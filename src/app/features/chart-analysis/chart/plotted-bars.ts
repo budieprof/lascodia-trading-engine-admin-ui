@@ -202,3 +202,22 @@ export function indexAtTime(bars: readonly { time: number }[], time: number): nu
   }
   return -1;
 }
+
+/**
+ * Index of the LAST plotted bar at `time` (ms), or -1 — a binary search; bars are ascending, and two
+ * bars may share a plotted time where a time-zone shift folds an hour (what a map by time kept: the last).
+ */
+export function lastIndexAtTime(bars: readonly { time: number }[], time: number): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const t = bars[mid].time;
+    if (t <= time) {
+      if (t === time) found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
+}

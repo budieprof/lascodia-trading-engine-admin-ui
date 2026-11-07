@@ -11,7 +11,9 @@
  *
  * Pure; unit-tested directly.
  */
-import type { CurrencyPairDto, TradingAccountDto } from '@core/api/api.types';
+import type { TradingAccountDto } from '@core/api/api.types';
+import type { InstrumentDto } from '@core/instruments/instrument.types';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import type { SignalPrefill } from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 import { positionInputs, positionLevels } from './tools/forecast';
 import { positionStats } from './tools/forecast-math';
@@ -52,27 +54,37 @@ export interface PositionAccountFacts {
   leverage?: number;
 }
 
+/** What a position tool needs of the instrument (`datafeed/instrument-facts.ts`, the ONE source of units and money). */
+export type PositionInstrumentFacts = Pick<InstrumentFacts, 'valuePerPrice' | 'distanceUnit' | 'inverse' | 'pnlCurrency'> & {
+  instrument: Pick<InstrumentDto, 'baseCurrency'>;
+};
+
 /**
  * The account's and the symbol's facts for a new position tool. Without a conversion rate only the symbol's facts
- * (contract size, pip) are given — an account size in one currency against money in another would size the trade
- * wrong.
+ * (money per 1.0 move per unit, distance unit) are given — an account size in one currency against money in another
+ * would size the trade wrong.
+ *
+ * US07 (ui-instrument leftover): from the instrument facts, not the currency pair. `lotSize` is the money one
+ * quantity unit makes on a 1.0 price move (`valuePerPrice`: the contract size on an MT5 row — 100 000 on FX, as
+ * before — tick value ÷ tick size on a catalogue row: 50 on ES); unknown, or an inverse contract (not linear in
+ * price), gives none. The money is in the P&L currency (the quote currency; FX unchanged).
  */
 export function positionAccountFacts(args: {
   account: Pick<TradingAccountDto, 'equity' | 'balance' | 'currency' | 'leverage'> | null;
-  pair: Pick<CurrencyPairDto, 'contractSize' | 'baseCurrency' | 'quoteCurrency'> | null;
-  pipSize: number;
+  facts: PositionInstrumentFacts | null;
   price: number;
   cross?: (from: string, to: string) => number | null;
 }): PositionAccountFacts | null {
-  const { account, pair, pipSize, price } = args;
+  const { account, facts, price } = args;
   const out: PositionAccountFacts = {};
-  if (pair && pair.contractSize > 0) out.lotSize = pair.contractSize;
-  if (pipSize > 0) out.pipSize = pipSize;
+  if (facts && !facts.inverse && facts.valuePerPrice !== null && facts.valuePerPrice > 0)
+    out.lotSize = facts.valuePerPrice;
+  if (facts && facts.distanceUnit > 0) out.pipSize = facts.distanceUnit;
   const rate = account
     ? quoteToAccountRate(
         account.currency,
-        pair?.baseCurrency,
-        pair?.quoteCurrency,
+        facts?.instrument.baseCurrency,
+        facts?.pnlCurrency,
         price,
         args.cross,
       )
@@ -97,7 +109,7 @@ export function isPositionTool(d: Drawing): boolean {
  * target, and its lots when the tool is linked to the account (else the dialog's own default). Null for anything but
  * a position on the price pane.
  */
-export function positionOrderPrefill(d: Drawing): SignalPrefill | null {
+export function positionOrderPrefill(d: Drawing, chartSymbol?: string): SignalPrefill | null {
   if (!isPositionTool(d) || d.pane || d.points.length === 0) return null;
   const side = d.kind === 'long-position' ? 'long' : 'short';
   const options = optionsOf(behaviorFor(d.kind), d);
@@ -106,7 +118,8 @@ export function positionOrderPrefill(d: Drawing): SignalPrefill | null {
     typeof options['accountCurrency'] === 'string' && options['accountCurrency'] !== '';
   const lots = linked ? positionStats(positionInputs(d, side, options)).qty : null;
   return {
-    symbol: d.symbol.toUpperCase(),
+    // US07: the chart's symbol — the drawing's is its instrument key (ES1! for a position drawn on ESZ6).
+    symbol: (chartSymbol ?? d.symbol).toUpperCase(),
     direction: side === 'long' ? 'Buy' : 'Sell',
     entryPrice: levels.entry.price,
     stopLoss: levels.stop,

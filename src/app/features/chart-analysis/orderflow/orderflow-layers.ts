@@ -77,7 +77,7 @@ export interface OrderFlowSurface {
   panesChanged?(): void;
 }
 
-const CVD_TITLE = 'Tick delta (CVD, tick rule)';
+const CVD_TITLE = 'Tick delta (CVD) — estimated (tick rule)';
 const RIBBON_TITLE = 'Spread (points: avg, min–max band) · ticks per minute';
 const UP = '#26A69A';
 const DOWN = '#EF5350';

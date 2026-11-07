@@ -22,9 +22,11 @@ import {
   buildMultibook,
   formatAge,
   formatPoints,
+  multibookUnits,
   stateLabel,
   type MultibookView,
 } from './multibook-model';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 
 /** Minute history shown beside the live health (md/dispersion). */
 const HISTORY_MINUTES = 60;
@@ -54,7 +56,7 @@ interface HourStats {
   template: `
     <div class="mb" data-testid="multibook-panel">
       <div class="mb-note">
-        Consolidated book · spot prices · sizes in base-currency units, summed across sources
+        Consolidated book · spot prices · sizes in {{ u().size }}, summed across sources
         @if (view().sources.length) {
           · {{ liveCount() }} of {{ view().sources.length }} sources live
         }
@@ -111,8 +113,8 @@ interface HourStats {
           @if (r.side === 'ask' && isLastAsk(r.price)) {
             <div class="mb-spread" role="row">
               <span role="cell">
-                {{ view().bestBid !== null && view().bestAsk !== null ? 'spread ' + spreadPoints() + ' pts' : '' }}
-                @if (view().midRangePoints !== null) { · mids spread {{ view().midRangePoints!.toFixed(1) }} pts }
+                {{ view().bestBid !== null && view().bestAsk !== null ? 'spread ' + spreadPoints() + ' ' + u().point : '' }}
+                @if (view().midRangePoints !== null) { · mids spread {{ view().midRangePoints!.toFixed(1) }} {{ u().point }} }
               </span>
             </div>
           }
@@ -122,7 +124,7 @@ interface HourStats {
         }
       </div>
 
-      <div class="mb-h">Dispersion — each source's mid vs the median of the live sources (points, last 5 min)</div>
+      <div class="mb-h">Dispersion — each source's mid vs the median of the live sources ({{ u().point === 'pts' ? 'points' : u().point }}, last 5 min)</div>
       <canvas #strip class="mb-strip" width="320" height="70" aria-label="Mid deviation by source over time"></canvas>
 
       <div class="mb-h">Source health</div>
@@ -298,6 +300,9 @@ export class MultibookPanelComponent {
 
   readonly symbol = input.required<string>();
   readonly digits = input<number>(5);
+  /** UF06: the chart's instrument facts — the base coin for sizes, ticks for a venue symbol's distances. */
+  readonly facts = input<InstrumentFacts | null>(null);
+  readonly u = computed(() => multibookUnits(this.facts()));
 
   private readonly md = signal<MdWatch | null>(null);
   readonly disabled = signal<ReadonlySet<string>>(new Set());
@@ -480,7 +485,7 @@ export class MultibookPanelComponent {
     }
     ctx.fillStyle = 'rgba(127,127,127,0.9)';
     ctx.font = '10px sans-serif';
-    ctx.fillText(`±${scale.toFixed(1)} pts`, 4, 11);
+    ctx.fillText(`±${scale.toFixed(1)} ${untracked(() => this.u().point)}`, 4, 11);
   }
 }
 

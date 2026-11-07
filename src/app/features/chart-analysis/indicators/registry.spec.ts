@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { INDICATORS, INDICATOR_CATEGORIES, defaultParams, indicatorById } from './registry';
 import type { Ohlc } from './math';
+import type { ExchangeSessions } from './exchange-sessions';
+
+/** UA02: a calendar whose pre / regular / post cover the whole UTC day, so the Exchange-sessions study draws all three. */
+const allDay = (start: string, end: string) => [{ start, end, zone: 'Etc/UTC', days: '1234567' }];
+const exchangeSessions: ExchangeSessions = {
+  code: 'test',
+  zone: 'Etc/UTC',
+  is24x7: false,
+  windows: { Pre: allDay('0000', '0800'), Regular: allDay('0800', '1600'), Post: allDay('1600', '2400') },
+};
 
 /**
  * Registry-wide invariants.
@@ -99,7 +109,7 @@ describe('indicator registry', () => {
 
   for (const def of INDICATORS) {
     describe(def.id, () => {
-      const result = def.compute(bars, defaultParams(def), { compareBars });
+      const result = def.compute(bars, defaultParams(def), { compareBars, exchangeSessions });
 
       it('declares `ahead` exactly when it returns values past the last bar', () => {
         // The flag keeps such studies off the higher-timeframe join (DR-I5), which has no bars ahead.

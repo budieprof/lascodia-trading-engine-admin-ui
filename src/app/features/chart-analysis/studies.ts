@@ -10,6 +10,7 @@ import { CANDLESTICK_PATTERNS } from './patterns/candlestick-patterns';
 import { CHART_PATTERNS } from './patterns/chart-patterns';
 import type { DialogItem } from './dialog/dialog-items';
 import { FUNDAMENTAL_PANES, type FundamentalPaneId } from './panels/fx-fundamentals';
+import { paneApplies, type PaneScope } from './panels/market-panes';
 
 /**
  * One namespace for everything that can sit in the page's active-studies list.
@@ -27,7 +28,12 @@ export const FUND_PREFIX = 'fund:';
 /** Every candlestick pattern / every chart pattern in one study. */
 export const ALL_PATTERNS = 'all';
 
-export type StudyKind = 'indicator' | 'profile' | 'candle-pattern' | 'chart-pattern' | 'fundamental';
+export type StudyKind =
+  | 'indicator'
+  | 'profile'
+  | 'candle-pattern'
+  | 'chart-pattern'
+  | 'fundamental';
 
 /** Inputs that may be numeric, a select or a symbol — the studies bar renders all three. */
 export type StudyInput = IndicatorInput;
@@ -73,7 +79,9 @@ export function studyMeta(defId: string): StudyMeta | null {
     }
     case 'profile': {
       const def = PROFILE_STUDIES.find((p) => p.id === sub);
-      return def ? { kind: 'profile', name: def.name, inputs: def.inputs as readonly StudyInput[] } : null;
+      return def
+        ? { kind: 'profile', name: def.name, inputs: def.inputs as readonly StudyInput[] }
+        : null;
     }
     case 'candle-pattern': {
       const name =
@@ -84,7 +92,9 @@ export function studyMeta(defId: string): StudyMeta | null {
     }
     case 'chart-pattern': {
       const name =
-        sub === ALL_PATTERNS ? 'All Chart Patterns' : CHART_PATTERNS.find((p) => p.id === sub)?.name;
+        sub === ALL_PATTERNS
+          ? 'All Chart Patterns'
+          : CHART_PATTERNS.find((p) => p.id === sub)?.name;
       return name ? { kind: 'chart-pattern', name, inputs: CHART_PATTERN_INPUTS } : null;
     }
     case 'fundamental': {
@@ -97,8 +107,31 @@ export function studyMeta(defId: string): StudyMeta | null {
 
 const FUNDAMENTAL_INPUTS: Partial<Record<FundamentalPaneId, readonly StudyInput[]>> = {
   'economic-surprise': [
-    { key: 'side', label: 'Series', type: 'select', default: 'base − quote', options: ['base − quote', 'base', 'quote'] },
-    { key: 'halfLifeDays', label: 'Half-life (days)', type: 'number', default: 30, min: 1, max: 365 },
+    {
+      key: 'side',
+      label: 'Series',
+      type: 'select',
+      default: 'base − quote',
+      options: ['base − quote', 'base', 'quote'],
+    },
+    {
+      key: 'halfLifeDays',
+      label: 'Half-life (days)',
+      type: 'number',
+      default: 30,
+      min: 1,
+      max: 365,
+    },
+  ],
+  'open-interest': [
+    {
+      key: 'windowMinutes',
+      label: 'Change window (min)',
+      type: 'number',
+      default: 60,
+      min: 1,
+      max: 10_080,
+    },
   ],
 };
 
@@ -127,8 +160,11 @@ export function profileIdOf(defId: string): ProfileStudyId {
   return studySubId(defId) as ProfileStudyId;
 }
 
-/** The dialog catalogue for every chart-local study family. */
-export function studyDialogItems(): DialogItem[] {
+/**
+ * The dialog catalogue for every chart-local study family. With the symbol's `scope` (UA03), only the fundamentals
+ * panes that can have data for it are offered (FX panes for FX pairs, derivatives panes for perpetuals, …).
+ */
+export function studyDialogItems(scope?: PaneScope | null): DialogItem[] {
   const items: DialogItem[] = INDICATORS.map((d) => ({
     kind: 'indicator',
     id: d.id,
@@ -151,7 +187,8 @@ export function studyDialogItems(): DialogItem[] {
     kind: 'chart-pattern',
     id: CHART_PATTERN_PREFIX + ALL_PATTERNS,
     name: 'All Chart Patterns',
-    description: 'Detects every chart pattern on swing pivots and draws its outline, breakout and target.',
+    description:
+      'Detects every chart pattern on swing pivots and draws its outline, breakout and target.',
     category: 'Chart patterns',
   });
   for (const p of CHART_PATTERNS) {
@@ -182,12 +219,13 @@ export function studyDialogItems(): DialogItem[] {
     });
   }
   for (const f of FUNDAMENTAL_PANES) {
+    if (scope && !paneApplies(f.id, scope)) continue;
     items.push({
       kind: 'fundamental',
       id: FUND_PREFIX + f.id,
       name: f.title,
       description: f.description,
-      category: f.available ? 'FX fundamentals' : 'Unavailable',
+      category: f.available ? (f.group ?? 'FX fundamentals') : 'Unavailable',
       tag: f.available ? 'pane' : 'no data',
     });
   }

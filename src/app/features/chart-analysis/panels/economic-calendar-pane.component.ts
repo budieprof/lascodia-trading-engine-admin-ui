@@ -32,6 +32,8 @@ import {
   upsertEvent,
 } from './economic-calendar';
 import { ZonedDatePipe, zoneLabel } from './zoned-time';
+import { DerivativesDataService } from './derivatives-data.service';
+import type { ScheduledMarketEventRow } from '@features/news-intel/news-intel.types';
 import { appStorage } from '@core/storage/app-storage';
 
 /** Currencies the pane offers to add beside the pair's two. */
@@ -58,7 +60,8 @@ const HOVER_OPEN_MS = 250;
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="tree-title">
-      Economic calendar · {{ allCurrencies() ? 'all' : filterCurrencies().join(' / ') }}
+      Economic calendar ·
+      {{ allCurrencies() ? 'all' : filterCurrencies().join(' / ') || 'none linked' }}
       <span class="ec-zone" [title]="'Times in ' + zoneName()">· {{ zoneName() }}</span>
     </div>
     <div class="ec-filters">
@@ -84,7 +87,12 @@ const HOVER_OPEN_MS = 250;
     @if (!allCurrencies()) {
       <div class="ec-ccys" aria-label="Also show">
         @for (c of extras(); track c) {
-          <button type="button" class="ec-chip on" (click)="toggleExtra(c)" [title]="'Stop showing ' + c">
+          <button
+            type="button"
+            class="ec-chip on"
+            (click)="toggleExtra(c)"
+            [title]="'Stop showing ' + c"
+          >
             {{ flag(c) }} {{ c }} ×
           </button>
         }
@@ -101,7 +109,12 @@ const HOVER_OPEN_MS = 250;
         </select>
       </div>
     }
-    @if (loading() && !events().length) {
+    @if (noScope()) {
+      <div class="pane-empty" data-testid="ec-no-scope">
+        No economic releases are linked to this symbol{{ scope() ? ' (' + scope() + ')' : '' }}.
+        Tick "All currencies" or add a currency to see them.
+      </div>
+    } @else if (loading() && !events().length) {
       <div class="pane-empty">Loading…</div>
     } @else if (error()) {
       <div class="pane-empty">{{ error() }}</div>
@@ -207,19 +220,66 @@ const HOVER_OPEN_MS = 250;
                         [class.miss]="e.result === 'Miss'"
                         [title]="
                           e.result
-                            ? e.result + ' for ' + e.currency + (e.polarity === 'Inverse' ? ' (lower is better)' : '')
-                            : 'Whether this is good for ' + e.currency + ' is not known for this figure'
+                            ? e.result +
+                              ' for ' +
+                              e.currency +
+                              (e.polarity === 'Inverse' ? ' (lower is better)' : '')
+                            : 'Whether this is good for ' +
+                              e.currency +
+                              ' is not known for this figure'
                         "
                       >
                         {{ sp.text }} vs forecast{{ e.result ? ' · ' + e.result : '' }}
                       </dd>
                     }
                   </dl>
-                  <button type="button" class="ec-open" (click)="opened.emit(e); $event.stopPropagation()">
+                  <button
+                    type="button"
+                    class="ec-open"
+                    (click)="opened.emit(e); $event.stopPropagation()"
+                  >
                     Open the AI reading
                   </button>
                 </div>
               }
+            </li>
+          }
+        </ul>
+      }
+    }
+    @if (marketKeys().length) {
+      <div class="tree-title ec-market-title" data-testid="ec-market">
+        Market events · {{ marketKeys().join(', ') }}
+      </div>
+      @if (marketNote(); as note) {
+        <div class="pane-empty">{{ note }}</div>
+      } @else {
+        <ul class="ec-list">
+          @for (m of marketRows(); track m.id) {
+            <li class="ec-row" [class.past]="marketPast(m)" data-testid="ec-market-row">
+              <div class="ec-top">
+                <span class="ec-time"
+                  >{{ m.scheduledAtUtc | zonedDate: timeZone() : 'day' }}
+                  {{ m.scheduledAtUtc | zonedDate: timeZone() : 'time' }}</span
+                >
+                <span class="ec-ccy">{{ m.exposureKey }}</span>
+                <span class="ec-dots" [attr.aria-label]="m.impact + ' importance'">
+                  @for (i of [1, 2, 3]; track i) {
+                    <i [class.on]="i <= dots(m.impact)" [class.high]="dots(m.impact) === 3"></i>
+                  }
+                </span>
+              </div>
+              <div class="ec-title" [title]="m.notes ?? ''">{{ m.title }}</div>
+              <div class="ec-nums">
+                <span
+                  >{{ m.kind }} · <b>{{ m.source }}</b></span
+                >
+                @if (m.actual) {
+                  <span
+                    >Act <b>{{ m.actual }}</b></span
+                  >
+                }
+              </div>
             </li>
           }
         </ul>
@@ -438,6 +498,9 @@ const HOVER_OPEN_MS = 250;
       .ec-card .miss {
         color: #f23645;
       }
+      .ec-market-title {
+        margin-top: 10px;
+      }
       .ec-open {
         font: inherit;
         color: var(--tv-blue, #2962ff);
@@ -457,11 +520,16 @@ export class EconomicCalendarPaneComponent {
   readonly allCurrencies = model(false);
   readonly minImpact = model<EconomicImpact>('Low');
   readonly opened = output<UpcomingEconomicEvent>();
+  /** UA01: what concerns the symbol, in words ("USD releases · AAPL earnings"), for the empty state. */
+  readonly scope = input<string | null>(null);
+  /** UA01: the symbol's scheduled market-event keys (`EQ:AAPL`, `WTI`, `IDX:US500`, `CR:BTC`). */
+  readonly marketKeys = input<string[]>([]);
 
   private readonly calendar = inject(EconomicCalendarService);
   private readonly clock = inject(ServerClock);
   private readonly destroyRef = inject(DestroyRef);
   private readonly realtime = inject(RealtimeService);
+  private readonly marketData = inject(DerivativesDataService);
 
   readonly events = signal<UpcomingEconomicEvent[]>([]);
   readonly loading = signal(false);
@@ -477,7 +545,19 @@ export class EconomicCalendarPaneComponent {
     () => [...new Set([...this.currencies().filter((c) => c && c !== '—'), ...this.extras()])],
     { equal: (a, b) => a.join() === b.join() },
   );
-  readonly addable = computed(() => EXTRA_CURRENCIES.filter((c) => !this.filterCurrencies().includes(c)));
+  /**
+   * UA01: nothing to ask for — the symbol has no calendar currency (an engine filter with none used to mean EVERY
+   * currency, so AAPL's pane listed the whole world).
+   */
+  readonly noScope = computed(() => !this.allCurrencies() && this.filterCurrencies().length === 0);
+  /** Scheduled market events of {@link marketKeys} (the last 6 hours through 7 days), from the engine. */
+  readonly marketRows = signal<ScheduledMarketEventRow[]>([]);
+  /** Why the market list is empty (loading, none, unreadable); null when it has rows. */
+  readonly marketNote = signal<string | null>(null);
+  private marketSeq = 0;
+  readonly addable = computed(() =>
+    EXTRA_CURRENCIES.filter((c) => !this.filterCurrencies().includes(c)),
+  );
   private seq = 0;
   private hoverTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -488,6 +568,10 @@ export class EconomicCalendarPaneComponent {
       const ccy = this.filterCurrencies();
       const min = this.minImpact();
       untracked(() => this.load(all ? [] : ccy, min));
+    });
+    effect(() => {
+      const keys = this.marketKeys();
+      untracked(() => void this.loadMarket(keys));
     });
     // EV-1: an actual recorded by the engine lands in its row at once.
     this.realtime
@@ -505,8 +589,47 @@ export class EconomicCalendarPaneComponent {
     });
   }
 
+  private async loadMarket(keys: readonly string[]): Promise<void> {
+    const n = ++this.marketSeq;
+    if (!keys.length) {
+      this.marketRows.set([]);
+      this.marketNote.set(null);
+      return;
+    }
+    this.marketNote.set('Loading…');
+    const now = this.clock.now();
+    const a = await this.marketData.scheduledEvents(
+      keys,
+      now - 6 * 3_600_000,
+      now + 7 * 86_400_000,
+    );
+    if (n !== this.marketSeq) return;
+    const rows = [...(a.data ?? [])].sort(
+      (x, y) => Date.parse(x.scheduledAtUtc) - Date.parse(y.scheduledAtUtc),
+    );
+    this.marketRows.set(rows);
+    this.marketNote.set(
+      !a.ok
+        ? `Market events could not be read: ${a.message || 'no answer'}.`
+        : rows.length
+          ? null
+          : 'None scheduled in the next 7 days.',
+    );
+  }
+
+  protected marketPast(m: ScheduledMarketEventRow): boolean {
+    return isEventPast({ scheduledAt: m.scheduledAtUtc }, this.now());
+  }
+
   private load(currencies: string[], minImpact: EconomicImpact): void {
     const n = ++this.seq;
+    if (!this.allCurrencies() && !currencies.length) {
+      // UA01: no currency concerns the symbol — never fall back to every currency.
+      this.events.set([]);
+      this.loading.set(false);
+      this.error.set(null);
+      return;
+    }
     this.loading.set(true);
     this.error.set(null);
     const sub = this.calendar.upcoming({ currencies, minImpact }).subscribe({
@@ -528,7 +651,7 @@ export class EconomicCalendarPaneComponent {
 
   /** A pushed release: its row updated in place (or added, when it passes this pane's filter). */
   applyPush(pushed: UpcomingEconomicEvent | null | undefined): void {
-    if (!pushed) return;
+    if (!pushed || this.noScope()) return;
     const all = this.allCurrencies();
     const next = upsertEvent(this.events(), pushed, {
       currencies: all ? [] : this.filterCurrencies(),
@@ -597,7 +720,9 @@ export class EconomicCalendarPaneComponent {
   private loadExtras(): string[] {
     try {
       const v = JSON.parse(appStorage.getItem(EXTRAS_KEY) ?? '[]') as unknown;
-      return Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').slice(0, 6) : [];
+      return Array.isArray(v)
+        ? v.filter((c): c is string => typeof c === 'string').slice(0, 6)
+        : [];
     } catch {
       return [];
     }

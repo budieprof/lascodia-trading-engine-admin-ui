@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_PANEL_STRIP } from './chart-page.token';
 
 /**
  * The right-hand strip of panel buttons: watchlist, alerts, object tree, details, news, data window and the side panels.
@@ -18,5 +18,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-panel-strip.component.scss',
 })
 export class ChartPanelStripComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_PANEL_STRIP);
 }

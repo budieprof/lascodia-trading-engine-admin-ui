@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { LayerGroupsMenuComponent } from '../../overlays/layer-groups-menu.component';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_OVERLAYS_MENU } from './chart-page.token';
 
 /**
  * The toolbar's "Chart overlays" menu (volume, trades, events, analysis and order-flow layers, layer groups).
@@ -18,5 +18,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-overlays-menu.component.scss',
 })
 export class ChartOverlaysMenuComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_OVERLAYS_MENU);
 }

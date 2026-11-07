@@ -2,12 +2,14 @@ import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { ApiService } from '@core/api/api.service';
-import type {
-  ExecutionQualityLogDto,
-  OrderDto,
-  PagedData,
-  ResponseData,
+import {
+  ApiError,
+  type ExecutionQualityLogDto,
+  type OrderDto,
+  type PagedData,
+  type ResponseData,
 } from '@core/api/api.types';
+import type { CmeOrderFlow, CmeOrderFlowRequest } from '@core/realtime/marketdata.types';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import type { OrderBookHeatmapDto, TickBarsDto, TickBarsRequest } from './orderflow.types';
 
@@ -52,6 +54,29 @@ export class ChartFlowService {
     return firstValueFrom(
       this.api.postEnvelope<TickBarsDto>('/chart-flow/tick-bars', request, { silent: true }),
     );
+  }
+
+  /**
+   * UF01 `POST md/crypto/orderflow` (research-routed): the CME order-flow analytics run on a crypto exchange's REAL
+   * aggressor-tagged trades + L2 book — the same answer shape as `md/orderflow`, the market's own prices (no spot
+   * mapping), sizes in coins, thresholds converted from notional at the window's VWAP (stated in `notes`). ≤ 24 h of
+   * trades; with the book ≤ 2 h. Entitlement `crypto:{exchange}`.
+   */
+  async cryptoOrderFlow(req: CmeOrderFlowRequest): Promise<CmeOrderFlow> {
+    const body = {
+      symbol: req.symbol,
+      sourceId: req.sourceId,
+      from: Math.floor(req.from),
+      to: Math.ceil(req.to),
+      barSeconds: req.barSeconds,
+      includeBook: req.includeBook ?? false,
+    };
+    const res = await firstValueFrom(
+      this.api.post<ResponseData<CmeOrderFlow>>('/md/crypto/orderflow', body, { silent: true }),
+    );
+    if (!res?.status || !res.data)
+      throw new ApiError(res?.responseCode ?? 'UNKNOWN', res?.message ?? 'md/crypto/orderflow failed', res);
+    return res.data;
   }
 
   /** C4: the newest snapshot captured at or before `asOfUtc`; null when there is none. */

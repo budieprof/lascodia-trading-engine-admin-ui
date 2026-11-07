@@ -25,6 +25,8 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.favoriteDrawingTools.v1',
   // Auto analysis layers (DR-I11).
   'lascodia.chart.pref.autoAnalysis',
+  // US07: per asset class, the timeframe and study template a symbol of that class opens with.
+  'lascodia.chart.assetClassDefaults.v1',
 ] as const;
 export type SyncedPrefKey = (typeof SYNCED_PREF_KEYS)[number];
 

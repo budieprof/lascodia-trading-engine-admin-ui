@@ -125,7 +125,13 @@ const NAMES: Readonly<Partial<Record<DrawingKind, string>>> = {
  */
 export function drawingAlertDraft(
   d: Drawing,
-  opts: { timeframe: string; level?: number | null; logScale?: boolean },
+  opts: {
+    timeframe: string;
+    level?: number | null;
+    logScale?: boolean;
+    /** US07: the chart's symbol — the drawing's is its instrument key (ES1! for a level drawn on ESZ6). */
+    symbol?: string;
+  },
 ): ChartAlertDto | null {
   const geometry = drawingAlertGeometry(d, opts);
   if (!geometry) return null;
@@ -134,7 +140,7 @@ export function drawingAlertDraft(
   return {
     id: 0,
     name,
-    symbol: d.symbol.toUpperCase(),
+    symbol: (opts.symbol ?? d.symbol).toUpperCase(),
     timeframe: opts.timeframe,
     kind: 'Drawing',
     side: 'Bid',

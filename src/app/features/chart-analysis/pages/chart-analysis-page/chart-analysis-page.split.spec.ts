@@ -4,6 +4,8 @@ import { of } from 'rxjs';
 
 import type { Bar } from '../../datafeed/candle-feed.service';
 import { ChartAnalysisPageComponent, type ComparePanel } from './chart-analysis-page.component';
+import { SplitPanelsController } from '../../compare/split-panels.controller';
+import { noDataMessage } from '../../datafeed/data-availability';
 
 // The split view (CC-12) run against just the state it touches, as the page's other specs do:
 // panels restored from a layout, moved by live prices, and paged back on scroll.
@@ -37,7 +39,14 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
       { id: '2h', label: '', panels: 1 },
       { id: '4', label: '', panels: 3 },
     ],
-    feed: { getBars, sessionOf: () => null, gridOf: () => ({ kind: 'epoch' }) },
+    feed: {
+      getBars,
+      sessionOf: () => null,
+      gridOf: () => ({ kind: 'epoch' }),
+      learnSession: () => Promise.resolve(null),
+    },
+    instruments: { all: () => [], lookupState: () => 'missing', get: () => null },
+    resolutionLabel: (r: string) => r,
     serverClock: { now: () => NOW },
     panelHosts: () => [],
     calendars: new Map(),
@@ -51,13 +60,38 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
       strategiesError: null,
     }),
   });
+  // US02: the split view lives in its controller; the page's split members are its signals.
+  const split = new SplitPanelsController({
+    feed: p.feed,
+    isSessionResolution: () => false,
+    noDataMessage: (symbol: string, r: string) => noDataMessage(symbol, r, null),
+    candidates: (taken: string[]) =>
+      p.symbols().map((x: { symbol: string }) => x.symbol).filter((x: string) => !taken.includes(x)),
+    mainSymbol: () => p.symbol(),
+    mainResolution: () => p.resolution(),
+    hostAt: (i: number) => p['panelHosts']()[i],
+    now: () => NOW,
+    calendarOf: () => null,
+    calendarCodeOf: () => null,
+    loadCalendar: () => Promise.resolve(null),
+    // As the page wires them: a panel's switch reaches its link group.
+    linkSymbol: (id: string, symbol: string) => p['linkSymbol'](id, symbol),
+    linkInterval: (id: string, r: string) => p['linkInterval'](id, r),
+  });
+  split.panels.set(comparePanels());
+  Object.assign(p, {
+    split,
+    comparePanels: split.panels,
+    splitLayout: split.layout,
+    panelLegends: split.legends,
+  });
   Object.defineProperty(p, 'panelScriptChoices', {
     value: computed(() => [...p.scriptCatalog()!.mine, ...p.scriptCatalog()!.examples]),
   });
   // As the page derives the layout's other charts (v2 `charts`, CC-I5).
   Object.defineProperty(p, 'panelStates', {
     value: computed(() =>
-      comparePanels().map((x) => ({
+      split.panels().map((x) => ({
         symbol: x.symbol,
         resolution: x.resolution,
         ...(x.indicators.length ? { indicators: x.indicators } : {}),
@@ -114,6 +148,64 @@ describe('chart page — split panels (CC-12)', () => {
     older.mockImplementation(() => Promise.resolve({ bars: [], noData: true }));
     await p.loadPanelOlder('a');
     expect(p.comparePanels()[0].historyComplete).toBe(true);
+  });
+});
+
+describe('chart page — split panel states (US03)', () => {
+  const panel = (): ComparePanel => ({
+    id: 'a',
+    symbol: 'BTC-USD',
+    resolution: '60',
+    bars: [],
+    indicators: [],
+    link: 0,
+    scripts: [],
+  });
+
+  it('a failed load says so (it used to leave an empty panel), and Retry asks again', async () => {
+    const getBars = vi.fn(() => Promise.reject(new Error('engine unreachable')));
+    const { p } = setup(getBars as never);
+    p.comparePanels.set([panel()]);
+    const loading = p['loadPanel']('a');
+    expect(p.comparePanels()[0].load).toEqual({ kind: 'loading' });
+    await loading;
+    expect(p.comparePanels()[0].load).toEqual({
+      kind: 'error',
+      message: 'Could not load candles: engine unreachable',
+    });
+
+    getBars.mockImplementation((() => Promise.resolve({ bars: hours(2, 3), noData: false })) as never);
+    p.retryPanel('a');
+    await vi.waitFor(() => expect(p.comparePanels()[0].load).toEqual({ kind: 'ready' }));
+    expect(p.comparePanels()[0].bars).toHaveLength(3);
+  });
+
+  it('no bars says why, never a silently empty chart', async () => {
+    const { p } = setup(vi.fn(() => Promise.resolve({ bars: [], noData: true })));
+    p.comparePanels.set([panel()]);
+    await p['loadPanel']('a');
+    const load = p.comparePanels()[0].load;
+    expect(load.kind).toBe('empty');
+    expect(load.message).toContain('BTC-USD');
+  });
+
+  it('an answer for a series the panel has left is dropped', async () => {
+    let resolve!: (v: { bars: Bar[]; noData: boolean }) => void;
+    const { p } = setup(vi.fn(() => new Promise<{ bars: Bar[]; noData: boolean }>((r) => (resolve = r))));
+    p.comparePanels.set([panel()]);
+    const loading = p['loadPanel']('a');
+    p.comparePanels.update((l: ComparePanel[]) => l.map((x) => ({ ...x, symbol: 'ETH-USD' })));
+    resolve({ bars: hours(2, 3), noData: false });
+    await loading;
+    expect(p.comparePanels()[0].bars).toEqual([]);
+  });
+
+  it('keeps a panel\'s own style / scale / volume in the layout and restores it', () => {
+    const { p } = setup();
+    p['restoreSplit']({ layout: '2h' }, [
+      { symbol: 'BTC-USD', resolution: '60', view: { style: 'line', showVolume: true, scaleMode: 'bogus' } },
+    ]);
+    expect(p.comparePanels()[0].view).toEqual({ style: 'line', showVolume: true });
   });
 });
 

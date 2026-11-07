@@ -37,6 +37,10 @@
           <span class="tv-tab-rating none">…</span>
         } @else if (!f.barCount) {
           <span class="tv-tab-rating none">No data</span>
+        } @else if (!f.rating.summary.buy && !f.rating.summary.neutral && !f.rating.summary.sell) {
+          <span class="tv-tab-rating none" [title]="f.barCount + ' bars: too few to rate'"
+            >n/a</span
+          >
         } @else {
           <span class="tv-tab-rating" [class]="tone(f.rating.summary.label)">{{
             f.rating.summary.label
@@ -59,7 +63,9 @@
           <div class="tv-gauge" [class.lg]="g.key === 'summary'">
             <app-rating-gauge [rating]="g.rating" [label]="g.title + ': ' + g.label" />
             <div class="tv-g-title">{{ g.title }}</div>
-            <div class="tv-g-label" [class]="tone(g.label)">{{ g.label }}</div>
+            <div class="tv-g-label" [class]="unrated() ? 'neutral' : tone(g.label)">
+              {{ unrated() ? 'n/a: ' + f.barCount + ' bars' : g.label }}
+            </div>
             <div class="tv-counts">
               <div>
                 <span class="k">Sell</span><span class="v">{{ g.sell }}</span>
@@ -116,8 +122,31 @@
       @if (pivots(); as p) {
         <section class="tv-block">
           <h3 class="tv-h3">
-            Pivots <span class="tv-h3-sub">{{ p.periodName }}, from {{ p.from }}</span>
+            Pivots
+            <span class="tv-h3-sub"
+              >{{ p.periodName }}, from {{ p.from
+              }}{{ p.regular ? ' (regular session)' : '' }}</span
+            >
+            @if (hasExtendedHours()) {
+              <label
+                class="tv-h3-sub"
+                title="Take the previous period's high, low and close from the regular session only, leaving out pre- and post-market"
+              >
+                <input
+                  type="checkbox"
+                  [checked]="regularOnly()"
+                  (change)="regularOnly.set($any($event.target).checked)"
+                />
+                Regular session only
+              </label>
+            }
           </h3>
+          @if (regularOnly() && hasExtendedHours() && !p.regular) {
+            <p class="tv-note">
+              Regular-session pivots need 15-minute bars for the period ({{ p.periodName }}): shown
+              from the whole session.
+            </p>
+          }
           <table class="tv-table pivots">
             <thead>
               <tr>
@@ -172,14 +201,14 @@
         }
         the forming bar included, from the engine's
         @if (sessionGrid()) {
-          session bars (days roll at 17:00 New York).
+          session bars ({{ sessionWords() }}).
         } @else {
           stored candles.
         }
         Hover an action for the rule behind it.
         @if (missing() > 0) {
-          {{ missing() }} {{ missing() === 1 ? 'row shows' : 'rows show' }} — because its lookback
-          is longer than the {{ tabLabel() }} history the engine holds.
+          {{ missing() }} {{ missing() === 1 ? 'row shows' : 'rows show' }} n/a: its lookback is
+          longer than the {{ f.barCount }} {{ tabLabel() }} bars the engine holds.
         }
       </p>
     }

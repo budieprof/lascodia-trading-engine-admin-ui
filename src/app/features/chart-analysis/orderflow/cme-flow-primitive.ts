@@ -13,6 +13,10 @@ export interface CmeFlowLayerModel {
   show: { large: boolean; sweeps: boolean; levels: boolean };
   /** Nothing at or after this instant (the replay head); null live. */
   clipUtc: number | null;
+  /** The size word of the hover (default `contracts`; a crypto exchange's base coin, e.g. `BTC`). */
+  sizeUnit?: string;
+  /** The book the level events came from (default CME `MBP-10`; a crypto exchange's aggregated `L2`). */
+  book?: 'MBP-10' | 'L2';
 }
 
 const BUY = '#26A69A';
@@ -22,7 +26,7 @@ const ICE = '#4FC3F7';
 const ABSORB = '#FFB300';
 
 /**
- * CME order-flow markers over the candles (cme-tier2), all from the engine's analysis of the REAL CME tape + book:
+ * Exchange order-flow markers over the candles (cme-tier2; crypto exchanges since UF01, sizes in coins), all from the engine's analysis of the REAL CME tape + book:
  * ◆ large lot (an aggressor order ≥ the threshold; area ∝ contracts, green buy / red sell), ↗ sweep / stop run (a
  * line from the first to the last level taken, arrow at the end), ▭ ICE iceberg-like level (traded beyond what it showed
  * while refilling — MBP-10 cannot prove a hidden order), ■ ABS absorption (aggression into a level that held). Hover:
@@ -153,7 +157,7 @@ export class CmeFlowPrimitive implements ISeriesPrimitive<Time> {
       const hover = this.hover;
       const hit = hover ? cmeMarkerAt(this.placed, hover.x, hover.y) : null;
       if (hit && hover)
-        drawHoverCard(ctx, cmeMarkerText(hit, m.label, this.deps.precision()), hover.x, hover.y, mediaSize, this.deps.dark());
+        drawHoverCard(ctx, cmeMarkerText(hit, m.label, this.deps.precision(), m.sizeUnit, m.book), hover.x, hover.y, mediaSize, this.deps.dark());
     });
   }
 }

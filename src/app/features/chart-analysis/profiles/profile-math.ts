@@ -5,16 +5,18 @@ import {
   SESSION_WINDOWS as NAMED_SESSIONS,
   minutesOfDay,
   sessionDayOf,
+  type SessionWindow,
 } from '../indicators/sessions';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
+import type { ExchangeSessions, ExchangeSessionKind } from '../indicators/exchange-sessions';
 
 /**
  * Profile studies — pure math, and THE one volume profile and VWAP of the chart (DR-19): the profile
  * studies, the chart-level volume profile overlay, the market-structure read, the volume-profile and
  * anchored-VWAP drawing tools and the VWAP indicators all compute here. (There were three profiles
  * that split a bar's volume differently and three VWAPs that treated a bar without volume three ways.)
- * Bar `time` is UTC epoch milliseconds (the chart's `Ohlc` convention). FX `volume` is TICK volume:
- * every profile here is a tick-volume profile.
+ * Bar `time` is UTC epoch milliseconds (the chart's `Ohlc` convention). `volume` is whatever the bars carry (C1
+ * `volumeKind`): tick volume on MT5 bars, coins / shares / contracts on venue bars — the strip names it (UA07).
  *
  * Each bar's volume is spread uniformly across its high–low range (overlap-weighted per row),
  * not dumped on the close, so total row volume always equals total bar volume.
@@ -290,7 +292,22 @@ export function vwapRun(
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 
-export type SessionName = 'daily' | 'asia' | 'london' | 'newyork';
+export type SessionName = 'daily' | 'asia' | 'london' | 'newyork' | 'pre' | 'regular' | 'post';
+
+/** UA02: the instrument's own sessions a profile can be per (from its trading calendar). */
+const EXCHANGE_KIND: Partial<Record<SessionName, ExchangeSessionKind>> = {
+  pre: 'Pre',
+  regular: 'Regular',
+  post: 'Post',
+};
+
+/** What the named sessions need beyond the clock (UA02). */
+export interface SessionScope {
+  /** The instrument's Pre / Regular / Post sessions; a `pre` / `regular` / `post` profile is empty without them. */
+  exchange?: ExchangeSessions | null;
+  /** A 24/7 instrument: the Asia / London / New York sessions run every day, not Monday to Friday. */
+  everyDay?: boolean;
+}
 
 /**
  * The named sessions are the Sessions indicator's (`indicators/sessions.ts`, DR-18): Tokyo 09:00–18:00, London and
@@ -313,6 +330,7 @@ export interface SessionOptions extends ProfileOptions {
   tzOffsetMinutes?: number;
   /** The symbol's trading days: what a `daily` session is when no clock offset is set. */
   days?: TradingDays;
+  scope?: SessionScope;
 }
 
 /**
@@ -327,13 +345,29 @@ export function sessionStartOf(
   session: SessionName,
   tzOffsetMinutes = 0,
   days?: TradingDays,
+  scope?: SessionScope,
 ): number | null {
   if (session === 'daily' && days && tzOffsetMinutes === 0) return days.sessionAt(t).start;
   if (session === 'daily') {
     const off = tzOffsetMinutes * MIN;
     return Math.floor((t + off) / DAY) * DAY - off;
   }
-  const w = SESSION_WINDOWS[session];
+  const kind = EXCHANGE_KIND[session];
+  if (kind) {
+    const ex = scope?.exchange;
+    if (!ex || ex.is24x7) return null;
+    for (const w of ex.windows[kind]) {
+      const start = openInstant(t, w);
+      if (start !== null) return start;
+    }
+    return null;
+  }
+  const named = SESSION_WINDOWS[session as 'asia' | 'london' | 'newyork'];
+  return openInstant(t, scope?.everyDay ? { ...named, days: '1234567' } : named);
+}
+
+/** The open instant (UTC ms) of the occurrence of `w` containing `t`, or null outside it. */
+function openInstant(t: number, w: SessionWindow): number | null {
   const localDay = sessionDayOf(t, w);
   if (localDay === null) return null;
   // The open's instant: its local time on that date, less the zone's offset there.
@@ -368,7 +402,7 @@ function groupProfiles(
 export function sessionProfiles(bars: readonly Ohlc[], opts: SessionOptions): SessionProfile[] {
   return groupProfiles(
     bars,
-    (t) => sessionStartOf(t, opts.session, opts.tzOffsetMinutes ?? 0, opts.days),
+    (t) => sessionStartOf(t, opts.session, opts.tzOffsetMinutes ?? 0, opts.days, opts.scope),
     opts,
   );
 }

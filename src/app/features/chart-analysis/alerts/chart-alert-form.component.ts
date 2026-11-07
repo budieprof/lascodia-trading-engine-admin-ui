@@ -32,7 +32,20 @@ import type {
   ChartAlertFrequency,
   ChartAlertInput,
   ChartAlertSide,
+  MetricAlertKind,
+  MetricComparator,
 } from './chart-alerts.types';
+import {
+  COMPARATORS,
+  DEFAULT_METRIC_WINDOW_MINUTES,
+  formatMetric,
+  isMetricKind,
+  metricInfo,
+  metricInput,
+  metricProblem,
+  type MetricAvailability,
+} from './metric-alerts';
+import { MetricAvailabilityService } from './metric-availability.service';
 
 /**
  * Create or edit a chart alert (alerts v2). The direction is explicit — "crosses above" / "crosses below" / either / a
@@ -54,72 +67,143 @@ import type {
         </p>
       }
 
-      <!-- [selected] per option, not [value] on the select: the options of a @for do not exist yet when the select's
-           value is applied, and the browser then shows the first one whatever the alert says. -->
-      <label class="caf-row">
-        <span>When</span>
-        <select (change)="setDirection($any($event.target).value)" data-testid="caf-direction">
-          @for (d of directionChoices(); track d.id) {
-            <option [value]="d.id" [selected]="d.id === direction()">{{ d.label }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="caf-row">
-        <span>Price</span>
-        <select (change)="setSide($any($event.target).value)" data-testid="caf-side">
-          @for (s of sides; track s.id) {
-            <option [value]="s.id" [title]="s.hint" [selected]="s.id === side()">
-              {{ s.label }}
-            </option>
-          }
-        </select>
-      </label>
-
-      @if (!isDrawing()) {
-        @if (isChannel()) {
-          <label class="caf-row">
-            <span>Lower</span>
-            <input
-              type="number"
-              [step]="step()"
-              [value]="lower()"
-              (input)="lower.set(num($event))"
-              data-testid="caf-lower"
-            />
-          </label>
-          <label class="caf-row">
-            <span>Upper</span>
-            <input
-              type="number"
-              [step]="step()"
-              [value]="upper()"
-              (input)="upper.set(num($event))"
-              data-testid="caf-upper"
-            />
-          </label>
-        } @else {
-          <label class="caf-row">
-            <span>Level</span>
-            <input
-              type="number"
-              [step]="step()"
-              [value]="level()"
-              (input)="level.set(num($event))"
-              data-testid="caf-level"
-            />
-          </label>
-        }
+      <!-- UF04: derivatives alerts, offered only for the kinds this symbol has data for. -->
+      @if (!isDrawing() && (metricOptions().length > 0 || isMetric())) {
+        <label class="caf-row">
+          <span>Alert on</span>
+          <select (change)="setKind($any($event.target).value)" data-testid="caf-kind">
+            <option value="Price" [selected]="kind() === 'Price'">Price</option>
+            @for (m of kindChoices(); track m.kind) {
+              <option [value]="m.kind" [selected]="m.kind === kind()" [title]="m.hint">{{ m.label }}</option>
+            }
+          </select>
+        </label>
       }
 
-      @if (livePrice() !== null) {
-        <div class="caf-live">Now: {{ side().toLowerCase() }} {{ livePrice() }}</div>
+      @if (metricKind(); as mk) {
+        <label class="caf-row">
+          <span>When</span>
+          <select (change)="comparator.set($any($event.target).value)" data-testid="caf-comparator">
+            @for (c of comparators; track c.id) {
+              <option [value]="c.id" [selected]="c.id === comparator()">{{ c.label }}</option>
+            }
+          </select>
+        </label>
+        <label class="caf-row">
+          <span>Value</span>
+          <span class="caf-unit">
+            <input
+              type="number"
+              step="any"
+              [value]="metricValue() ?? ''"
+              (input)="metricValue.set(numOrNull($event))"
+              data-testid="caf-metric-value"
+            />
+            <small>{{ metricUnitText() }}</small>
+          </span>
+        </label>
+        @if (needsWindow()) {
+          <label class="caf-row">
+            <span>Window</span>
+            <span class="caf-unit">
+              <input
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+                [value]="windowMinutes() ?? ''"
+                (input)="windowMinutes.set(numOrNull($event))"
+                data-testid="caf-metric-window"
+              />
+              <small>minutes</small>
+            </span>
+          </label>
+        }
+        @if (metricSources().length > 1) {
+          <label class="caf-row">
+            <span>Source</span>
+            <select (change)="metricSource.set($any($event.target).value || null)" data-testid="caf-metric-source">
+              <option value="" [selected]="!metricSource()">First with data</option>
+              @for (src of metricSources(); track src.sourceId) {
+                <option [value]="src.sourceId" [selected]="src.sourceId === metricSource()">{{ src.label }}</option>
+              }
+            </select>
+          </label>
+        }
+        @if (metricNow(); as now) {
+          <div class="caf-live" data-testid="caf-metric-now">Now: {{ now }}</div>
+        }
+        <p class="caf-note">Checked by the engine every 15 s from the stored derivatives data, not per tick.</p>
+      }
+
+      <!-- [selected] per option, not [value] on the select: the options of a @for do not exist yet when the select's
+           value is applied, and the browser then shows the first one whatever the alert says. -->
+      @if (!isMetric()) {
+        <label class="caf-row">
+          <span>When</span>
+          <select (change)="setDirection($any($event.target).value)" data-testid="caf-direction">
+            @for (d of directionChoices(); track d.id) {
+              <option [value]="d.id" [selected]="d.id === direction()">{{ d.label }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="caf-row">
+          <span>Price</span>
+          <select (change)="setSide($any($event.target).value)" data-testid="caf-side">
+            @for (s of sides; track s.id) {
+              <option [value]="s.id" [title]="s.hint" [selected]="s.id === side()">
+                {{ s.label }}
+              </option>
+            }
+          </select>
+        </label>
+
+        @if (!isDrawing()) {
+          @if (isChannel()) {
+            <label class="caf-row">
+              <span>Lower</span>
+              <input
+                type="number"
+                [step]="step()"
+                [value]="lower()"
+                (input)="lower.set(num($event))"
+                data-testid="caf-lower"
+              />
+            </label>
+            <label class="caf-row">
+              <span>Upper</span>
+              <input
+                type="number"
+                [step]="step()"
+                [value]="upper()"
+                (input)="upper.set(num($event))"
+                data-testid="caf-upper"
+              />
+            </label>
+          } @else {
+            <label class="caf-row">
+              <span>Level</span>
+              <input
+                type="number"
+                [step]="step()"
+                [value]="level()"
+                (input)="level.set(num($event))"
+                data-testid="caf-level"
+              />
+            </label>
+          }
+        }
+
+        @if (livePrice() !== null) {
+          <div class="caf-live">Now: {{ side().toLowerCase() }} {{ livePrice() }}</div>
+        }
       }
 
       <label class="caf-row">
         <span>Trigger</span>
         <select (change)="frequency.set($any($event.target).value)" data-testid="caf-frequency">
-          @for (f of frequencies; track f.id) {
+          @for (f of frequencyChoices(); track f.id) {
             <option [value]="f.id" [title]="f.hint" [selected]="f.id === frequency()">
               {{ f.label }}
             </option>
@@ -277,6 +361,18 @@ import type {
       .caf-channels input {
         height: auto;
       }
+      .caf-unit {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .caf-unit input {
+        flex: 1;
+      }
+      .caf-unit small {
+        color: var(--tv-muted, #888);
+        white-space: nowrap;
+      }
       .caf-problem {
         margin: 0;
         padding: 6px 8px;
@@ -318,6 +414,7 @@ import type {
 })
 export class ChartAlertFormComponent {
   private readonly alerts = inject(ChartAlertsService);
+  private readonly availability = inject(MetricAvailabilityService);
 
   /** The chart's symbol and timeframe (a new alert's). */
   readonly symbol = input.required<string>();
@@ -362,6 +459,50 @@ export class ChartAlertFormComponent {
   readonly saving = signal(false);
   readonly serverError = signal<string | null>(null);
 
+  // ── UF04: derivatives alerts ──
+  readonly kind = signal<'Price' | MetricAlertKind>('Price');
+  readonly comparator = signal<MetricComparator>('crossesAbove');
+  readonly metricValue = signal<number | null>(null);
+  readonly windowMinutes = signal<number | null>(DEFAULT_METRIC_WINDOW_MINUTES);
+  readonly metricSource = signal<string | null>(null);
+  /** The derivatives kinds the symbol has data for (empty: none, or not read yet). */
+  readonly metricOptions = signal<MetricAvailability[]>([]);
+  protected readonly comparators = COMPARATORS;
+  protected readonly isMetric = computed(() => isMetricKind(this.kind()));
+  protected readonly metricKind = computed(() => {
+    const k = this.kind();
+    return isMetricKind(k) ? k : null;
+  });
+  /** The offered kinds (an edited metric alert's own kind stays listed even when its data is gone now). */
+  protected readonly kindChoices = computed(() => {
+    const kinds = new Set(this.metricOptions().map((m) => m.kind));
+    const k = this.metricKind();
+    if (k) kinds.add(k);
+    return [...kinds].map((x) => metricInfo(x));
+  });
+  protected readonly needsWindow = computed(() => {
+    const k = this.metricKind();
+    return k ? metricInfo(k).needsWindow : false;
+  });
+  protected readonly metricUnitText = computed(() => {
+    const k = this.metricKind();
+    return k ? metricInfo(k).unitText : '';
+  });
+  private readonly metricAvailable = computed(
+    () => this.metricOptions().find((m) => m.kind === this.metricKind()) ?? null,
+  );
+  protected readonly metricSources = computed(() => this.metricAvailable()?.sources ?? []);
+  protected readonly metricNow = computed<string | null>(() => {
+    const a = this.metricAvailable();
+    if (!a || a.current === null) return null;
+    const src = a.sources.find((s) => s.sourceId === a.currentSource)?.label;
+    return `${formatMetric(a.kind, a.current)}${src ? ` (${src})` : ''}`;
+  });
+  /** Metric alerts are evaluated every 15 s, never at bar closes. */
+  protected readonly frequencyChoices = computed(() =>
+    this.isMetric() ? FREQUENCIES.filter((f) => f.id !== 'once_per_bar_close') : FREQUENCIES,
+  );
+
   /** Set once the operator typed a level — re-defaulting must not overwrite it. */
   private touchedLevel = false;
 
@@ -373,7 +514,9 @@ export class ChartAlertFormComponent {
     if (e && !this.copy()) return `Edit alert · ${e.symbol}`;
     const draft = e ? null : this.draft();
     if (draft?.kind === 'Drawing') return `Drawing alert · ${draft.symbol.toUpperCase()}`;
-    return `${this.copy() ? 'Copy alert' : 'Price alert'} · ${(e?.symbol ?? this.symbol()).toUpperCase()}`;
+    const mk = this.metricKind();
+    const what = this.copy() ? 'Copy alert' : mk ? `${metricInfo(mk).label} alert` : 'Price alert';
+    return `${what} · ${(e?.symbol ?? this.symbol()).toUpperCase()}`;
   });
   protected readonly drawingLabel = computed(() =>
     (this.base()?.drawingKind ?? 'drawing').replace(/-/g, ' '),
@@ -406,6 +549,18 @@ export class ChartAlertFormComponent {
     if (this.expires() && Date.parse(this.expires()) <= Date.now())
       return 'The expiry is in the past.';
     if (this.isDrawing()) return null;
+    const mk = this.metricKind();
+    if (mk)
+      return metricProblem(
+        {
+          kind: mk,
+          comparator: this.comparator(),
+          value: this.metricValue(),
+          windowMinutes: this.windowMinutes(),
+          sourceId: this.metricSource(),
+        },
+        this.frequency(),
+      );
     if (this.isChannel()) {
       if (!(this.lower() > 0) || !(this.upper() > 0)) return 'Enter both channel levels.';
       if (this.upper() <= this.lower()) return 'The upper level must be above the lower level.';
@@ -429,6 +584,40 @@ export class ChartAlertFormComponent {
       const preset = this.presetPrice();
       untracked(() => this.reset(e, preset));
     });
+    // UF04: which derivatives kinds this symbol has data for (none for FX without a CME source, a spot coin, …).
+    effect(() => {
+      const symbol = this.alertSymbol();
+      const drawing = this.isDrawing();
+      untracked(() => {
+        this.metricOptions.set([]);
+        if (drawing || !symbol) return;
+        this.availability.forSymbol(symbol).then(
+          (list) => {
+            if (this.alertSymbol() === symbol) this.metricOptions.set(list);
+          },
+          () => undefined,
+        );
+      });
+    });
+  }
+
+  /** UF04: switch between a price alert and a derivatives kind. */
+  setKind(kind: string): void {
+    const next = isMetricKind(kind as MetricAlertKind) ? (kind as MetricAlertKind) : 'Price';
+    if (next === this.kind()) return;
+    this.kind.set(next);
+    if (next !== 'Price') {
+      if (this.frequency() === 'once_per_bar_close') this.frequency.set('once');
+      this.metricValue.set(null);
+      this.metricSource.set(null);
+      if (metricInfo(next).needsWindow && this.windowMinutes() === null)
+        this.windowMinutes.set(DEFAULT_METRIC_WINDOW_MINUTES);
+    }
+  }
+
+  protected numOrNull(ev: Event): number | null {
+    const v = (ev.target as HTMLInputElement).valueAsNumber;
+    return Number.isFinite(v) ? v : null;
   }
 
   protected num(ev: Event): number {
@@ -456,6 +645,37 @@ export class ChartAlertFormComponent {
   /** The input the form describes. */
   toInput(): ChartAlertInput {
     const e = this.base();
+    const mk = this.metricKind();
+    if (mk && e?.kind !== 'Drawing') {
+      const metric = metricInput({
+        kind: mk,
+        comparator: this.comparator(),
+        value: this.metricValue(),
+        windowMinutes: this.windowMinutes(),
+        sourceId: this.metricSource(),
+      });
+      // The engine keeps the condition's column in step with the comparator's direction; the side is unused.
+      const down = metric.comparator === 'below' || metric.comparator === 'crossesBelow';
+      return {
+        name: this.name().trim() || null,
+        symbol: this.alertSymbol(),
+        timeframe: e?.timeframe ?? this.timeframe(),
+        kind: mk,
+        side: 'Mid',
+        condition: down ? 'CrossingDown' : 'CrossingUp',
+        price: null,
+        upperPrice: null,
+        geometry: null,
+        drawingId: null,
+        drawingKind: null,
+        frequency: this.frequency(),
+        expiresAtUtc: this.expires() ? new Date(this.expires()).toISOString() : null,
+        channels: this.channels(),
+        messageTemplate: this.message().trim() || null,
+        severity: this.severity(),
+        metric,
+      };
+    }
     const channel = this.isChannel();
     return {
       name: this.name().trim() || null,
@@ -506,6 +726,11 @@ export class ChartAlertFormComponent {
   private reset(e: ChartAlertDto | null, preset: number | null): void {
     this.serverError.set(null);
     this.touchedLevel = false;
+    this.kind.set(e && isMetricKind(e.kind) ? e.kind : 'Price');
+    this.comparator.set(e?.metric?.comparator ?? 'crossesAbove');
+    this.metricValue.set(e?.metric?.value ?? null);
+    this.windowMinutes.set(e?.metric?.windowMinutes ?? DEFAULT_METRIC_WINDOW_MINUTES);
+    this.metricSource.set(e?.metric?.sourceId ?? null);
     if (e) {
       this.direction.set(directionOf(e.condition));
       this.side.set(e.side);

@@ -49,6 +49,9 @@ const lt = (a: number, b: number): boolean => round9(a) < round9(b);
 const ge = (a: number, b: number): boolean => round9(a) >= round9(b);
 const le = (a: number, b: number): boolean => round9(a) <= round9(b);
 const eq = (a: number, b: number): boolean => round9(a) === round9(b);
+/** The runtime's `>` / `<` ({@link gt}, {@link lt}), for the chart's incremental study path (US01). */
+export const pineGt = gt;
+export const pineLt = lt;
 const toNum = (v: Maybe | undefined): number => (v === null || v === undefined ? NaN : v);
 const maybe = (v: number): Maybe => (Number.isFinite(v) ? v : null);
 

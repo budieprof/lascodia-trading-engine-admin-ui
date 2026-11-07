@@ -5,7 +5,35 @@ import type { AlertChannel, AlertSeverity } from '@core/api/api.types';
  * `docs/api/chart-alerts-api.md`). Enums travel as their names.
  */
 
-export type ChartAlertKind = 'Price' | 'Drawing';
+export type ChartAlertKind = 'Price' | 'Drawing' | MetricAlertKind;
+
+/**
+ * Derivatives alerts (multi-asset chart program C7 / UF04): evaluated engine-side every 15 s from the stored derivatives
+ * data, not per tick. Funding in percent per funding interval, open-interest change in percent over `windowMinutes`,
+ * basis in percent, liquidations in quote notional over `windowMinutes`.
+ */
+export type MetricAlertKind = 'Funding' | 'OpenInterestChange' | 'Basis' | 'Liquidations';
+
+export type MetricComparator = 'above' | 'below' | 'crossesAbove' | 'crossesBelow';
+
+/** The unit of a metric alert's value (engine `ChartAlertMetricKinds.Unit`). */
+export type MetricUnit = 'percentPerInterval' | 'percent' | 'quoteNotional';
+
+/** A derivatives alert's condition as the API takes it. */
+export interface ChartAlertMetricInput {
+  comparator: MetricComparator;
+  /** In the kind's unit. */
+  value: number;
+  /** OpenInterestChange / Liquidations only (1-1440); must be empty for the others. */
+  windowMinutes?: number | null;
+  /** The market-data source read (`crypto-okx`); empty = the first with data. */
+  sourceId?: string | null;
+}
+
+/** …and as the API answers it. */
+export interface ChartAlertMetricDto extends ChartAlertMetricInput {
+  unit: MetricUnit;
+}
 
 /** Which price is compared with the level: bid (the chart's candles), ask or mid. */
 export type ChartAlertSide = 'Bid' | 'Ask' | 'Mid';
@@ -59,9 +87,12 @@ export interface ChartAlertInput {
   channels: AlertChannel[];
   messageTemplate?: string | null;
   severity: AlertSeverity;
+  /** C7: required for the metric kinds, absent otherwise. */
+  metric?: ChartAlertMetricInput | null;
 }
 
 export interface ChartAlertDto extends ChartAlertInput {
+  metric?: ChartAlertMetricDto | null;
   id: number;
   status: ChartAlertStatus;
   statusReason: string | null;

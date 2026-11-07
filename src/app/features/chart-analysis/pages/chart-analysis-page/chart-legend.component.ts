@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ScriptStatusLineComponent } from '../../scripts/script-status-line.component';
 import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { DecimalPipe } from '@angular/common';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_LEGEND } from './chart-page.token';
+import { legendDigitsFormat } from '../../indicators/study-format';
 import { ChartMarketChipsComponent } from '../../datafeed/chart-market-chips.component';
 
 /**
@@ -26,5 +27,7 @@ import { ChartMarketChipsComponent } from '../../datafeed/chart-market-chips.com
   styleUrl: './chart-legend.component.scss',
 })
 export class ChartLegendComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_LEGEND);
+  /** UA10: a study value's decimals — FX keeps `1.2-5`, other instruments their own. */
+  protected readonly digitsFormat = legendDigitsFormat;
 }

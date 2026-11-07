@@ -10,7 +10,7 @@ import { LongPressDirective } from '../../panels/long-press.directive';
 import { ArticleFlagsPipe } from '../../panels/news-pane';
 import { ZonedDatePipe } from '../../panels/zoned-time';
 import { DecimalPipe } from '@angular/common';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_SIDE_PANE } from './chart-page.token';
 
 /**
  * The chart's side pane: symbol details, news, the economic calendar, the data window and the docked side panels.
@@ -40,5 +40,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-side-pane.component.scss',
 })
 export class ChartSidePaneComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_SIDE_PANE);
 }

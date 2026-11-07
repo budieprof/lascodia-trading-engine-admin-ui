@@ -1,6 +1,7 @@
 import type { InstrumentDto } from '@core/instruments/instrument.types';
 import { isExchangeTraded } from '@features/venues/venues.logic';
 import { isVenueSource, volumeLabel, type ChartSource, type SymbolFacts } from './chart-facts';
+import { referenceExchange, withoutListingSuffix } from './venue-label';
 
 /**
  * What a chart says about the bars it draws (multi-asset chart program UD07): where they come from (the candle source:
@@ -11,7 +12,7 @@ import { isVenueSource, volumeLabel, type ChartSource, type SymbolFacts } from '
 
 export interface SymbolChip {
   /** Stable identity for `@for` tracking. */
-  id: 'kind' | 'source' | 'exchange' | 'contract' | 'perp' | 'volume' | 'adjustment';
+  id: 'kind' | 'source' | 'exchange' | 'contract' | 'perp' | 'volume' | 'adjustment' | 'synthetic';
   text: string;
   title: string;
   /** Draws attention (an expiring contract, a non-front month, unknown volume). */
@@ -57,11 +58,13 @@ export function instrumentKindLabel(
 /** The instrument's description, unless it only repeats the symbol or reads "USD / USD" (a CFD's pair row). */
 export function instrumentDescription(
   inst:
-    | Pick<InstrumentDto, 'symbol' | 'description' | 'baseCurrency' | 'quoteCurrency'>
+    | (Pick<InstrumentDto, 'symbol' | 'description' | 'baseCurrency' | 'quoteCurrency'> &
+        Partial<Pick<InstrumentDto, 'exchange'>>)
     | null
     | undefined,
 ): string | null {
-  const d = (inst?.description ?? '').trim();
+  // US08: "BTC/USD (Binance)" names the reference listing, not the bars' venue: the suffix goes.
+  const d = withoutListingSuffix((inst?.description ?? '').trim(), inst?.exchange);
   if (!d || d.toUpperCase() === (inst?.symbol ?? '').toUpperCase()) return null;
   const legs = /^\s*([A-Za-z]{3})\s*\/\s*([A-Za-z]{3})\s*$/.exec(d);
   if (legs && legs[1].toUpperCase() === legs[2].toUpperCase()) return null;
@@ -96,9 +99,14 @@ export function symbolChips(
         },
   );
 
-  const exchange = (inst?.exchange ?? '').trim();
-  if (inst && isExchangeTraded(inst) && exchange && exchange.toUpperCase() !== 'OTC')
-    out.push({ id: 'exchange', text: exchange, title: `Listed on ${exchange}` });
+  // US08: the source is the venue; the listing exchange only where it differs, and said to be a reference.
+  const reference = referenceExchange(inst, source);
+  if (reference)
+    out.push({
+      id: 'exchange',
+      text: `ref: ${reference}`,
+      title: `Reference listing from the instrument catalogue (${reference})${source ? ` — the bars come from ${source.label}` : ''}`,
+    });
 
   const fut = inst?.future;
   if (fut) {

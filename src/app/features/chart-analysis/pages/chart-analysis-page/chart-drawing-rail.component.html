@@ -5,7 +5,7 @@
     class="rail-tool"
     [class.active]="page.tool() === null"
     (click)="page.selectTool(null)"
-    title="Cursor (Esc)"
+    title="Cursor (Esc)" aria-label="Cursor (Esc)"
   >
     <app-chart-icon name="arrow" [size]="24" />
   </button>
@@ -17,7 +17,7 @@
         class="rail-tool"
         [class.active]="page.tool() === current.kind"
         (click)="page.selectTool(current.kind)"
-        [title]="current.label"
+        [title]="current.label" [attr.aria-label]="current.label"
       >
         <app-chart-icon [name]="current.kind" [size]="28" />
       </button>
@@ -27,7 +27,7 @@
           class="rail-caret"
           [class.active]="page.railGroupActive(group)"
           (click)="page.toggleRailFlyout(group.name, $event)"
-          [title]="group.title"
+          [title]="group.title" [attr.aria-label]="group.title"
           [attr.aria-expanded]="page.railFlyout() === group.name"
           aria-haspopup="menu"
         >
@@ -43,7 +43,7 @@
       class="rail-tool"
       [class.active]="page.tool() === t.kind"
       (click)="page.selectTool(t.kind)"
-      [title]="t.label"
+      [title]="t.label" [attr.aria-label]="t.label"
     >
       <app-chart-icon [name]="t.kind" [size]="28" />
     </button>
@@ -58,6 +58,9 @@
       [title]="
         (page.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
         ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
+      " [attr.aria-label]="
+        (page.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
+        ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
       "
     >
       <app-chart-icon name="magnet" [size]="28" />
@@ -67,7 +70,7 @@
       class="rail-caret"
       [class.active]="page.magnet()"
       (click)="page.toggleMagnetMenu($event)"
-      title="Magnet mode"
+      title="Magnet mode" aria-label="Magnet mode"
       [attr.aria-expanded]="page.magnetMenuOpen()"
       aria-haspopup="menu"
     >
@@ -79,7 +82,7 @@
     class="rail-tool"
     [class.active]="page.stayInDrawing()"
     (click)="page.toggleStayInDrawing()"
-    title="Stay in drawing mode"
+    title="Stay in drawing mode" aria-label="Stay in drawing mode"
     [attr.aria-pressed]="page.stayInDrawing()"
   >
     <app-chart-icon name="draw-stay" [size]="28" />
@@ -90,7 +93,7 @@
     [class.active]="page.drawings.allLocked()"
     [disabled]="!page.drawings.visible().length"
     (click)="page.drawings.setLockAll(!page.drawings.allLocked())"
-    [title]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
+    [title]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'" [attr.aria-label]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
   >
     <app-chart-icon [name]="page.drawings.allLocked() ? 'lock' : 'unlock'" [size]="28" />
   </button>
@@ -99,7 +102,7 @@
     class="rail-tool"
     [class.active]="page.drawings.hidden()"
     (click)="page.drawings.hidden.set(!page.drawings.hidden())"
-    [title]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
+    [title]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'" [attr.aria-label]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
   >
     <app-chart-icon [name]="page.drawings.hidden() ? 'eye-off' : 'eye'" [size]="28" />
   </button>
@@ -109,7 +112,7 @@
     class="rail-tool"
     [disabled]="!page.drawings.visible().length"
     (click)="page.drawings.clearVisible()"
-    title="Remove all drawings on this chart"
+    title="Remove all drawings on this chart" aria-label="Remove all drawings on this chart"
   >
     <app-chart-icon name="trash" [size]="28" />
   </button>

@@ -76,8 +76,8 @@
                     <span class="sym-name">{{ p.symbol }}</span>
                     <span class="sym-desc"
                       >{{ symbolDescription(p.symbol, p.description) }}
-                      @if (p.exchange || p.source) {
-                        <span class="sym-venue">· {{ p.exchange || p.source }}</span>
+                      @if (p.venue) {
+                        <span class="sym-venue">· {{ p.venue }}</span>
                       }
                       @if (p.noDataReason) {
                         <span class="sym-nodata" data-testid="symbol-no-data">· {{ p.noDataReason }}</span>
@@ -198,7 +198,7 @@
         class="tb-btn"
         (click)="toggleMenu('style', $event)"
         [class.open]="openMenu() === 'style'"
-        [title]="styleLabel()"
+        [title]="styleLabel()" [attr.aria-label]="styleLabel()"
         data-testid="style-button"
       >
         <app-chart-icon [name]="style()" [size]="28" />
@@ -361,7 +361,7 @@
         class="tb-btn"
         (click)="toggleMenu('templates', $event)"
         [class.open]="openMenu() === 'templates'"
-        title="Indicator templates"
+        title="Indicator templates" aria-label="Indicator templates"
       >
         <app-chart-icon name="templates" [size]="28" />
       </button>
@@ -386,11 +386,29 @@
                 >
                   {{ t.name }} <span class="tb-hint">{{ t.indicators.length }}</span>
                 </button>
+                @if (symbolClass_(); as cls) {
+                  <!-- US07: open every symbol of this asset class with this template. -->
+                  <button
+                    type="button"
+                    class="tb-menu-x"
+                    [attr.aria-pressed]="classDefault()?.templateId === t.id"
+                    [attr.aria-label]="'Default template for ' + assetClassName[cls]"
+                    [title]="
+                      classDefault()?.templateId === t.id
+                        ? 'The default for ' + assetClassName[cls] + ': click to stop'
+                        : 'Open every ' + assetClassName[cls] + ' symbol with this template'
+                    "
+                    (click)="toggleClassTemplate(t.id, $event)"
+                  >
+                    {{ classDefault()?.templateId === t.id ? '★' : '☆' }}
+                  </button>
+                }
                 <button
                   type="button"
                   class="tb-menu-x"
                   (click)="removeTemplate(t.id, $event)"
                   title="Delete template"
+                  aria-label="Delete template"
                 >
                   <app-chart-icon name="close" [size]="16" />
                 </button>
@@ -398,6 +416,18 @@
             }
           } @else {
             <div class="tb-menu-empty">No saved templates yet.</div>
+          }
+          @if (symbolClass_(); as cls) {
+            <!-- US07: the timeframe every symbol of this asset class opens on. -->
+            <button
+              type="button"
+              class="tb-menu-item"
+              [attr.aria-pressed]="classDefault()?.resolution === resolution()"
+              (click)="toggleClassResolution()"
+            >
+              {{ classDefault()?.resolution === resolution() ? '✓ ' : '' }}Open {{ assetClassName[cls] }} on
+              {{ resolutionLabel(resolution()) }}
+            </button>
           }
         </div>
       }
@@ -481,7 +511,7 @@
       class="tb-btn tb-wide"
       (click)="undo()"
       [disabled]="!canUndo()"
-      [title]="undoTitle()"
+      [title]="undoTitle()" [attr.aria-label]="undoTitle()"
     >
       <app-chart-icon name="undo" [size]="28" />
     </button>
@@ -490,14 +520,14 @@
       class="tb-btn tb-wide"
       (click)="redo()"
       [disabled]="!canRedo()"
-      [title]="redoTitle()"
+      [title]="redoTitle()" [attr.aria-label]="redoTitle()"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
-    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(0.7)" title="Zoom in">
+    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(0.7)" title="Zoom in" aria-label="Zoom in">
       <app-chart-icon name="zoom-in" [size]="28" />
     </button>
-    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(1 / 0.7)" title="Zoom out">
+    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(1 / 0.7)" title="Zoom out" aria-label="Zoom out">
       <app-chart-icon name="zoom-out" [size]="28" />
     </button>
 
@@ -552,7 +582,7 @@
         class="tb-btn"
         (click)="toggleMenu('split', $event)"
         [class.open]="openMenu() === 'split'"
-        title="Select layout"
+        title="Select layout" aria-label="Select layout"
       >
         <app-chart-icon [name]="'layout-' + splitLayout()" [size]="28" />
       </button>
@@ -564,7 +594,7 @@
               class="tb-split"
               [class.selected]="splitLayout() === l.id"
               (click)="setSplitLayout(l.id); openMenu.set(null)"
-              [title]="l.panels + 1 + ' chart(s)'"
+              [title]="l.panels + 1 + ' chart(s)'" [attr.aria-label]="l.panels + 1 + ' chart(s)'"
             >
               <app-chart-icon [name]="'layout-' + l.id" [size]="28" />
             </button>
@@ -676,7 +706,13 @@
                     <span>{{ t.name }}</span>
                     <span class="muted">{{ t.indicators.length }} studies</span>
                   </button>
-                  <button type="button" class="tree-remove" (click)="removeTemplate(t.id, $event)">
+                  <button
+                    type="button"
+                    class="tree-remove"
+                    (click)="removeTemplate(t.id, $event)"
+                    title="Delete template"
+                    aria-label="Delete template"
+                  >
                     <app-chart-icon name="close" [size]="14" />
                   </button>
                 </li>
@@ -694,7 +730,7 @@
       class="tb-btn tb-wide"
       (click)="toggleFullscreen()"
       [class.active]="isFullscreen()"
-      title="Fullscreen"
+      title="Fullscreen" aria-label="Fullscreen"
     >
       <app-chart-icon name="fullscreen" [size]="28" />
     </button>
@@ -702,7 +738,7 @@
       type="button"
       class="tb-btn tb-wide"
       (click)="takeSnapshot()"
-      title="Take a snapshot (PNG)"
+      title="Take a snapshot (PNG)" aria-label="Take a snapshot (PNG)"
     >
       <app-chart-icon name="camera" [size]="28" />
     </button>
@@ -710,7 +746,7 @@
       type="button"
       class="tb-btn tb-wide"
       (click)="chartSettingsOpen.set(true)"
-      title="Chart settings"
+      title="Chart settings" aria-label="Chart settings"
       data-testid="chart-settings"
     >
       <app-chart-icon name="settings" [size]="28" />
@@ -722,7 +758,7 @@
         class="tb-btn tb-more"
         (click)="toggleMenu('more', $event)"
         [class.open]="openMenu() === 'more'"
-        title="More"
+        title="More" aria-label="More"
         aria-haspopup="menu"
         [attr.aria-expanded]="openMenu() === 'more'"
       >
@@ -838,6 +874,8 @@
         (pointerdown)="drawingMenu.set(null)"
       >
         <app-chart-legend />
+        <!-- US05: the symbol, its market state and (at most every 30 s) its price, for screen readers. -->
+        <div class="sr-only" role="status" aria-live="polite" data-testid="chart-live">{{ liveMessage() }}</div>
 
         @if (error()) {
           <div class="chart-error">{{ error() }}</div>
@@ -857,12 +895,14 @@
           [historyComplete]="historyComplete()"
           [dataWindowOpen]="sidePane() === 'datawindow'"
           [style]="style()"
-          [showVolume]="showVolume()"
+          [showVolume]="showVolume() && !synthetic()"
           [indicators]="active()"
           [positionFacts]="positionFacts()"
           [autoAnalysis]="autoAnalysisOn() ? autoAnalysis() : null"
           [precision]="precision()"
           [facts]="facts()"
+          [exchangeSessions]="exchangeSessions()"
+          [volumeKind]="volumeKind()"
           [tool]="tool()"
           [magnet]="magnetMode()"
           [stayInDrawingMode]="stayInDrawing()"
@@ -909,6 +949,8 @@
         />
 
         <!-- SP-I3/SP-I4 (trading): the order ticket and the draggable trading lines on the price pane. -->
+        <!-- US04: none on a synthetic (spread / ratio) series: it is no instrument. -->
+        @if (!synthetic()) {
         <app-chart-trading
           [host]="host"
           [symbol]="symbol()"
@@ -923,6 +965,7 @@
           (submitted)="onTicketSubmitted()"
           (changed)="onChartTradeChanged()"
         />
+        }
 
         <!-- SP-I5 (analysis): the analysis panel, the plan / watch lines and the watches' fire markers. -->
         <app-chart-analysis
@@ -930,6 +973,7 @@
           [symbol]="symbol()"
           [resolution]="resolution()"
           [precision]="precision()"
+          [facts]="facts()"
           [lastPrice]="bars().at(-1)?.close ?? null"
           [windowFrom]="bars()[0]?.time ?? null"
           [(open)]="analysisOpen"
@@ -1001,6 +1045,7 @@
       </div>
 
       @for (panel of comparePanels(); track panel.id) {
+        @let look = panelLook(panel);
         <div class="chart-area compare">
           <div class="panel-bar">
             <!--
@@ -1016,8 +1061,15 @@
               [ngModelOptions]="{ standalone: true }"
               aria-label="Panel symbol"
             >
-              @for (p of symbols(); track p.id) {
-                <option [value]="p.symbol">{{ p.symbol }}</option>
+              @if (!panelSymbolKnown().has(panel.symbol)) {
+                <option [value]="panel.symbol">{{ panel.symbol }}</option>
+              }
+              @for (g of panelSymbolChoices(); track g.label) {
+                <optgroup [label]="g.label">
+                  @for (o of g.options; track o.symbol) {
+                    <option [value]="o.symbol">{{ o.label }}</option>
+                  }
+                </optgroup>
               }
             </select>
             <select
@@ -1044,6 +1096,42 @@
               <option [ngValue]="2">Link 2</option>
               <option [ngValue]="3">Link 3</option>
             </select>
+            <!-- US03: its own style, scale and volume ("Main chart" follows the main chart). -->
+            <select
+              class="panel-select"
+              [ngModel]="panel.view?.style ?? ''"
+              (ngModelChange)="setPanelView(panel.id, 'style', $event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Panel chart style"
+              title="This chart's style"
+            >
+              <option value="">Style: main chart</option>
+              @for (st of chartStyles; track st.id) {
+                <option [value]="st.id">{{ st.label }}</option>
+              }
+            </select>
+            <select
+              class="panel-select"
+              [ngModel]="panel.view?.scaleMode ?? ''"
+              (ngModelChange)="setPanelView(panel.id, 'scaleMode', $event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Panel price scale"
+              title="This chart's price scale"
+            >
+              <option value="">Scale: main chart</option>
+              @for (sc of panelScales; track sc.id) {
+                <option [value]="sc.id">{{ sc.label }}</option>
+              }
+            </select>
+            <button
+              type="button"
+              class="panel-select"
+              [attr.aria-pressed]="look.showVolume"
+              (click)="setPanelView(panel.id, 'showVolume', look.showVolume ? undefined : true)"
+              [title]="look.showVolume ? 'Hide the volume on this chart' : 'Show the volume on this chart'"
+            >
+              Vol{{ look.showVolume ? ' ✓' : '' }}
+            </button>
             <!-- Its own studies and Pine indicators (CC-I5). -->
             <select
               class="panel-select"
@@ -1094,7 +1182,7 @@
               type="button"
               class="panel-focus"
               (click)="focusPanel(panel.id)"
-              title="Swap with the main chart"
+              title="Swap with the main chart" aria-label="Swap with the main chart"
             >
               <app-chart-icon name="swap" [size]="18" />
             </button>
@@ -1154,20 +1242,28 @@
             [bars]="panel.bars"
             [dataKey]="panel.symbol + '|' + panel.resolution"
             [historyComplete]="!!panel.historyComplete"
-            [style]="style()"
-            [showVolume]="false"
+            [style]="look.style"
+            [showVolume]="look.showVolume"
             [indicators]="panel.indicators"
             (crosshairSync)="onChartCrosshair(panel.id, $event)"
             (rangeSync)="onChartRange(panel.id, $event)"
             [scriptResults]="panelLayerMap().get(panel.id) ?? noLayers"
             [precision]="panelPrecision(panel.symbol)"
             [facts]="panelFacts(panel.symbol)"
-            [scaleMode]="scaleMode()"
+            [session]="panelSession(panel.symbol)"
+            [exchangeSessions]="panelExchangeSessions(panel.symbol)"
+            [volumeKind]="panelVolumeKind(panel.symbol)"
+            [scaleMode]="look.scaleMode"
             [timezone]="timezone()"
             [symbol]="panel.symbol"
             [resolution]="panel.resolution"
             (loadMore)="loadPanelOlder(panel.id)"
             (legend)="onPanelLegend(panel.id, $event)"
+          />
+          <app-panel-state
+            [load]="panel.load"
+            [symbol]="panel.symbol"
+            (retry)="retryPanel(panel.id)"
           />
         </div>
       }
@@ -1180,6 +1276,8 @@
         [base]="currentPair()?.baseCurrency ?? null"
         [quote]="currentPair()?.quoteCurrency ?? null"
         [digits]="panelPrecision(symbol())"
+        [sessionWords]="technicalsSessionWords()"
+        [exchangeSessions]="exchangeSessions()"
         [initialResolution]="resolution()"
         [livePrice]="liveBids()[symbol()] ?? null"
         (closed)="technicalsOpen.set(false)"
@@ -1193,6 +1291,8 @@
         [symbol]="symbol()"
         [base]="currentPair()?.baseCurrency ?? null"
         [quote]="currentPair()?.quoteCurrency ?? null"
+        [seriesSymbol]="facts().instrument.future?.continuousSymbol ?? null"
+        [sessionWords]="technicalsSessionWords()"
         (closed)="seasonalsOpen.set(false)"
       />
     }
@@ -1253,10 +1353,11 @@
   @if (compareOpen()) {
     <app-compare-dialog
       [series]="compareSeries()"
-      [symbols]="symbolNames()"
+      [symbols]="compareSymbolNames()"
       [chartSymbol]="symbol()"
       (add)="addCompare($event)"
       (remove)="removeCompare($event)"
+      (openAsChart)="openCompareAsChart($event)"
       (closed)="compareOpen.set(false)"
     />
   }

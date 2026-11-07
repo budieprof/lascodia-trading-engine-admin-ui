@@ -7,6 +7,7 @@ import type {
   ChartAlertSide,
   ChartAlertStatus,
 } from './chart-alerts.types';
+import { describeMetric, isMetricKind } from './metric-alerts';
 
 /** The latest quote of a symbol (bid and ask), as the price stream reports it. */
 export interface LiveQuote {
@@ -180,6 +181,8 @@ export function describeAlert(alert: ChartAlertDto, precision: number): string {
     typeof v === 'number' ? v.toFixed(Math.max(0, precision)) : '—';
   const freq =
     FREQUENCIES.find((f) => f.id === alert.frequency)?.label.toLowerCase() ?? alert.frequency;
+  // UF04: a derivatives alert says its metric, comparator, value with its unit and window.
+  if (isMetricKind(alert.kind) && alert.metric) return `${describeMetric(alert.kind, alert.metric)} · ${freq}`;
   const what =
     alert.kind === 'Drawing'
       ? `the ${(alert.drawingKind ?? 'drawing').replace(/-/g, ' ')}`
@@ -223,5 +226,15 @@ export function inputOf(alert: ChartAlertDto, copy = false): ChartAlertInput {
     channels: [...alert.channels],
     messageTemplate: alert.messageTemplate ?? null,
     severity: alert.severity,
+    ...(alert.metric
+      ? {
+          metric: {
+            comparator: alert.metric.comparator,
+            value: alert.metric.value,
+            windowMinutes: alert.metric.windowMinutes ?? null,
+            sourceId: alert.metric.sourceId ?? null,
+          },
+        }
+      : {}),
   };
 }

@@ -8,6 +8,7 @@ import type {
 } from '@core/realtime/marketdata.types';
 import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
 import type { FootprintRowDto, TickBarDto } from './orderflow.types';
+import { formatFlowVolume, type RealFlowVenue } from './flow-source';
 
 /**
  * CME order flow on the spot chart (market-data program, cme-tier2): the engine's `md/orderflow` analytics of the REAL
@@ -30,12 +31,14 @@ export type CmeFlowState =
   | { kind: 'ready' };
 
 export interface CmeFlowDeps {
-  orderFlow(req: CmeOrderFlowRequest): Promise<CmeOrderFlow>;
+  /** `venue` = whose analysis: CME (`md/orderflow`, spot-mapped) or a crypto exchange (`md/crypto/orderflow`, same shape). */
+  orderFlow(req: CmeOrderFlowRequest, venue: RealFlowVenue): Promise<CmeOrderFlow>;
   now(): number;
   changed(): void;
 }
 
 interface Asked {
+  venue: RealFlowVenue;
   symbol: string;
   sourceId: string;
   from: number;
@@ -57,13 +60,24 @@ export class CmeFlowFeed {
    * Point at a window. `barSeconds` = the chart's bar (≤ 1 day); `live` = the right edge is on screen (re-read every
    * {@link LIVE_REFRESH_MS}); `head` = Bar Replay's head (nothing after it).
    */
-  update(o: { symbol: string; sourceId: string; fromUtc: number; toUtc: number; barSeconds: number; live: boolean; head: number | null }): void {
+  update(o: {
+    symbol: string;
+    sourceId: string;
+    fromUtc: number;
+    toUtc: number;
+    barSeconds: number;
+    live: boolean;
+    head: number | null;
+    /** Default `cme`. */
+    venue?: RealFlowVenue;
+  }): void {
+    const venue = o.venue ?? 'cme';
     const now = this.deps.now();
     const to = Math.ceil(Math.min(o.head ?? now, o.live ? now : o.toUtc));
     const from = Math.floor(o.fromUtc);
     if (!(to > from)) return;
     if (to - from > MAX_TRADES_WINDOW_MS) {
-      this.state = { kind: 'idle', message: 'CME order flow: zoom in to 24 h or less' };
+      this.state = { kind: 'idle', message: `${venue === 'cme' ? 'CME' : 'Exchange'} order flow: zoom in to 24 h or less` };
       this.deps.changed();
       return;
     }
@@ -72,6 +86,7 @@ export class CmeFlowFeed {
     const a = this.asked;
     const covers =
       !!a &&
+      a.venue === venue &&
       a.symbol === symbol &&
       a.sourceId === o.sourceId &&
       a.barSeconds === barSeconds &&
@@ -79,7 +94,7 @@ export class CmeFlowFeed {
       to <= a.to + (o.live ? LIVE_REFRESH_MS : 0) &&
       !(o.live && now - a.at >= LIVE_REFRESH_MS);
     if (covers) return;
-    void this.fetch({ symbol, sourceId: o.sourceId, from, to, barSeconds, at: now });
+    void this.fetch({ venue, symbol, sourceId: o.sourceId, from, to, barSeconds, at: now });
   }
 
   clear(): void {
@@ -95,15 +110,18 @@ export class CmeFlowFeed {
     if (!this.data) this.state = { kind: 'loading' };
     this.deps.changed();
     try {
-      const d = await this.deps.orderFlow({
-        symbol: a.symbol,
-        sourceId: a.sourceId,
-        from: a.from,
-        to: a.to,
-        barSeconds: a.barSeconds,
-        spot: true,
-        includeBook: a.to - a.from <= MAX_BOOK_WINDOW_MS,
-      });
+      const d = await this.deps.orderFlow(
+        {
+          symbol: a.symbol,
+          sourceId: a.sourceId,
+          from: a.from,
+          to: a.to,
+          barSeconds: a.barSeconds,
+          spot: true,
+          includeBook: a.to - a.from <= MAX_BOOK_WINDOW_MS,
+        },
+        a.venue,
+      );
       if (n !== this.seq) return;
       this.data = d;
       this.state = { kind: 'ready' };
@@ -114,7 +132,7 @@ export class CmeFlowFeed {
       const m = (e as { message?: unknown })?.message;
       this.state = {
         kind: 'error',
-        message: refusal ?? (typeof m === 'string' && m ? m : 'md/orderflow did not answer'),
+        message: refusal ?? (typeof m === 'string' && m ? m : `${a.venue === 'cme' ? 'md/orderflow' : 'md/crypto/orderflow'} did not answer`),
       };
     }
     this.deps.changed();
@@ -281,15 +299,26 @@ export function cmeMarkerAt(placed: readonly PlacedCmeMarker[], x: number, y: nu
   return null;
 }
 
-/** Hover text of a marker (spot terms; sizes in contracts). */
-export function cmeMarkerText(m: PlacedCmeMarker, label: string, digits: number): string[] {
+/**
+ * Hover text of a marker. CME: spot terms, sizes in contracts, MBP-10 book. A crypto exchange (`unit` = the base coin,
+ * `book` = 'L2'): the market's own prices, sizes in coins, an aggregated L2 book without order ids.
+ */
+export function cmeMarkerText(
+  m: PlacedCmeMarker,
+  label: string,
+  digits: number,
+  unit = 'contracts',
+  book: 'MBP-10' | 'L2' = 'MBP-10',
+): string[] {
   const px = (p: number) => p.toFixed(digits);
+  // Contracts are whole numbers and print as they always did; coin sizes get a readable fraction.
+  const n = (v: number) => (unit === 'contracts' ? String(v) : formatFlowVolume(v));
   const who = (s: number) => (s > 0 ? 'buyer-initiated' : s < 0 ? 'seller-initiated' : 'aggressor not reported');
   switch (m.kind) {
     case 'large': {
       const o = m.item as CmeAggressorOrder;
       return [
-        `${label} large lot · ${o.size} contracts ${who(m.side)}`,
+        `${label} large lot · ${n(o.size)} ${unit} ${who(m.side)}`,
         `VWAP ${px(o.price)} · ${o.prints} print${o.prints === 1 ? '' : 's'} over ${o.levels} level${o.levels === 1 ? '' : 's'} (${px(o.low)}–${px(o.high)})`,
         new Date(o.t).toISOString().replace('T', ' ').replace('Z', ' UTC'),
       ];
@@ -298,7 +327,7 @@ export function cmeMarkerText(m: PlacedCmeMarker, label: string, digits: number)
       const s = m.item as CmeSweep;
       return [
         `${label} sweep · ${s.levels} levels in ${Math.max(0, s.endT - s.t)} ms, ${who(m.side)}`,
-        `${px(s.fromPrice)} → ${px(s.toPrice)} · ${s.size} contracts, ${s.orders} order${s.orders === 1 ? '' : 's'}`,
+        `${px(s.fromPrice)} → ${px(s.toPrice)} · ${n(s.size)} ${unit}, ${s.orders} order${s.orders === 1 ? '' : 's'}`,
         new Date(s.t).toISOString().replace('T', ' ').replace('Z', ' UTC'),
       ];
     }
@@ -306,7 +335,7 @@ export function cmeMarkerText(m: PlacedCmeMarker, label: string, digits: number)
       const l = m.item as CmeLevelEvent;
       return [
         `${label} iceberg-like ${l.side} ${px(l.price)}`,
-        `traded ${l.volume} vs at most ${l.maxDisplayed} shown, ${l.refills} refill${l.refills === 1 ? '' : 's'} (MBP-10: a refill may be a new order)`,
+        `traded ${n(l.volume)} vs at most ${n(l.maxDisplayed)} shown, ${l.refills} refill${l.refills === 1 ? '' : 's'} (${book}: a refill may be a new order)`,
         `${new Date(l.t).toISOString().slice(11, 23)}–${new Date(l.endT).toISOString().slice(11, 23)} UTC`,
       ];
     }
@@ -314,7 +343,7 @@ export function cmeMarkerText(m: PlacedCmeMarker, label: string, digits: number)
       const l = m.item as CmeLevelEvent;
       return [
         `${label} absorption at ${l.side} ${px(l.price)}`,
-        `${l.volume} contracts of aggression absorbed; the level held ≥ ${Math.round(l.heldMs / 1000)} s`,
+        `${n(l.volume)} ${unit} of aggression absorbed; the level held ≥ ${Math.round(l.heldMs / 1000)} s`,
         `${new Date(l.t).toISOString().slice(11, 23)}–${new Date(l.endT).toISOString().slice(11, 23)} UTC`,
       ];
     }

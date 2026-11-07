@@ -103,4 +103,21 @@ describe('symbol search (UD09: the whole catalogue, honest about data)', () => {
     expect(s.loading()).toBe(false);
     vi.useRealTimers();
   });
+
+  it('US08: the row names the candle source as the venue, the listing only as a reference where it differs', () => {
+    const coinbase = { id: 'crypto-coinbase', kind: 'venue' as const, label: 'Coinbase Advanced Trade' };
+    const row = searchRowOf(
+      inst({ symbol: 'BTC-USD', assetClass: 'Crypto', exchange: 'BINANCE', description: 'BTC/USD (Binance)', crypto: { kind: 'Spot' } as InstrumentDto['crypto'], candleSource: coinbase }),
+      true,
+    );
+    expect(row.venue).toBe('Coinbase Advanced Trade · ref: Binance');
+    expect(row.description).toBe('BTC/USD');
+    const same = searchRowOf(
+      inst({ symbol: 'BTC-USD', assetClass: 'Crypto', exchange: 'COINBASE', crypto: { kind: 'Spot' } as InstrumentDto['crypto'], candleSource: coinbase }),
+      true,
+    );
+    expect(same.venue).toBe('Coinbase Advanced Trade');
+    // An MT5 symbol: the broker, no listing.
+    expect(searchRowOf(inst({ symbol: 'EURUSD', assetClass: 'Fx', candleSource: { id: 'mt5', kind: 'mt5', label: 'MT5 broker feed' } }), true).venue).toBe('MT5 broker');
+  });
 });

@@ -219,12 +219,12 @@ describe('tpoProfile', () => {
 
 describe('profile studies catalogue', () => {
   const bars = walk(24 * 10);
-  it('every study computes and VP descriptions mention tick volume', () => {
+  it('every study computes and VP descriptions say what the volume is (UA07)', () => {
     for (const s of PROFILE_STUDIES) {
       const m = computeProfileStudy(s.id, bars, {}, { from: 10, to: 100 });
       if (m.kind === 'volume') {
         expect(m.blocks.length).toBeGreaterThan(0);
-        expect(s.description).toContain('(tick volume)');
+        expect(s.description).toContain('tick count on MT5 bars');
       } else {
         // TPO refuses H1 bars for 30-minute brackets (DR-20); on M5 it draws a profile a day.
         expect(m.sessions.length).toBe(0);

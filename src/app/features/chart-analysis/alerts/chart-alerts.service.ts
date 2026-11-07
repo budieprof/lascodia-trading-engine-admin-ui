@@ -8,6 +8,16 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import type { LiveQuote } from './chart-alert-rules';
 import type { ChartAlertDto, ChartAlertFireDto, ChartAlertInput } from './chart-alerts.types';
 
+/** A `priceUpdated` push: the EA's (bid / ask) or, C3, a venue's (`bid` / `ask` null on a trades-only source). */
+interface PriceTick {
+  symbol?: string;
+  bid?: number | null;
+  ask?: number | null;
+  price?: number | null;
+  mid?: number | null;
+  last?: number | null;
+}
+
 /**
  * Chart alerts v2: the operator's alerts (`chart-alert`, owner-scoped on the engine), kept in one signal the alert
  * manager, the chart's alert lines and the pop-ups read; plus the live bid AND ask of every symbol on the price stream
@@ -34,7 +44,7 @@ export class ChartAlertsService {
 
   constructor() {
     this.realtime
-      .on<{ symbol?: string; bid?: number; ask?: number; price?: number }>('priceUpdated')
+      .on<PriceTick>('priceUpdated')
       .subscribe((tick) => this.recordQuote(tick));
     // A fire changes the alert (a "once" alert is now Fired, counts move): re-read the list.
     this.realtime.on<AlertFiredPayload>('alertFired').subscribe((fired) => {
@@ -138,9 +148,10 @@ export class ChartAlertsService {
     });
   }
 
-  private recordQuote(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
+  private recordQuote(tick: PriceTick): void {
     const symbol = tick?.symbol?.toUpperCase();
-    const bid = tick?.bid ?? tick?.price;
+    // C3: a venue's trades-only source publishes no bid / ask — its `mid` or `last` stands for both sides.
+    const bid = tick?.bid ?? tick?.price ?? tick?.mid ?? tick?.last ?? undefined;
     const ask = tick?.ask ?? bid;
     if (
       !symbol ||

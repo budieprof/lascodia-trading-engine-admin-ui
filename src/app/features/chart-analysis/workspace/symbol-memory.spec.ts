@@ -31,4 +31,18 @@ describe('layout memory per symbol (CC-I11)', () => {
     ).toEqual({ EURUSD: { resolution: '15', view }, USDJPY: { resolution: '60' } });
     expect(restoredSymbolMemory(null)).toEqual({});
   });
+
+  it('US07: remembers by instrument (ESZ6 and ESH7 are ES1!) and migrates older keys, the most recent first', () => {
+    const m = rememberSymbol({}, 'ESZ6', { resolution: '15' });
+    expect(Object.keys(m)).toEqual(['ES1!']);
+    expect(recalled(m, 'ESH7')).toEqual({ resolution: '15' });
+    expect(
+      restoredSymbolMemory({
+        ESH7: { resolution: '60' },
+        ESZ6: { resolution: '240' },
+        'RATIO(EURUSD,GBPUSD)': { resolution: '1D' },
+        EURUSD: { resolution: '5' },
+      }),
+    ).toEqual({ 'ES1!': { resolution: '60' }, 'RATIO(EURUSD,GBPUSD)': { resolution: '1D' }, EURUSD: { resolution: '5' } });
+  });
 });

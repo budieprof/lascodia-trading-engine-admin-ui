@@ -1,6 +1,7 @@
 import type { Bar } from '../datafeed/candle-feed.service';
 import type { ExternalPane } from '../chart/chart-host.component';
 import type { PanePoint } from '../panels/fx-fundamentals';
+import { asOfJoin } from './synthetic';
 
 /**
  * Compare overlays and synthetic series (CC-I12), computed in the browser from the bars the chart already loads for
@@ -85,19 +86,39 @@ function closesByTime(bars: readonly Bar[]): Map<number, number> {
 }
 
 /**
+ * Whether a combined series' legs trade on different calendars (US04): `calendarOf` names each leg's calendar
+ * (absent: all the same, as before).
+ */
+export function legsDiffer(spec: CompareSeriesSpec, calendarOf?: (symbol: string) => string): boolean {
+  if (!calendarOf || spec.kind === 'compare') return false;
+  return new Set(spec.symbols.map((s) => calendarOf(s.toUpperCase()))).size > 1;
+}
+
+/**
  * The points of `spec` from the bars it reads (`barsOf(symbol)`: the chart's own for its symbol, the compare bars for
- * the others; ascending, UTC opens). Combined series have a point at every bar time all their legs share.
+ * the others; ascending, UTC opens). Combined series have a point at every bar time all their legs share — or, when
+ * their calendars differ ({@link legsDiffer}, US04), at every time any of them has once all have started, each leg as
+ * of then (its last close where it has no bar): BTC-USD ÷ AAPL kept only the hours both had a bar.
  */
 export function compareSeriesPoints(
   spec: CompareSeriesSpec,
   barsOf: (symbol: string) => readonly Bar[] | undefined,
+  calendarOf?: (symbol: string) => string,
 ): PanePoint[] {
   if (specProblem(spec)) return [];
   const legs = spec.symbols.map((sym) => barsOf(sym.toUpperCase()) ?? []);
   if (legs.some((l) => l.length === 0)) return [];
   if (spec.kind === 'compare') return legs[0].map((b) => ({ time: b.time, value: b.close }));
-  const maps = legs.map(closesByTime);
-  const times = [...maps[0].keys()].filter((t) => maps.every((m) => m.has(t))).sort((a, b) => a - b);
+  let maps: Map<number, number>[];
+  let times: number[];
+  if (legsDiffer(spec, calendarOf)) {
+    const rows = asOfJoin(legs.map((l) => l.filter((b) => Number.isFinite(b.close))));
+    times = rows.map((r) => r.time);
+    maps = legs.map((_, k) => new Map(rows.map((r) => [r.time, r.legs[k].close])));
+  } else {
+    maps = legs.map(closesByTime);
+    times = [...maps[0].keys()].filter((t) => maps.every((m) => m.has(t))).sort((a, b) => a - b);
+  }
   if (spec.kind === 'ratio')
     return times.flatMap((t) => {
       const b = maps[1].get(t)!;
@@ -124,16 +145,21 @@ export function comparePanes(
   specs: readonly CompareSeriesSpec[],
   barsOf: (symbol: string) => readonly Bar[] | undefined,
   precisionOf: (symbol: string) => number,
+  calendarOf?: (symbol: string) => string,
 ): ExternalPane[] {
   return specs.map((s) => ({
     uid: `compare:${s.id}`,
     target: s.kind === 'compare' ? 'price' : 'pane',
     stepped: false,
+    // US04: say how legs on different hours were joined.
+    note: legsDiffer(s, calendarOf)
+      ? 'Legs trade different hours: joined as of each bar (a leg without a bar holds its last close).'
+      : null,
     lines: [
       {
         title: compareTitle(s),
         color: s.color,
-        points: compareSeriesPoints(s, barsOf),
+        points: compareSeriesPoints(s, barsOf, calendarOf),
         precision: s.kind === 'compare' || s.kind === 'spread' ? precisionOf(s.symbols[0]) : s.kind === 'ratio' ? 5 : 2,
       },
     ],

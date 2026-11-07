@@ -74,7 +74,7 @@ import {
   joinClosed,
   padResults,
   parseStudySource,
-  plotColors,
+  plotColorAt,
   sourceBars,
   studyOrder,
   type ColorBy,
@@ -101,7 +101,6 @@ import {
   asTime,
   barPaint,
   firstChangedValue,
-  ohlcOf,
   ohlcRows,
   ohlcvRows,
   plottedSeconds,
@@ -119,9 +118,11 @@ import {
   PlottedBars,
   barContaining,
   indexAtTime,
+  lastIndexAtTime,
   type PlotTransform,
   type PlotUpdate,
 } from './plotted-bars';
+import { StudyBarsMirror, StudyTailEngine } from './study-tail';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
 import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
@@ -167,6 +168,9 @@ import {
 import { formatEventTime, groupCard, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
+import { digitsFormat, studyDigits } from '../indicators/study-format';
+import type { ExchangeSessions } from '../indicators/exchange-sessions';
+import type { VolumeKind } from '../datafeed/chart-facts';
 import { paintLegend, paintTable, placeTable, stackTables, type LegendRun } from './snapshot';
 import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
@@ -207,7 +211,7 @@ import {
   PineTableOverlayComponent,
   type KeyedTable,
 } from '@shared/pine-chart/components/pine-table-overlay.component';
-import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
+import { alignToBars, sumToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
 import { OrderFlowLayers, type OrderFlowModel } from '../orderflow/orderflow-layers';
 
@@ -288,7 +292,18 @@ type PriceSeries = ISeriesApi<
 /** A pane of externally fetched series (FX fundamentals). */
 export interface ExternalPane {
   uid: string;
-  lines: { title: string; color: string; points: PanePoint[]; precision?: number }[];
+  lines: {
+    title: string;
+    color: string;
+    points: PanePoint[];
+    precision?: number;
+    /** `sum`: points are a flow summed per bar (liquidations), not a level held until the next (UA03). */
+    aggregate?: 'sum';
+    /** UA08: drawn as bars (funding instants, liquidations) instead of a line. */
+    kind?: 'histogram';
+  }[];
+  /** Why the pane drew nothing or only part (UA03) — the studies strip shows it; the chart ignores it. */
+  note?: string | null;
   /**
    * Where it draws: its own pane below (default), or on the price pane on the price's scale (`price`, CC-I12 compare
    * overlays — the percent scale rebases each line at the first bar on screen).
@@ -336,6 +351,8 @@ export interface LegendSnapshot {
     uid: string;
     label: string;
     values: Array<{ title: string; value: number | null; color: string }>;
+    /** Decimals the values print with (UA10); absent = FX's legacy formats. */
+    digits?: number | null;
   }>;
 }
 
@@ -382,6 +399,8 @@ interface IndicatorSeries {
   series: IndicatorPlotSeries[];
   /** The band / cloud fills, on the first plot's series. */
   fill: FillPrimitive | null;
+  /** Decimals its values and pane axis print with (UA10, {@link studyDigits}); null = FX's legacy formats. */
+  digits?: number | null;
 }
 
 /** An external pane's line on the chart, kept across ticks (CC-02). */
@@ -389,11 +408,12 @@ interface IndicatorSeries {
 type PriceExternal = Set<string>;
 
 interface ExternalLineSeries {
-  api: ISeriesApi<'Line'>;
+  api: ISeriesApi<'Line' | 'Histogram'>;
   sync: SeriesSync<ValueRow>;
   /** The points it was sampled from; new points re-sample every bar. */
   points: readonly PanePoint[];
   values: Maybe[];
+  aggregate?: 'sum';
 }
 
 /**
@@ -686,6 +706,10 @@ export class ChartHostComponent implements OnDestroy {
    * structure overlay speaks its distance unit. Null: a point at {@link precision}, as before.
    */
   readonly facts = input<InstrumentFacts | null>(null);
+  /** UA02: the instrument's own Pre / Regular / Post sessions (engine calendar), for the session studies and profiles. */
+  readonly exchangeSessions = input<ExchangeSessions | null>(null);
+  /** UA07: what the bars' volume counts (C1 `volumeKind`), for the Volume study's quote-notional measure. */
+  readonly volumeKind = input<VolumeKind | null>(null);
   /**
    * One display unit in price: the page's {@link pipSize}, else the facts' (split panels), else none — a legend then
    * shows the change in price only, never a guessed FX pip (UI02).
@@ -991,7 +1015,7 @@ export class ChartHostComponent implements OnDestroy {
       ...s.indicators.flatMap((ind) =>
         ind.values.map((v) => ({
           label: ind.values.length > 1 ? `${ind.label} ${v.title}` : ind.label,
-          value: v.value === null ? '—' : v.value.toFixed(Math.min(dp, 4)),
+          value: v.value === null ? '—' : v.value.toFixed(ind.digits ?? Math.min(dp, 4)),
           color: v.color,
         })),
       ),
@@ -1011,8 +1035,6 @@ export class ChartHostComponent implements OnDestroy {
   private plotted: Bar[] = [];
   /** {@link plotted} before the display zone's shift: the same bars, one for one, at their UTC times. */
   private plottedUtc: Bar[] = [];
-  /** A plotted time → its UTC time, built the first time a study asks ({@link plottedDayOf}). */
-  private utcByPlotted: Map<number, number> | null = null;
 
   /** The session's identity, so an equal spec from a later answer changes nothing downstream. */
   private readonly sessionKey = computed(() => {
@@ -1037,11 +1059,13 @@ export class ChartHostComponent implements OnDestroy {
     const calendar = this.calendar();
     if (!calendar) return undefined;
     if (this.timezone() === 'UTC') return calendar.dayOf;
-    this.utcByPlotted ??= new Map(
-      this.plotted.map((b, i) => [b.time, this.plottedUtc[i]?.time ?? b.time]),
-    );
-    const byPlotted = this.utcByPlotted;
-    return (t) => calendar.dayOf(byPlotted.get(t) ?? t - this.timezoneShiftMs(t));
+    // US01: a lookup by binary search (the last bar at that time), not a map of every bar rebuilt per tick.
+    const plotted = this.plotted;
+    const utc = this.plottedUtc;
+    return (t) => {
+      const i = lastIndexAtTime(plotted, t);
+      return calendar.dayOf(i >= 0 ? (utc[i]?.time ?? t) : t - this.timezoneShiftMs(t));
+    };
   }
   /**
    * On 1D/1W/1M, each plotted bar's trading date (00:00 UTC ms) by its plotted time in seconds — what
@@ -1258,6 +1282,8 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const active = this.indicators();
       this.calendar();
+      this.exchangeSessions();
+      this.volumeKind();
       untracked(() => this.applyStudies(active));
     });
 
@@ -1283,8 +1309,10 @@ export class ChartHostComponent implements OnDestroy {
       this.resolution();
       untracked(() => {
         this.drawings.ensureSymbol(symbol);
+        // US07: drawings are kept under the instrument's key (a contract's continuous root).
+        const key = this.drawings.keyOf(symbol);
         this.controller.sync(
-          all.filter((d) => d.symbol === symbol),
+          all.filter((d) => d.symbol === key),
           selected,
           selectedIds,
         );
@@ -2261,7 +2289,8 @@ export class ChartHostComponent implements OnDestroy {
     this.chart.subscribeClick((param) => {
       if (!param.point || this.tool() !== null) return;
       const mark = this.eventGroupAt(param.point, param.paneIndex)?.[0];
-      if (mark) this.eventOpen.emit(mark.event);
+      // Only an economic release has a reading to open (UA01: market events, expiries and funding show their card).
+      if (mark?.event) this.eventOpen.emit(mark.event);
     });
     this.bindHold(el);
 
@@ -2437,7 +2466,7 @@ export class ChartHostComponent implements OnDestroy {
       lines.push([
         { text: ind.label, color: ink },
         ...ind.values.map((v) => ({
-          text: v.value === null ? '—' : v.value.toFixed(Math.min(dp, 4)),
+          text: v.value === null ? '—' : v.value.toFixed(ind.digits ?? Math.min(dp, 4)),
           color: v.color,
         })),
       ]);
@@ -2623,9 +2652,11 @@ export class ChartHostComponent implements OnDestroy {
     this.plotKey = key;
     this.plotted = this.plotter.plotted;
     this.plottedUtc = this.plotter.utc;
-    this.utcByPlotted = null;
     this.dataVersion++;
-    this.studyBarsCache = null;
+    // US01: the studies' bars follow from the first changed bar; their states resume from there.
+    this.studyMirror.update(this.plotted, this.plottedUtc, update.rebuild ? 0 : update.from);
+    if (update.rebuild) this.studyTail.reset();
+    else this.studyTail.barsChanged(update.from);
     // Before the series are written: the time scale weighs and labels their times by these.
     this.labelTradingDates(raw, update);
 
@@ -3029,6 +3060,24 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /** The symbol's decimals on the price scale and every study drawn on it. */
+  /**
+   * UA10: a non-FX study's decimals — the instrument's on the price pane, by magnitude in its own pane (BTC MACD 2,
+   * AAPL MACD 3) — applied to its series when they change. FX (and a chart without facts) keeps its formats untouched.
+   */
+  private applyStudyDigits(target: IndicatorSeries, computed: Record<string, Maybe[]>): void {
+    const facts = this.facts();
+    const digits = studyDigits({
+      overlay: target.overlay,
+      precision: this.precision(),
+      isFx: !facts || facts.isFx,
+      values: target.series.map((s) => computed[s.key] ?? []),
+    });
+    if (digits === (target.digits ?? null)) return;
+    target.digits = digits;
+    if (digits === null || target.overlay) return;
+    for (const plot of target.series) plot.api.applyOptions({ priceFormat: digitsFormat(digits) });
+  }
+
   private applyPrecision(precision: number): void {
     const priceFormat = { type: 'price' as const, precision, minMove: this.minMove() };
     this.price?.applyOptions({ priceFormat });
@@ -3185,10 +3234,15 @@ export class ChartHostComponent implements OnDestroy {
       target ??= this.createIndicatorSeries(item, def);
       if (!target) continue;
       target.paramsKey = JSON.stringify(item.params);
+      // US01: values a tail computation updated in place changed from its `from` on, nowhere before.
+      const tailFrom = this.tailFrom.get(computed);
+      this.tailFrom.delete(computed);
 
       for (const s of target.series) {
         const values = computed[s.key] ?? [];
-        const from = Math.min(timesFrom, firstChangedValue(s.values, values));
+        const changed =
+          tailFrom !== undefined && s.values === values ? tailFrom : firstChangedValue(s.values, values);
+        const from = Math.min(timesFrom, changed);
         s.values = values;
         const rows = valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows());
         if (s.colorBy) this.colorRows(rows, values, from, s.colorBy);
@@ -3198,6 +3252,7 @@ export class ChartHostComponent implements OnDestroy {
         if (s.markers) this.writePlotMarkers(s, values);
       }
       if (target.fill) this.writeFills(target.fill, def, computed);
+      this.applyStudyDigits(target, computed);
     }
 
     // Drawings in a study's pane follow its series when they are made again; session breaks reach a new pane.
@@ -3319,7 +3374,6 @@ export class ChartHostComponent implements OnDestroy {
   /** Per-bar colours on the rows written from `from` (the rows before keep theirs). */
   private colorRows(rows: ValueRow[], values: readonly Maybe[], from: number, by: ColorBy): void {
     if (!rows.length) return;
-    const colors = plotColors(by, values, this.plotted);
     const start =
       from < this.plotted.length ? (asTime(this.plotted[from].time) as number) : Infinity;
     let i = this.plotted.length - 1;
@@ -3328,9 +3382,14 @@ export class ChartHostComponent implements OnDestroy {
       const t = row.time as number;
       if (t < start) break;
       while (i > 0 && (asTime(this.plotted[i].time) as number) > t) i--;
-      if (row.value !== undefined && colors[i]) row.color = colors[i];
+      if (row.value === undefined) continue;
+      // US01: coloured bar by bar for the rows written now, not the whole history.
+      const color = plotColorAt(by, values, this.plotted, i);
+      if (color) row.color = color;
     }
   }
+
+  private fillTimes: { version: number; times: number[] } | null = null;
 
   /** The band / cloud fills of a study, over its bars and the values past the last bar. */
   private writeFills(
@@ -3338,7 +3397,10 @@ export class ChartHostComponent implements OnDestroy {
     def: IndicatorDef,
     computed: Record<string, Maybe[]>,
   ): void {
-    const times = this.plotted.map((b) => asTime(b.time) as number);
+    // The bars' times in seconds, once per change of the bars for every study with a fill.
+    if (this.fillTimes?.version !== this.dataVersion)
+      this.fillTimes = { version: this.dataVersion, times: this.plotted.map((b) => asTime(b.time) as number) };
+    const times = this.fillTimes.times;
     const models = (def.fills ?? []).map((f) => {
       const aheadA = computed[aheadKey(f.a)] ?? [];
       const aheadB = computed[aheadKey(f.b)] ?? [];
@@ -3346,10 +3408,11 @@ export class ChartHostComponent implements OnDestroy {
         new Array<Maybe>(Math.max(aheadA.length, aheadB.length)).fill(0),
         'break',
       ).map((r) => r.time as number);
+      // US01: without values ahead, the arrays as they are (no copy of the whole history per tick).
       return {
-        times: [...times, ...ahead],
-        a: [...(computed[f.a] ?? []), ...aheadA],
-        b: [...(computed[f.b] ?? []), ...aheadB],
+        times: ahead.length ? [...times, ...ahead] : times,
+        a: aheadA.length ? [...(computed[f.a] ?? []), ...aheadA] : (computed[f.a] ?? []),
+        b: aheadB.length ? [...(computed[f.b] ?? []), ...aheadB] : (computed[f.b] ?? []),
         color: f.color,
         colorBelow: f.colorBelow,
       };
@@ -3408,11 +3471,19 @@ export class ChartHostComponent implements OnDestroy {
     markers.api.setMarkers(out);
   }
 
-  /** The plotted bars as the study maths takes them, made once per change of the bars. */
-  private studyBarsCache: Ohlc[] | null = null;
+  /** The plotted bars as the study maths takes them, kept in step from the first changed bar (US01). */
+  private readonly studyMirror = new StudyBarsMirror();
   private studyBars(): Ohlc[] {
-    return (this.studyBarsCache ??= ohlcOf(this.plotted));
+    return this.studyMirror.ohlc;
   }
+
+  /**
+   * US01: the built-ins with a tail kernel resume from their state before the newest bar, so a tick costs one
+   * bar of their maths, not the whole history ({@link StudyTailEngine}; identical values, `study-tail.spec.ts`).
+   */
+  private readonly studyTail = new StudyTailEngine();
+  /** The first bar a tail computation may have changed, per values record, until its series are written. */
+  private readonly tailFrom = new WeakMap<object, number>();
 
   /** Each study's values per change of the bars ({@link dataVersion}), inputs and context. */
   private computedCache = new Map<string, Record<string, Maybe[]>>();
@@ -3442,7 +3513,7 @@ export class ChartHostComponent implements OnDestroy {
       (resolutionMs(item.timeframe) ?? 0) > (resolutionMs(this.resolution()) ?? Infinity)
         ? item.timeframe
         : '';
-    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${symbol}:${compare?.length ?? 0}:${compare?.[compare.length - 1]?.close ?? ''}:${this.sessionKey()}:${dep ? JSON.stringify(dep.params) + (dep.timeframe ?? '') : ''}:${htf}:${htf ? this.profileBars.version() : ''}`;
+    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${symbol}:${compare?.length ?? 0}:${compare?.[compare.length - 1]?.close ?? ''}:${this.sessionKey()}:${dep ? JSON.stringify(dep.params) + (dep.timeframe ?? '') : ''}:${htf}:${htf ? this.profileBars.version() : ''}:${this.exchangeSessions()?.code ?? ''}:${this.volumeKind() ?? ''}`;
     const hit = this.computedCache.get(cacheKey);
     if (hit) return hit;
     const context = {
@@ -3453,6 +3524,9 @@ export class ChartHostComponent implements OnDestroy {
       utcTimes: this.studyUtcTimes(),
       barIntervalMs: resolutionMs(this.resolution()) ?? undefined,
       tradingDaysPerYear: this.tradingDaysPerYear(),
+      everyDay: this.tradesEveryDay(),
+      exchangeSessions: this.exchangeSessions(),
+      volumeKind: this.volumeKind(),
     };
     let computed: Record<string, Maybe[]>;
     if (dep && depDef && ref) {
@@ -3468,7 +3542,12 @@ export class ChartHostComponent implements OnDestroy {
     } else if (htf) {
       computed = this.computeOnHigherTimeframe(item, def, htf);
     } else {
-      computed = def.compute(ohlc, item.params, context);
+      const tail = this.studyTail.compute(cacheKey, def.id, item.params, ohlc, context);
+      if (tail) {
+        // The same arrays, written from `from` on: the series are written from there (applyIndicators).
+        computed = tail.values;
+        this.tailFrom.set(computed, Math.min(this.tailFrom.get(computed) ?? Infinity, tail.from));
+      } else computed = def.compute(ohlc, item.params, context);
     }
     this.computedCache.set(cacheKey, computed);
     return computed;
@@ -3501,6 +3580,9 @@ export class ChartHostComponent implements OnDestroy {
       utcTimes: htf.map((b) => b.time),
       barIntervalMs: htfMs,
       tradingDaysPerYear: this.tradingDaysPerYear(),
+      everyDay: this.tradesEveryDay(),
+      exchangeSessions: this.exchangeSessions(),
+      volumeKind: this.volumeKind(),
     });
     const now = this.serverClock.now();
     const htfClose = htf.map((b) => b.closeTime ?? b.time + htfMs);
@@ -3512,13 +3594,14 @@ export class ChartHostComponent implements OnDestroy {
     return out;
   }
 
-  /** {@link plottedUtc}'s times, made once per change of the bars (the studies' cache key). */
-  private studyUtcCache: { version: number; times: number[] } | null = null;
+  /** {@link plottedUtc}'s times, kept in step with the bars (US01). */
   private studyUtcTimes(): number[] {
-    if (this.studyUtcCache?.version !== this.dataVersion) {
-      this.studyUtcCache = { version: this.dataVersion, times: this.plottedUtc.map((b) => b.time) };
-    }
-    return this.studyUtcCache.times;
+    return this.studyMirror.utcTimes;
+  }
+
+  /** UA02: the symbol's calendar is known and trades all seven days (crypto) — never assumed without a calendar. */
+  private tradesEveryDay(): boolean {
+    return !!this.calendar() && this.tradingDaysPerYear() === 365;
   }
 
   /** The symbol's trading days a year (Historical Volatility): 5 a week → 260, every day → 365. */
@@ -3570,24 +3653,32 @@ export class ChartHostComponent implements OnDestroy {
         const paneIndex = onPrice ? 0 : chart.panes().length;
         if (onPrice) this.priceExternal.add(pane.uid);
         lines = pane.lines.map((line) => {
-          const api = chart.addSeries(
-            LineSeries,
-            {
-              color: line.color,
-              lineWidth: 2,
-              // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
-              lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
-              priceLineVisible: false,
-              title: line.title,
-              ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
-              priceFormat: {
-                type: 'price',
-                precision: line.precision ?? 2,
-                minMove: 10 ** -(line.precision ?? 2),
-              },
-            },
-            paneIndex,
-          );
+          const format = {
+            type: 'price' as const,
+            precision: line.precision ?? 2,
+            minMove: 10 ** -(line.precision ?? 2),
+          };
+          const api: ISeriesApi<'Line' | 'Histogram'> =
+            line.kind === 'histogram'
+              ? chart.addSeries(
+                  HistogramSeries,
+                  { color: line.color, priceLineVisible: false, title: line.title, priceFormat: format },
+                  paneIndex,
+                )
+              : chart.addSeries(
+                LineSeries,
+                {
+                  color: line.color,
+                  lineWidth: 2,
+                  // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
+                  lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
+                  priceLineVisible: false,
+                  title: line.title,
+                  ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
+                  priceFormat: format,
+                },
+                paneIndex,
+              );
           return {
             api,
             sync: new SeriesSync<ValueRow>(api as unknown as SyncTarget<ValueRow>, sameValueRow),
@@ -3602,6 +3693,7 @@ export class ChartHostComponent implements OnDestroy {
         held.api.applyOptions({ color: line.color, title: line.title });
         if (held.points !== line.points) {
           held.points = line.points;
+          held.aggregate = line.aggregate;
           this.writeExternalLine(held, 0);
         }
       });
@@ -3620,7 +3712,8 @@ export class ChartHostComponent implements OnDestroy {
    * minutes) would otherwise wedge thousands of slots between the bars and squash them.
    */
   private writeExternalLine(l: ExternalLineSeries, timesFrom: number): void {
-    const values = alignToBars(l.points, this.plottedUtc);
+    const values =
+      l.aggregate === 'sum' ? sumToBars(l.points, this.plottedUtc) : alignToBars(l.points, this.plottedUtc);
     const from = Math.min(timesFrom, firstChangedValue(l.values, values));
     l.values = values;
     l.sync.apply(valueRowsFrom(this.plotted, values, 'join', from, l.sync.rows()));
@@ -4262,6 +4355,8 @@ export class ChartHostComponent implements OnDestroy {
         computeProfileStudy(id, input.bars, a.params, visible, this.calendar() ?? undefined, {
           checkpoints,
           lowerTimeframeMs: input.lowerMs,
+          everyDay: this.tradesEveryDay(),
+          exchangeSessions: this.exchangeSessions(),
         }),
       );
     }
@@ -4521,6 +4616,7 @@ export class ChartHostComponent implements OnDestroy {
             value: computed[plot.key]?.[index] ?? null,
             color: plot.color,
           })),
+          digits: this.indicatorSeries.find((x) => x.uid === item.uid)?.digits ?? null,
         };
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);

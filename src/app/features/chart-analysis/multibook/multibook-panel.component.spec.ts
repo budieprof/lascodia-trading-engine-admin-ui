@@ -9,7 +9,7 @@ import { MdSourceStream, type MdFrameListener, type MdWatchSpec, type MdWatchSta
 import type { MdConsolidatedWire } from '@core/realtime/marketdata.types';
 import { MultibookPanelComponent } from './multibook-panel.component';
 
-declareSignalIo(MultibookPanelComponent, { inputs: ['symbol', 'digits'] });
+declareSignalIo(MultibookPanelComponent, { inputs: ['symbol', 'digits', 'facts'] });
 
 /** Sources named test-* are synthetic TEST sources (specs only). */
 function consolidated(): MdConsolidatedWire {

@@ -116,6 +116,7 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     }),
   };
 
+  const liveAccounts = signal<{ id: number; accountId: string; accountName: string; accountType: string }[]>([]);
   const byId = <T extends Element = HTMLElement>(id: string) => el.querySelector(`[data-testid="${id}"]`) as T | null;
   const settle = async () => {
     for (let i = 0; i < 5; i++) {
@@ -131,13 +132,19 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
         provideAuthWithPermissions(...permissions),
         { provide: MarketDataStreamService, useValue: mdStream },
         { provide: LiveDepthService, useValue: liveDepth },
-        { provide: MarketDataApiService, useValue: { history: vi.fn(async () => ({ sources: [], truncated: false, message: null })) } },
+        {
+          provide: MarketDataApiService,
+          useValue: {
+            history: vi.fn(async () => ({ sources: [], truncated: false, message: null })),
+            sources: vi.fn(async () => []),
+          },
+        },
         { provide: ManualTradingService, useValue: trading },
         { provide: ChartPanelsService, useValue: { accountStrip: vi.fn(() => of(null)) } },
         {
           provide: AccountScopeService,
           useValue: {
-            liveAccounts: signal([{ id: 17, accountId: '134', accountName: 'Demo 17', accountType: 'Demo' }]),
+            liveAccounts: liveAccounts,
             accounts: signal([]),
             effectiveSelectedId: signal(17),
           },
@@ -167,6 +174,7 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     trading.preview.mockImplementation(defaultPreview);
     Object.values(notify).forEach((f) => f.mockClear());
     released.mockClear();
+    liveAccounts.set([{ id: 17, accountId: '134', accountName: 'Demo 17', accountType: 'Demo' }]);
   });
 
   afterEach(() => {
@@ -265,6 +273,60 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     await settle();
     expect(byId('ladder-armed')).toBeNull();
     expect(TestBed.inject(LadderArmingService).armed()).toBe(false);
+  });
+
+  async function armLive(): Promise<void> {
+    byId<HTMLInputElement>('ladder-live')!.dispatchEvent(new Event('change'));
+    await settle();
+    byId<HTMLButtonElement>('ladder-arm')!.click();
+    await settle();
+    byId<HTMLButtonElement>('ladder-confirm')!.click();
+    await settle();
+    expect(byId('ladder-armed')).not.toBeNull();
+  }
+
+  it('UF05: hiding the tab disarms one-click and the ladder says why', async () => {
+    setup();
+    await settle();
+    await armLive();
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    vis.mockRestore();
+    await settle();
+    expect(byId('ladder-armed')).toBeNull();
+    expect(byId('ladder-disarmed')?.textContent).toContain('the tab was hidden');
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).not.toHaveBeenCalled();
+  });
+
+  it('UF05: an account whose EA stopped disarms before the next armed click sends anything', async () => {
+    setup();
+    await settle();
+    await armLive();
+    liveAccounts.set([]);
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).not.toHaveBeenCalled();
+    expect(byId('ladder-armed')).toBeNull();
+    expect(byId('ladder-disarmed')?.textContent).toContain('no active EA');
+  });
+
+  it('UF05: an armed ladder past its idle timeout disarms on the next click instead of sending', async () => {
+    setup();
+    await settle();
+    await armLive();
+    const arming = TestBed.inject(LadderArmingService);
+    const a = arming.arming()!;
+    // Pretend the last activity was 6 minutes ago (default timeout 5 min).
+    arming.arm(a.accountId, a.symbol, Date.now() - 6 * 60_000);
+    await settle();
+    const cell = byId('bid-109990')!;
+    cell.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    cell.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).not.toHaveBeenCalled();
+    expect(byId('ladder-disarmed')?.textContent).toContain('no ladder activity for 5 min');
   });
 
   it('UI05: while the instrument is resolving, an armed one-click ladder sends nothing and says why', async () => {
