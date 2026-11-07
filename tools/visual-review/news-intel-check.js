@@ -273,7 +273,7 @@ function stub(method, p, q) {
   await page.waitForTimeout(500);
   results.sources.verify = await text('[data-testid="vendor-verify"] >> nth=2')().catch(() => 'missing');
   await page.screenshot({ path: path.join(OUT, 'sources-verify.png'), fullPage: true });
-  await visit('/news-intel/calendar', 'calendar', { days: count('section.card h2') });
+  await visit('/news-intel/calendar', 'calendar', { days: count('[data-testid="cal-day"]'), timeline: count('app-ni-timeline .cell') });
   await visit('/news-intel/stories', 'stories', { rows: count('tbody tr.clickable') });
   await page.locator('tr.clickable').first().click().catch(() => {});
   await page.waitForTimeout(900);
