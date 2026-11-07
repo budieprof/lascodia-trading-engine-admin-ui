@@ -185,25 +185,34 @@ export function plotColors(
   values: readonly Maybe[],
   bars: readonly Pick<Ohlc, 'open' | 'close'>[],
 ): (string | undefined)[] {
-  return values.map((v, i) => {
-    if (v === null || v === undefined) return undefined;
-    const prev = i > 0 ? values[i - 1] : null;
-    switch (by) {
-      case 'sign':
-        return v >= 0 ? UP : DOWN;
-      case 'candle':
-        return bars[i] && bars[i].close < bars[i].open ? DOWN : UP;
-      case 'macd': {
-        // TradingView's: `hist[1] < hist` is "growing"; on the first bar (no previous) it is not.
-        const growing = prev !== null && prev !== undefined && prev < v;
-        if (v >= 0) return growing ? UP : '#B2DFDB';
-        return growing ? '#FFCDD2' : '#FF5252';
-      }
-      default:
-        // TradingView's AO: `diff <= 0` is red; the first bar (no diff) is green.
-        return prev === null || prev === undefined || v > prev ? UP : DOWN;
+  return values.map((_, i) => plotColorAt(by, values, bars, i));
+}
+
+/** {@link plotColors} at one bar: a tick colours the bars it changed, not the whole history (US01). */
+export function plotColorAt(
+  by: ColorBy,
+  values: readonly Maybe[],
+  bars: readonly Pick<Ohlc, 'open' | 'close'>[],
+  i: number,
+): string | undefined {
+  const v = values[i];
+  if (v === null || v === undefined) return undefined;
+  const prev = i > 0 ? values[i - 1] : null;
+  switch (by) {
+    case 'sign':
+      return v >= 0 ? UP : DOWN;
+    case 'candle':
+      return bars[i] && bars[i].close < bars[i].open ? DOWN : UP;
+    case 'macd': {
+      // TradingView's: `hist[1] < hist` is "growing"; on the first bar (no previous) it is not.
+      const growing = prev !== null && prev !== undefined && prev < v;
+      if (v >= 0) return growing ? UP : '#B2DFDB';
+      return growing ? '#FFCDD2' : '#FF5252';
     }
-  });
+    default:
+      // TradingView's AO: `diff <= 0` is red; the first bar (no diff) is green.
+      return prev === null || prev === undefined || v > prev ? UP : DOWN;
+  }
 }
 
 // ── The settings dialog's choices ───────────────────────────────────────────

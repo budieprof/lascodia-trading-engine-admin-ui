@@ -74,7 +74,7 @@ import {
   joinClosed,
   padResults,
   parseStudySource,
-  plotColors,
+  plotColorAt,
   sourceBars,
   studyOrder,
   type ColorBy,
@@ -101,7 +101,6 @@ import {
   asTime,
   barPaint,
   firstChangedValue,
-  ohlcOf,
   ohlcRows,
   ohlcvRows,
   plottedSeconds,
@@ -119,9 +118,11 @@ import {
   PlottedBars,
   barContaining,
   indexAtTime,
+  lastIndexAtTime,
   type PlotTransform,
   type PlotUpdate,
 } from './plotted-bars';
+import { StudyBarsMirror, StudyTailEngine } from './study-tail';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
 import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
@@ -1034,8 +1035,6 @@ export class ChartHostComponent implements OnDestroy {
   private plotted: Bar[] = [];
   /** {@link plotted} before the display zone's shift: the same bars, one for one, at their UTC times. */
   private plottedUtc: Bar[] = [];
-  /** A plotted time → its UTC time, built the first time a study asks ({@link plottedDayOf}). */
-  private utcByPlotted: Map<number, number> | null = null;
 
   /** The session's identity, so an equal spec from a later answer changes nothing downstream. */
   private readonly sessionKey = computed(() => {
@@ -1060,11 +1059,13 @@ export class ChartHostComponent implements OnDestroy {
     const calendar = this.calendar();
     if (!calendar) return undefined;
     if (this.timezone() === 'UTC') return calendar.dayOf;
-    this.utcByPlotted ??= new Map(
-      this.plotted.map((b, i) => [b.time, this.plottedUtc[i]?.time ?? b.time]),
-    );
-    const byPlotted = this.utcByPlotted;
-    return (t) => calendar.dayOf(byPlotted.get(t) ?? t - this.timezoneShiftMs(t));
+    // US01: a lookup by binary search (the last bar at that time), not a map of every bar rebuilt per tick.
+    const plotted = this.plotted;
+    const utc = this.plottedUtc;
+    return (t) => {
+      const i = lastIndexAtTime(plotted, t);
+      return calendar.dayOf(i >= 0 ? (utc[i]?.time ?? t) : t - this.timezoneShiftMs(t));
+    };
   }
   /**
    * On 1D/1W/1M, each plotted bar's trading date (00:00 UTC ms) by its plotted time in seconds — what
@@ -2649,9 +2650,11 @@ export class ChartHostComponent implements OnDestroy {
     this.plotKey = key;
     this.plotted = this.plotter.plotted;
     this.plottedUtc = this.plotter.utc;
-    this.utcByPlotted = null;
     this.dataVersion++;
-    this.studyBarsCache = null;
+    // US01: the studies' bars follow from the first changed bar; their states resume from there.
+    this.studyMirror.update(this.plotted, this.plottedUtc, update.rebuild ? 0 : update.from);
+    if (update.rebuild) this.studyTail.reset();
+    else this.studyTail.barsChanged(update.from);
     // Before the series are written: the time scale weighs and labels their times by these.
     this.labelTradingDates(raw, update);
 
@@ -3229,10 +3232,15 @@ export class ChartHostComponent implements OnDestroy {
       target ??= this.createIndicatorSeries(item, def);
       if (!target) continue;
       target.paramsKey = JSON.stringify(item.params);
+      // US01: values a tail computation updated in place changed from its `from` on, nowhere before.
+      const tailFrom = this.tailFrom.get(computed);
+      this.tailFrom.delete(computed);
 
       for (const s of target.series) {
         const values = computed[s.key] ?? [];
-        const from = Math.min(timesFrom, firstChangedValue(s.values, values));
+        const changed =
+          tailFrom !== undefined && s.values === values ? tailFrom : firstChangedValue(s.values, values);
+        const from = Math.min(timesFrom, changed);
         s.values = values;
         const rows = valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows());
         if (s.colorBy) this.colorRows(rows, values, from, s.colorBy);
@@ -3364,7 +3372,6 @@ export class ChartHostComponent implements OnDestroy {
   /** Per-bar colours on the rows written from `from` (the rows before keep theirs). */
   private colorRows(rows: ValueRow[], values: readonly Maybe[], from: number, by: ColorBy): void {
     if (!rows.length) return;
-    const colors = plotColors(by, values, this.plotted);
     const start =
       from < this.plotted.length ? (asTime(this.plotted[from].time) as number) : Infinity;
     let i = this.plotted.length - 1;
@@ -3373,9 +3380,14 @@ export class ChartHostComponent implements OnDestroy {
       const t = row.time as number;
       if (t < start) break;
       while (i > 0 && (asTime(this.plotted[i].time) as number) > t) i--;
-      if (row.value !== undefined && colors[i]) row.color = colors[i];
+      if (row.value === undefined) continue;
+      // US01: coloured bar by bar for the rows written now, not the whole history.
+      const color = plotColorAt(by, values, this.plotted, i);
+      if (color) row.color = color;
     }
   }
+
+  private fillTimes: { version: number; times: number[] } | null = null;
 
   /** The band / cloud fills of a study, over its bars and the values past the last bar. */
   private writeFills(
@@ -3383,7 +3395,10 @@ export class ChartHostComponent implements OnDestroy {
     def: IndicatorDef,
     computed: Record<string, Maybe[]>,
   ): void {
-    const times = this.plotted.map((b) => asTime(b.time) as number);
+    // The bars' times in seconds, once per change of the bars for every study with a fill.
+    if (this.fillTimes?.version !== this.dataVersion)
+      this.fillTimes = { version: this.dataVersion, times: this.plotted.map((b) => asTime(b.time) as number) };
+    const times = this.fillTimes.times;
     const models = (def.fills ?? []).map((f) => {
       const aheadA = computed[aheadKey(f.a)] ?? [];
       const aheadB = computed[aheadKey(f.b)] ?? [];
@@ -3391,10 +3406,11 @@ export class ChartHostComponent implements OnDestroy {
         new Array<Maybe>(Math.max(aheadA.length, aheadB.length)).fill(0),
         'break',
       ).map((r) => r.time as number);
+      // US01: without values ahead, the arrays as they are (no copy of the whole history per tick).
       return {
-        times: [...times, ...ahead],
-        a: [...(computed[f.a] ?? []), ...aheadA],
-        b: [...(computed[f.b] ?? []), ...aheadB],
+        times: ahead.length ? [...times, ...ahead] : times,
+        a: aheadA.length ? [...(computed[f.a] ?? []), ...aheadA] : (computed[f.a] ?? []),
+        b: aheadB.length ? [...(computed[f.b] ?? []), ...aheadB] : (computed[f.b] ?? []),
         color: f.color,
         colorBelow: f.colorBelow,
       };
@@ -3453,11 +3469,19 @@ export class ChartHostComponent implements OnDestroy {
     markers.api.setMarkers(out);
   }
 
-  /** The plotted bars as the study maths takes them, made once per change of the bars. */
-  private studyBarsCache: Ohlc[] | null = null;
+  /** The plotted bars as the study maths takes them, kept in step from the first changed bar (US01). */
+  private readonly studyMirror = new StudyBarsMirror();
   private studyBars(): Ohlc[] {
-    return (this.studyBarsCache ??= ohlcOf(this.plotted));
+    return this.studyMirror.ohlc;
   }
+
+  /**
+   * US01: the built-ins with a tail kernel resume from their state before the newest bar, so a tick costs one
+   * bar of their maths, not the whole history ({@link StudyTailEngine}; identical values, `study-tail.spec.ts`).
+   */
+  private readonly studyTail = new StudyTailEngine();
+  /** The first bar a tail computation may have changed, per values record, until its series are written. */
+  private readonly tailFrom = new WeakMap<object, number>();
 
   /** Each study's values per change of the bars ({@link dataVersion}), inputs and context. */
   private computedCache = new Map<string, Record<string, Maybe[]>>();
@@ -3516,7 +3540,12 @@ export class ChartHostComponent implements OnDestroy {
     } else if (htf) {
       computed = this.computeOnHigherTimeframe(item, def, htf);
     } else {
-      computed = def.compute(ohlc, item.params, context);
+      const tail = this.studyTail.compute(cacheKey, def.id, item.params, ohlc, context);
+      if (tail) {
+        // The same arrays, written from `from` on: the series are written from there (applyIndicators).
+        computed = tail.values;
+        this.tailFrom.set(computed, Math.min(this.tailFrom.get(computed) ?? Infinity, tail.from));
+      } else computed = def.compute(ohlc, item.params, context);
     }
     this.computedCache.set(cacheKey, computed);
     return computed;
@@ -3563,13 +3592,9 @@ export class ChartHostComponent implements OnDestroy {
     return out;
   }
 
-  /** {@link plottedUtc}'s times, made once per change of the bars (the studies' cache key). */
-  private studyUtcCache: { version: number; times: number[] } | null = null;
+  /** {@link plottedUtc}'s times, kept in step with the bars (US01). */
   private studyUtcTimes(): number[] {
-    if (this.studyUtcCache?.version !== this.dataVersion) {
-      this.studyUtcCache = { version: this.dataVersion, times: this.plottedUtc.map((b) => b.time) };
-    }
-    return this.studyUtcCache.times;
+    return this.studyMirror.utcTimes;
   }
 
   /** UA02: the symbol's calendar is known and trades all seven days (crypto) — never assumed without a calendar. */

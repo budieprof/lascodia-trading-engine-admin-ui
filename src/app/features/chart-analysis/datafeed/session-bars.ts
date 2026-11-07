@@ -81,7 +81,10 @@ export function applySessionTick(
     low: Math.min(last.low, price),
     close: price,
   };
-  return { kind: 'update', bars: [...bars.slice(0, -1), updated] };
+  // US01: one copy of the array, the newest bar replaced.
+  const out = bars.slice();
+  out[out.length - 1] = updated;
+  return { kind: 'update', bars: out };
 }
 
 /**
