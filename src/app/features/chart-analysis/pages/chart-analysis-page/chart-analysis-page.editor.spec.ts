@@ -8,6 +8,7 @@ import { ScriptSettings } from '../../scripts/script-settings';
 import { dockStateOf, restoredDock } from '../../workspace/workspace-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
+import { dockPageState } from './chart-analysis-page.dock.testing';
 
 // The page's own methods, run against just the state they touch: the component's prototype with
 // the editor's, the runs' and the settings' signals — no template, no chart, no engine. runScript
@@ -37,25 +38,22 @@ function page(runs: ChartScriptRun[]): Page {
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   const scriptRuns = signal(runs);
   const editorKey = signal<string | null>(null);
-  const editorOpen = signal(false);
+  // The dock (U13 fu-ui: ChartDockState): the editor starts closed, the tester has no strategy to show.
+  const dockState = dockPageState(scriptRuns);
+  const editorOpen = dockState.editorOpen;
   Object.assign(p, {
     // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
     ...realtimePageState(),
-    // The dock's Pine Logs (PC-I6): closed.
-    logsKey: signal(null),
-    logsFront: signal(false),
+    // The dock, its Pine Logs (PC-I6) closed.
+    ...dockState,
     scriptRuns,
     restoringScripts: signal([]),
     runsInFlight: new Map(),
     runningKeys: signal(new Map()),
     runScheduler: { cancel: vi.fn() },
-    editorOpen,
     editorKey,
     editorDraft: signal(null),
     assistSource: signal(null),
-    dockPreference: signal('tester'),
-    testerOpen: signal(true),
-    testerPrompt: signal(false),
     assistSeq: 0,
     strategySources: signal({}),
     editorCleared: signal(false),
@@ -91,7 +89,6 @@ function page(runs: ChartScriptRun[]): Page {
           }
         : null;
     }),
-    dockTab: computed(() => (editorOpen() ? 'editor' : null)),
   });
   Object.assign(p, {
     settings: new ScriptSettings(scriptRuns, {

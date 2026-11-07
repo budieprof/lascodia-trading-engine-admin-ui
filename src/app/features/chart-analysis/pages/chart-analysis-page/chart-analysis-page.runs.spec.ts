@@ -10,6 +10,7 @@ import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { MAX_BUSY_RETRIES } from '../../scripts/script-run-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
+import { dockPageState } from './chart-analysis-page.dock.testing';
 import { ReplayController } from '../../replay/replay-controller';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { normalizeOutputs } from '@shared/pine-chart/model/normalize';
@@ -119,9 +120,8 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   Object.assign(p, {
     // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
     ...realtimePageState(),
-    // The dock's Pine Logs (PC-I6): closed.
-    logsKey: signal(null),
-    logsFront: signal(false),
+    // The dock (U13 fu-ui: ChartDockState): the editor open in front, Pine Logs (PC-I6) closed.
+    ...dockPageState(scriptRuns, { editorOpen: true, dockPreference: 'editor' }),
     replayActive,
     displayBars,
     replayClosedHead: computed(() => (replayActive() ? (displayBars().at(-1) ?? null) : null)),
@@ -150,12 +150,9 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
         ({ key, source: 'mine', name, description: '', kind, pineSource: source }) as ChartScriptItem,
     },
     destroyRef: { destroyed: false, onDestroy: () => () => undefined },
-    testerOpen: signal(true),
-    dockPreference: signal('editor'),
     settings: { loadStoredInputs: vi.fn(), run: () => null, close: vi.fn() },
     replacedNotice: signal(null),
     editorKey,
-    editorOpen: signal(true),
     editorDraft: signal(null),
     assistSource: signal(null),
     editorCleared: signal(false),

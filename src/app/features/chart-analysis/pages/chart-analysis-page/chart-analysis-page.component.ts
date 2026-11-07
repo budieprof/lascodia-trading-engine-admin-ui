@@ -496,6 +496,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartHistoryPager } from './chart-history-pager';
+import { ChartDockState } from './chart-dock-state';
 import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 
@@ -806,19 +807,11 @@ export class ChartAnalysisPageComponent {
   }
 
   toggleTester(): void {
-    if (this.dockTab() === 'tester') {
-      this.closeTester();
-    } else {
-      this.testerOpen.set(true);
-      // With no strategy on the chart it opens on how to add one, as TradingView's does.
-      this.testerPrompt.set(!this.strategyRun());
-      this.frontDock('tester');
-    }
+    this.dock.toggleTester();
   }
 
   closeTester(): void {
-    this.testerOpen.set(false);
-    this.testerPrompt.set(false);
+    this.dock.closeTester();
   }
 
   /** "auto": fit the price scale to the visible bars, keeping its mode — log stays log (CC-19). */
@@ -936,6 +929,14 @@ export class ChartAnalysisPageComponent {
 
   /** Pine runs on the chart (indicators and at most one strategy, like TradingView). */
   readonly scriptRuns = signal<ChartScriptRun[]>([]);
+  /**
+   * U13 (fu-ui): which panel the dock shows (editor / tester / Pine Logs) and the tester / logs actions. The page's
+   * members of the same names below are aliases of its signals.
+   */
+  readonly dock = new ChartDockState<ChartScriptRun>({
+    scriptRuns: () => this.scriptRuns(),
+    strategyRun: () => this.strategyRun(),
+  });
   /**
    * The runs drawn on the chart: those computed for its symbol and resolution, once its bars are
    * that series. Through a switch the previous runs' plots, drawings and tables go at once, and the
@@ -1096,16 +1097,11 @@ export class ChartAnalysisPageComponent {
     }
     return out;
   });
-  readonly testerOpen = signal(true);
-  /**
-   * The operator opened the Strategy Tester with no strategy on the chart: it shows how to add
-   * one. The tab used to be disabled then, explained only by a tooltip — which touch never shows.
-   */
-  readonly testerPrompt = signal(false);
-  readonly testerShown = computed(
-    () => this.testerOpen() && (!!this.strategyRun() || this.testerPrompt()),
-  );
-  readonly editorOpen = signal(false);
+  // The dock's open state — aliases of {@link dock} (ChartDockState).
+  readonly testerOpen = this.dock.testerOpen;
+  readonly testerPrompt = this.dock.testerPrompt;
+  readonly testerShown = this.dock.testerShown;
+  readonly editorOpen = this.dock.editorOpen;
 
   // ── Pine Editor ↔ chart script (TradingView: the editor shows the script on the chart) ──
   private readonly strategies = inject(StrategiesService);
@@ -1232,41 +1228,17 @@ export class ChartAnalysisPageComponent {
     },
   });
 
-  /** Which dock tab wins when both the editor and the tester are open. */
-  readonly dockPreference = signal<'editor' | 'tester'>('tester');
-  /**
-   * Pine Logs (PC-I6) is the dock's front tab — opened, or its tab clicked — until the editor or
-   * the tester is brought up ({@link frontDock}). Session only, as is which script's logs it shows:
-   * a layout keeps the editor and the tester, not this.
-   */
-  readonly logsFront = signal(false);
-  /** The script whose Pine Logs, trace and profiler the dock shows; null: closed. */
-  readonly logsKey = signal<string | null>(null);
-  /** That script's run on the chart (the dock closes with it). */
-  readonly logsRun = computed(() => {
-    const key = this.logsKey();
-    return key === null ? null : (this.scriptRuns().find((r) => r.item.key === key) ?? null);
-  });
-  readonly dockTab = computed<'editor' | 'tester' | 'logs' | null>(() => {
-    const editor = this.editorOpen();
-    const tester = this.testerShown();
-    if (this.logsRun() && (this.logsFront() || (!editor && !tester))) return 'logs';
-    if (editor && tester) return this.dockPreference();
-    return editor ? 'editor' : tester ? 'tester' : null;
-  });
-  /** The dock's tabs: the panels open in it (its strip shows when there are two or more). */
-  readonly dockTabs = computed(() => {
-    const out: { id: 'editor' | 'tester' | 'logs'; label: string }[] = [];
-    if (this.editorOpen()) out.push({ id: 'editor', label: 'Pine Editor' });
-    if (this.testerShown()) out.push({ id: 'tester', label: 'Strategy Tester' });
-    if (this.logsRun()) out.push({ id: 'logs', label: 'Pine Logs' });
-    return out;
-  });
+  // Which panel is in the dock's front — aliases of {@link dock} (ChartDockState).
+  readonly dockPreference = this.dock.dockPreference;
+  readonly logsFront = this.dock.logsFront;
+  readonly logsKey = this.dock.logsKey;
+  readonly logsRun = this.dock.logsRun;
+  readonly dockTab = this.dock.dockTab;
+  readonly dockTabs = this.dock.dockTabs;
 
   /** Bring the editor or the tester to the dock's front (Pine Logs goes behind). */
   frontDock(which: 'editor' | 'tester'): void {
-    this.logsFront.set(false);
-    this.dockPreference.set(which);
+    this.dock.frontDock(which);
   }
 
   // ── Dock layout: the Pine Editor / Strategy Tester / Pine Logs panel docked below the chart, maximised over it
@@ -1358,19 +1330,16 @@ export class ChartAnalysisPageComponent {
 
   /** A dock tab clicked. */
   showDock(id: 'editor' | 'tester' | 'logs'): void {
-    if (id === 'logs') this.logsFront.set(true);
-    else this.frontDock(id);
+    this.dock.showDock(id);
   }
 
   /** A script's Pine Logs, trace and profiler, in the dock's front (its chip or status line). */
   openLogs(key: string): void {
-    this.logsKey.set(key);
-    this.logsFront.set(true);
+    this.dock.openLogs(key);
   }
 
   closeLogs(): void {
-    this.logsKey.set(null);
-    this.logsFront.set(false);
+    this.dock.closeLogs();
   }
 
   /**
