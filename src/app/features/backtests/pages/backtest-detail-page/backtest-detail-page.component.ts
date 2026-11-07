@@ -39,6 +39,13 @@ import type { ReportTrade } from '@features/scripting/report/strategy-report.mod
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
 import { MonteCarloPanelComponent } from '@features/scripting/research/monte-carlo-panel.component';
+import { fileStamp, saveBlob } from '@features/scripting/shared/download';
+import {
+  hasExcursions,
+  legacyTradeRows,
+  legacyTradesCsv,
+  type LegacyTradeRow,
+} from '../../legacy-trades';
 import { MartingaleSimulatorComponent } from '@shared/components/martingale-simulator/martingale-simulator.component';
 import {
   ladderFromDslTrades,
@@ -628,6 +635,15 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                     sortedTrades().length === 1 ? '' : 's'
                   }}</span
                 >
+                <!-- U11: the whole list with R and the recorded excursions, for a spreadsheet. -->
+                <button
+                  type="button"
+                  class="filter-pill"
+                  data-testid="trades-csv"
+                  (click)="downloadTradesCsv()"
+                >
+                  Download CSV
+                </button>
                 <div class="filter-pills">
                   <button
                     type="button"
@@ -686,6 +702,23 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                     <th class="num">TP</th>
                     <th class="num">Lots</th>
                     <th class="num">P&L</th>
+                    <th class="num" title="Result in units of what the trade risked at its stop">
+                      R
+                    </th>
+                    @if (showExcursions()) {
+                      <th
+                        class="num"
+                        title="Maximum favourable excursion (run-up), account currency"
+                      >
+                        MFE
+                      </th>
+                      <th
+                        class="num"
+                        title="Maximum adverse excursion (drawdown), account currency"
+                      >
+                        MAE
+                      </th>
+                    }
                     <th>Exit</th>
                     <th></th>
                   </tr>
@@ -722,6 +755,17 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                       >
                         {{ t.trade.PnL >= 0 ? '+' : '' }}{{ t.trade.PnL | number: '1.2-2' }}
                       </td>
+                      @if (legacyRow(t.trade); as lr) {
+                        <td class="num mono">{{ rText(lr.r) }}</td>
+                        @if (showExcursions()) {
+                          <td class="num mono" [title]="excursionTitle(lr.mfeR)">
+                            {{ lr.mfe !== null ? (lr.mfe | number: '1.2-2') : '—' }}
+                          </td>
+                          <td class="num mono" [title]="excursionTitle(lr.maeR)">
+                            {{ lr.mae !== null ? (lr.mae | number: '1.2-2') : '—' }}
+                          </td>
+                        }
+                      }
                       <td>
                         <span class="reason-pill" [class]="exitReasonClass(t.trade.ExitReason)">{{
                           exitReasonShort(t.trade.ExitReason)
@@ -1517,6 +1561,35 @@ export class BacktestDetailPageComponent implements OnInit {
    *  drawdown, streaks) see chronological order even if the engine wrote
    *  trades out of order. Public so the trade-log section can iterate it
    *  directly with stable 1-based indices that survive filter changes. */
+  /** U11: each trade's grid row (R, MFE/MAE) by identity, from the run's own trade list. */
+  private readonly legacyRows = computed(() => {
+    const trades = this.parsed()?.Trades ?? [];
+    const rows = legacyTradeRows(trades);
+    return new Map<BacktestTrade, LegacyTradeRow>(trades.map((t, i) => [t, rows[i]]));
+  });
+  readonly showExcursions = computed(() => hasExcursions([...this.legacyRows().values()]));
+
+  legacyRow(t: BacktestTrade): LegacyTradeRow | null {
+    return this.legacyRows().get(t) ?? null;
+  }
+
+  rText(r: number | null): string {
+    return r === null ? '—' : `${r >= 0 ? '+' : '−'}${Math.abs(r).toFixed(2)}R`;
+  }
+
+  excursionTitle(r: number | null): string {
+    return r === null ? '' : `${Math.abs(r).toFixed(2)} R of the amount risked`;
+  }
+
+  downloadTradesCsv(): void {
+    const bt = this.backtest();
+    const rows = legacyTradeRows(this.sortedTrades());
+    saveBlob(
+      new Blob([legacyTradesCsv(rows)], { type: 'text/csv;charset=utf-8' }),
+      `${fileStamp('backtest', bt?.id, bt?.symbol, 'trades')}.csv`,
+    );
+  }
+
   readonly sortedTrades = computed<BacktestTrade[]>(() => {
     const p = this.parsed();
     if (!p?.Trades?.length) return [];
