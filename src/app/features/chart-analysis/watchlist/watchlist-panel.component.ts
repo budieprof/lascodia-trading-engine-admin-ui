@@ -1,6 +1,7 @@
 import { PairIconComponent, pairFlags, pairName } from './pair-icon.component';
 import { InstrumentIconComponent } from './instrument-icon.component';
 import { resolveInstrument } from '@core/instruments/instrument-math';
+import { shortDistanceLabel } from '../datafeed/instrument-facts';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -197,6 +198,8 @@ export class WatchlistPanelComponent {
   readonly flags = FLAGS;
   readonly split = splitPrice;
   readonly tickParts = tickParts;
+  /** `pt` / `t` after a non-pip distance (UI07); FX cells stay as they were. */
+  readonly unitShort = (label: string) => shortDistanceLabel(label).trim();
   readonly pairFlags = pairFlags;
   /** A symbol the instrument catalogue says is not FX: it gets its asset-class badge, not a currency letter. */
   readonly nonFx = (symbol: string): boolean => resolveInstrument(symbol).assetClass !== 'Fx';

@@ -62,6 +62,23 @@ const quote = (over: Partial<WatchQuote> = {}): WatchQuote => ({
 });
 
 describe('watchlist model', () => {
+  it('UI07: an FX row speaks pips with a fractional pip; a crypto row speaks points, whole digits, no FX sessions', () => {
+    const fx = rowFor({ symbol: 'EURUSD', flag: null }, 'a', quote({ marketOpen: true }), 1.05, 1.04, 5);
+    expect(fx.unitLabel).toBe('pips');
+    expect(fx.fractionalPip).toBe(true);
+    const btc = rowFor(
+      { symbol: 'BTC-USD', flag: null },
+      'a',
+      quote({ digits: 5, pipSize: undefined, marketOpen: true }),
+      undefined,
+      undefined,
+      5,
+    );
+    expect(btc.unitLabel).toBe('points');
+    expect(btc.fractionalPip).toBe(false);
+    expect(['Open', 'Closed']).toContain(btc.session);
+  });
+
   it('computes change against the previous close, preferring the live tick', () => {
     const r = rowFor({ symbol: 'EURUSD', flag: null }, 'a', quote(), 1.05, 1.04, 5);
     expect(r.last).toBe(1.05);
@@ -151,10 +168,13 @@ describe('watchlist model', () => {
   });
 
   it('splits the fractional pip and navigates', () => {
-    expect(splitPrice(1.12848, 5)).toEqual(['1.1284', '8']);
-    expect(splitPrice(157.985, 3)).toEqual(['157.98', '5']);
-    expect(splitPrice(4170.37, 2)).toEqual(['4170.37', '']);
-    expect(splitPrice(null, 5)).toEqual(['—', '']);
+    expect(splitPrice(1.12848, 5, true)).toEqual(['1.1284', '8']);
+    expect(splitPrice(157.985, 3, true)).toEqual(['157.98', '5']);
+    expect(splitPrice(4170.37, 2, true)).toEqual(['4170.37', '']);
+    expect(splitPrice(null, 5, true)).toEqual(['—', '']);
+    // UI07: only FX has a fractional pip — a 5-decimal crypto or a 3-decimal index is drawn whole.
+    expect(splitPrice(0.12345, 5, false)).toEqual(['0.12345', '']);
+    expect(splitPrice(5012.125, 3, false)).toEqual(['5012.125', '']);
     expect(neighbour(['A', 'B', 'C'], 'B', 1)).toBe('C');
     expect(neighbour(['A', 'B', 'C'], 'A', -1)).toBeNull();
     expect(neighbour(['A', 'B'], 'Z', 1)).toBe('A');
@@ -253,22 +273,22 @@ describe('watchlist model', () => {
 
 describe('tickParts (TradingView colours the digits a tick changed)', () => {
   it('colours from the first changed digit to the end, the small pip included', () => {
-    expect(tickParts(1.11973, 5, 1.11881)).toEqual({ head: '1.11', changed: '97', pip: '3', pipChanged: true });
-    expect(tickParts(1.11973, 5, 1.11981)).toEqual({ head: '1.119', changed: '7', pip: '3', pipChanged: true });
-    expect(tickParts(158.27, 3, 158.262)).toEqual({ head: '158.2', changed: '7', pip: '0', pipChanged: true });
+    expect(tickParts(1.11973, 5, 1.11881, true)).toEqual({ head: '1.11', changed: '97', pip: '3', pipChanged: true });
+    expect(tickParts(1.11973, 5, 1.11981, true)).toEqual({ head: '1.119', changed: '7', pip: '3', pipChanged: true });
+    expect(tickParts(158.27, 3, 158.262, true)).toEqual({ head: '158.2', changed: '7', pip: '0', pipChanged: true });
   });
 
   it('colours only the small pip when only it changed', () => {
-    expect(tickParts(1.12344, 5, 1.12341)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: true });
+    expect(tickParts(1.12344, 5, 1.12341, true)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: true });
   });
 
   it('colours nothing before the first tick or when the price is unchanged', () => {
-    expect(tickParts(1.12344, 5, null)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
-    expect(tickParts(1.12344, 5, 1.12344)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
+    expect(tickParts(1.12344, 5, null, true)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
+    expect(tickParts(1.12344, 5, 1.12344, true)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
   });
 
   it('handles quotes without a fractional pip and a missing price', () => {
-    expect(tickParts(1.2345, 4, 1.2355)).toEqual({ head: '1.23', changed: '45', pip: '', pipChanged: false });
-    expect(tickParts(null, 5, 1.1)).toEqual({ head: '—', changed: '', pip: '', pipChanged: false });
+    expect(tickParts(1.2345, 4, 1.2355, true)).toEqual({ head: '1.23', changed: '45', pip: '', pipChanged: false });
+    expect(tickParts(null, 5, 1.1, true)).toEqual({ head: '—', changed: '', pip: '', pipChanged: false });
   });
 });

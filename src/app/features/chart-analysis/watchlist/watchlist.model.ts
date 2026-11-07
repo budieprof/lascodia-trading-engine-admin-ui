@@ -15,6 +15,7 @@ import {
   nextEventFor,
   pipSizeOf,
   pips,
+  rowUnit,
   sessionLabel,
   type CalendarEventLite,
   type Legs,
@@ -110,11 +111,15 @@ export interface WatchRow {
   bid: number | null;
   ask: number | null;
   pipSize: number;
-  /** Live spread, pips. */
+  /** The unit of spread / range / ADR: `pips` on FX, `ticks` / `points` otherwise (UI07). */
+  unitLabel: string;
+  /** The quote has a fractional pip (FX on 3 / 5 decimals): its last digit is drawn small. */
+  fractionalPip: boolean;
+  /** Live spread, in {@link unitLabel}. */
   spread: number | null;
-  /** Today's high − low, pips. */
+  /** Today's high − low, in {@link unitLabel}. */
   dayRange: number | null;
-  /** Average daily range, pips. */
+  /** Average daily range, in {@link unitLabel}. */
   adr: number | null;
   /** Today's range as % of the ADR. */
   adrUsed: number | null;
@@ -201,7 +206,8 @@ export function rowFor(
   const legs = ctx.legs ?? null;
   const nextEvent = ctx.events ? nextEventFor(legs, ctx.events, now) : null;
   const marketOpen = quote?.marketOpen ?? false;
-  const session = sessionLabel(legs, marketOpen, now);
+  const unit = rowUnit(item.symbol, digits, pipSize);
+  const session = sessionLabel(legs, marketOpen, now, unit.fx);
   return {
     symbol: item.symbol,
     flag: item.flag,
@@ -215,6 +221,8 @@ export function rowFor(
     bid,
     ask,
     pipSize,
+    unitLabel: unit.label,
+    fractionalPip: unit.fx && (digits === 3 || digits === 5),
     spread: bid !== null && ask !== null ? pips(ask - bid, pipSize) : null,
     dayRange: high !== null && low !== null ? pips(high - low, pipSize) : null,
     adr: pips(quote?.adr ?? null, pipSize),
@@ -476,12 +484,17 @@ export function toggleSection(list: ChartWatchlist, id: string): ChartWatchlist 
 /**
  * Split a price for TradingView's display: the last digit (the fractional
  * pip on a 5-digit quote) is rendered smaller. `1.12848` → ["1.1284", "8"].
+ * Only an FX quote has a fractional pip (`row.fractionalPip`, UI07): a 3- or 5-decimal crypto or index price is
+ * drawn whole.
  */
-export function splitPrice(value: number | null, digits: number): [string, string] {
+export function splitPrice(
+  value: number | null,
+  digits: number,
+  fractionalPip: boolean,
+): [string, string] {
   if (value === null || !Number.isFinite(value)) return ['—', ''];
   const s = value.toFixed(digits);
-  // Only quotes with a fractional pip (3 or 5 digits) get the small last digit.
-  return digits === 3 || digits === 5 ? [s.slice(0, -1), s.slice(-1)] : [s, ''];
+  return fractionalPip && (digits === 3 || digits === 5) ? [s.slice(0, -1), s.slice(-1)] : [s, ''];
 }
 
 /** A last price split as TradingView's watchlist shows a tick: unchanged digits, changed digits, the small last digit. */
@@ -501,8 +514,13 @@ export interface TickParts {
  * fractional pip included — and keeps that colour until the next tick. `previous` is the price before the last
  * change (null: no tick seen yet, nothing coloured). `1.11973` after `1.11981` → head "1.11", changed "97", pip "3".
  */
-export function tickParts(value: number | null, digits: number, previous: number | null): TickParts {
-  const [main, pip] = splitPrice(value, digits);
+export function tickParts(
+  value: number | null,
+  digits: number,
+  previous: number | null,
+  fractionalPip: boolean,
+): TickParts {
+  const [main, pip] = splitPrice(value, digits, fractionalPip);
   if (value === null || !Number.isFinite(value) || previous === null || !Number.isFinite(previous)) {
     return { head: main, changed: '', pip, pipChanged: false };
   }
