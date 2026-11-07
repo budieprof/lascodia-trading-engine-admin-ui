@@ -532,6 +532,11 @@ import {
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
 import {
+  ASSET_CLASS_NAME,
+  AssetClassDefaultsService,
+  defaultOnSwitch,
+} from '../../workspace/asset-class-defaults';
+import {
   parseSynthetic,
   syntheticNotice,
   syntheticSymbol,
@@ -788,6 +793,7 @@ export class ChartAnalysisPageComponent {
     const d = this.drawings.allDrawings().find((x) => x.id === e.id);
     const draft = d
       ? drawingAlertDraft(d, {
+          symbol: this.symbol(),
           timeframe: this.resolution(),
           level: e.level,
           logScale: this.scaleMode() === 'log',
@@ -2100,10 +2106,10 @@ export class ChartAnalysisPageComponent {
         : live.length === 1
           ? live[0]
           : null;
+    // US07: the instrument's facts (UI01), not the pair's contract size — a non-pair symbol had no money at all.
     const facts = positionAccountFacts({
       account,
-      pair: this.currentPair() ?? null,
-      pipSize: this.pipSize(),
+      facts: this.facts(),
       price: this.bars().at(-1)?.close ?? 0,
     });
     return facts ? { ...facts } : null;
@@ -2131,7 +2137,7 @@ export class ChartAnalysisPageComponent {
    */
   stageOrder(id: string): void {
     const d = this.drawings.allDrawings().find((x) => x.id === id);
-    const prefill = d ? positionOrderPrefill(d) : null;
+    const prefill = d ? positionOrderPrefill(d, this.symbol()) : null;
     if (!prefill?.direction) return;
     this.ticketPrefill.set({
       direction: prefill.direction,
@@ -2166,6 +2172,33 @@ export class ChartAnalysisPageComponent {
 
   // ── Workspace: layouts, templates, timezone, chrome ──────────────────────
   readonly layoutStore = inject(ChartLayoutStore);
+  /** US07: per asset class, the timeframe and study template a symbol of that class opens with (opt-in). */
+  readonly classDefaults = inject(AssetClassDefaultsService);
+  readonly assetClassName = ASSET_CLASS_NAME;
+  /** US07: the chart symbol's asset class, as the instrument facts say (null while resolving). */
+  readonly symbolClass_ = computed(() => (this.facts().resolving ? null : this.facts().assetClass));
+  /** US07: this class's default (the templates menu shows and edits it). */
+  readonly classDefault = computed(() => {
+    const cls = this.symbolClass_();
+    return cls ? (this.classDefaults.defaults()[cls] ?? null) : null;
+  });
+
+  /** US07: use the current timeframe (or, again, none) for every symbol of this class. */
+  toggleClassResolution(): void {
+    const cls = this.symbolClass_();
+    if (!cls) return;
+    const on = this.classDefault()?.resolution === this.resolution();
+    this.classDefaults.set(cls, 'resolution', on ? undefined : this.resolution());
+  }
+
+  /** US07: open every symbol of this class with `templateId` (or, again, with none). */
+  toggleClassTemplate(templateId: string, ev: Event): void {
+    ev.stopPropagation();
+    const cls = this.symbolClass_();
+    if (!cls) return;
+    const on = this.classDefault()?.templateId === templateId;
+    this.classDefaults.set(cls, 'templateId', on ? undefined : templateId);
+  }
   readonly timezones = CHART_TIMEZONES;
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
@@ -2668,6 +2701,7 @@ export class ChartAnalysisPageComponent {
     drawingTemplates.useStorage(this.prefs.storage);
     prefsRef = this.prefs;
     this.layoutStore.reload();
+    this.classDefaults.reload();
     this.favoriteTools.reload();
     this.magnetStrength.set(readPref('magnetStrength', 'weak'));
     this.stayInDrawing.set(readPref('stayInDrawing', false));
@@ -4101,6 +4135,18 @@ export class ChartAnalysisPageComponent {
     );
     const memory = this.rememberPerSymbol() ? recalled(this.symbolMemory(), symbol) : null;
     if (memory && isSupportedResolution(memory.resolution)) this.resolution.set(memory.resolution);
+    // US07: a symbol of another asset class opens with that class's default, when the operator set one.
+    const classDefault = defaultOnSwitch(
+      this.classDefaults.defaults(),
+      this.facts().resolving ? null : this.facts().assetClass,
+      this.panelFacts(symbol).resolving ? null : this.panelFacts(symbol).assetClass,
+      !!memory,
+    );
+    if (classDefault?.resolution) this.resolution.set(classDefault.resolution);
+    const classTemplate = classDefault?.templateId
+      ? this.layoutStore.templates().find((t) => t.id === classDefault.templateId)
+      : undefined;
+    if (classTemplate) this.active.set(this.layoutStore.instantiate(classTemplate));
     if (memory?.view) {
       this.pendingView = memory.view;
       this.pendingViewFor = { symbol, resolution: this.resolution() };

@@ -1309,8 +1309,10 @@ export class ChartHostComponent implements OnDestroy {
       this.resolution();
       untracked(() => {
         this.drawings.ensureSymbol(symbol);
+        // US07: drawings are kept under the instrument's key (a contract's continuous root).
+        const key = this.drawings.keyOf(symbol);
         this.controller.sync(
-          all.filter((d) => d.symbol === symbol),
+          all.filter((d) => d.symbol === key),
           selected,
           selectedIds,
         );

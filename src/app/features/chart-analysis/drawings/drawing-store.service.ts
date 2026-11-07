@@ -19,6 +19,8 @@ import {
   type OutboxEntry,
 } from './drawing-sync';
 import { appStorage } from '@core/storage/app-storage';
+import { instrumentKey } from '../workspace/instrument-key';
+import { rekeyDrawings, type DrawingMove } from './drawing-keys';
 
 const STORAGE_KEY = 'lascodia.chart.drawings.v1';
 const UNDO_DEPTH = 50;
@@ -34,6 +36,11 @@ const RETRY_MAX_MS = 60_000;
  * Drawings: storage, scoping, undo/redo and sync with the engine.
  *
  * ── Scope: per symbol (DR-01 / DR-I2) ───────────────────────────────────────
+ *
+ * US07: "symbol" here is the INSTRUMENT's key ({@link instrumentKey}): every public method takes the chart's symbol
+ * and keys it, so a futures contract's drawings are its continuous root's (ESZ6 and ESH7 share ES1!'s). Drawings
+ * saved under an older key move to the new one — locally at start-up, and the engine's rows when that symbol is
+ * next opened ({@link migrateAlias}).
  *
  * A drawing belongs to its SYMBOL and remembers the timeframe it was made on, as on TradingView: a level drawn on
  * EURUSD H4 shows on M15 too, unless its Visibility tab lists the timeframes it shows on (`visibleOn`). The chart
@@ -91,6 +98,13 @@ export class DrawingStore {
     for (const [id, v] of Object.entries(stored.versions)) this.versions.set(id, v);
     for (const [id, e] of Object.entries(stored.outbox)) this.outbox.set(id, e);
     this.pending.set(this.outbox.size);
+    // US07: drawings cached under an older key (a bare futures contract) move to their instrument's key.
+    const rekeyed = rekeyDrawings(this.all(), (s) => this.keyOf(s));
+    if (rekeyed.moved.length) {
+      this.all.set(rekeyed.drawings);
+      this.persist(rekeyed.drawings);
+      this.queueMoves(rekeyed.moved);
+    }
 
     // `pagehide` fires on close, reload and bfcache; `visibilitychange` covers mobile tab kills.
     if (typeof window !== 'undefined') {
@@ -176,18 +190,74 @@ export class DrawingStore {
     () => this.undoRevision() >= 0 && (this.redoStacks.get(this.scope().symbol)?.length ?? 0) > 0,
   );
 
-  setScope(symbol: string, resolution: string): void {
-    const prev = this.scope();
-    this.scope.set({ symbol, resolution });
-    if (prev.symbol !== symbol) this.selectedId.set(null);
-    if (symbol) this.ensureSymbol(symbol);
+  /** US07: the key a chart symbol's drawings are kept under (its instrument: a contract's continuous root). */
+  keyOf(symbol: string): string {
+    return instrumentKey(symbol);
   }
 
-  /** Load a symbol's drawings from the engine once per session (a split panel's symbol too). */
-  ensureSymbol(symbol: string): void {
+  setScope(chartSymbol: string, resolution: string): void {
+    const prev = this.scope();
+    const symbol = this.keyOf(chartSymbol);
+    this.scope.set({ symbol, resolution });
+    if (prev.symbol !== symbol) this.selectedId.set(null);
+    if (symbol) this.ensureSymbol(chartSymbol);
+  }
+
+  /**
+   * Load a symbol's drawings from the engine once per session (a split panel's symbol too) — under its instrument's
+   * key, and, when the chart symbol is another spelling of it (ESZ6 for ES1!), the rows the engine still holds under
+   * that spelling, which move to the key (US07).
+   */
+  ensureSymbol(chartSymbol: string): void {
+    const symbol = this.keyOf(chartSymbol);
+    const alias = (chartSymbol ?? '').trim().toUpperCase();
+    if (symbol && alias && alias !== symbol && !this.hydrated.has(`alias:${alias}`)) {
+      this.hydrated.add(`alias:${alias}`);
+      this.migrateAlias(alias, symbol);
+    }
     if (!symbol || this.hydrated.has(symbol)) return;
     this.hydrated.add(symbol);
     this.load(symbol);
+  }
+
+  /**
+   * US07: the engine's drawings under an older key move to `key` — each a new drawing under the key and a delete of
+   * the old row (the engine never moves a drawing between symbols). A row whose delete is already queued (moved in
+   * an earlier session, not yet acknowledged) is not moved twice.
+   */
+  private migrateAlias(alias: string, key: string): void {
+    this.remote.list(alias).subscribe({
+      next: (res) => {
+        if (!res?.status || !Array.isArray(res.data)) return;
+        const rows: Drawing[] = [];
+        for (const row of res.data) {
+          const d = fromDto(row);
+          if (!d || this.outbox.get(d.id)?.op === 'delete' || this.all().some((x) => x.id === d.id)) continue;
+          this.setVersion(d.id, row.updatedAt);
+          rows.push(d);
+        }
+        const { moved } = rekeyDrawings(rows, () => key);
+        if (!moved.length) return;
+        this.all.update((list) => [...list, ...moved.map((m) => m.to)]);
+        this.persist(this.all());
+        this.queueMoves(moved);
+      },
+      // Unreachable: asked again next session.
+      error: () => this.hydrated.delete(`alias:${alias}`),
+    });
+  }
+
+  /** The engine writes of moved drawings: the new one saved, the old one deleted where the engine has it. */
+  private queueMoves(moved: readonly DrawingMove[]): void {
+    for (const { from, to } of moved) {
+      const pending = this.outbox.get(from.id);
+      this.outbox.delete(from.id);
+      if (!isTransient(to)) this.enqueue({ op: 'upsert', drawing: to });
+      // Acknowledged once (or a delete was already on its way): the engine has the row; else it never had it.
+      if (this.versions.has(from.id) || pending?.op === 'delete') this.enqueue({ op: 'delete', drawing: from });
+    }
+    this.pending.set(this.outbox.size);
+    this.persistSync();
   }
 
   /**
@@ -280,14 +350,16 @@ export class DrawingStore {
     }
   }
 
-  /** Drawings of one symbol. */
+  /** Drawings of one symbol (a chart symbol or a key: keyed either way). */
   forSymbol(symbol: string): Drawing[] {
-    return this.all().filter((d) => d.symbol === symbol);
+    const key = this.keyOf(symbol);
+    return this.all().filter((d) => d.symbol === key);
   }
 
   /** Drawings on one chart: the symbol's drawings shown on `resolution` (eye-hidden ones included). */
   forScope(symbol: string, resolution: string): Drawing[] {
-    return this.all().filter((d) => d.symbol === symbol && isShownOn(d, resolution));
+    const key = this.keyOf(symbol);
+    return this.all().filter((d) => d.symbol === key && isShownOn(d, resolution));
   }
 
   add(
@@ -297,7 +369,9 @@ export class DrawingStore {
     scope?: { symbol: string; resolution: string },
     extra?: Pick<Drawing, 'options' | 'pane'>,
   ): Drawing {
-    const { symbol, resolution } = scope ?? this.scope();
+    const chart = scope ?? this.scope();
+    const symbol = this.keyOf(chart.symbol);
+    const resolution = chart.resolution;
     const drawing: Drawing = {
       id: newDrawingId(),
       kind,
@@ -389,6 +463,7 @@ export class DrawingStore {
   paste(scope: { symbol: string; resolution: string }, offset = { dt: 0, dp: 0 }): Drawing | null {
     const src = this.clipboard;
     if (!src) return null;
+    scope = { symbol: this.keyOf(scope.symbol), resolution: scope.resolution };
     const same = src.symbol === scope.symbol;
     const pasted: Drawing = {
       ...structuredCloneDrawing(src),

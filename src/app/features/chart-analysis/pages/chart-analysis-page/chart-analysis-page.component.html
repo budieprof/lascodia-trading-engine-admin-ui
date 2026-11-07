@@ -386,11 +386,29 @@
                 >
                   {{ t.name }} <span class="tb-hint">{{ t.indicators.length }}</span>
                 </button>
+                @if (symbolClass_(); as cls) {
+                  <!-- US07: open every symbol of this asset class with this template. -->
+                  <button
+                    type="button"
+                    class="tb-menu-x"
+                    [attr.aria-pressed]="classDefault()?.templateId === t.id"
+                    [attr.aria-label]="'Default template for ' + assetClassName[cls]"
+                    [title]="
+                      classDefault()?.templateId === t.id
+                        ? 'The default for ' + assetClassName[cls] + ': click to stop'
+                        : 'Open every ' + assetClassName[cls] + ' symbol with this template'
+                    "
+                    (click)="toggleClassTemplate(t.id, $event)"
+                  >
+                    {{ classDefault()?.templateId === t.id ? '★' : '☆' }}
+                  </button>
+                }
                 <button
                   type="button"
                   class="tb-menu-x"
                   (click)="removeTemplate(t.id, $event)"
                   title="Delete template"
+                  aria-label="Delete template"
                 >
                   <app-chart-icon name="close" [size]="16" />
                 </button>
@@ -398,6 +416,18 @@
             }
           } @else {
             <div class="tb-menu-empty">No saved templates yet.</div>
+          }
+          @if (symbolClass_(); as cls) {
+            <!-- US07: the timeframe every symbol of this asset class opens on. -->
+            <button
+              type="button"
+              class="tb-menu-item"
+              [attr.aria-pressed]="classDefault()?.resolution === resolution()"
+              (click)="toggleClassResolution()"
+            >
+              {{ classDefault()?.resolution === resolution() ? '✓ ' : '' }}Open {{ assetClassName[cls] }} on
+              {{ resolutionLabel(resolution()) }}
+            </button>
           }
         </div>
       }
