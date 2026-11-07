@@ -53,11 +53,22 @@ const toOhlc = (rows: number[][]): Ohlc[] =>
 const bars = toOhlc(reference.bars);
 const compareBars = toOhlc(reference.compareBars);
 const calendar = new TradingCalendar(reference.session);
+/**
+ * UA02: the Exchange-sessions study reads the instrument's calendar; the reference run gives it London pre 07:00–08:00,
+ * regular 08:00–17:00 and post 17:00–18:00, Monday to Friday (the engine script uses the same three session strings).
+ */
+const london = (start: string, end: string) => [{ start, end, zone: 'Europe/London', days: '23456' }];
 const ctx: IndicatorContext = {
   compareBars,
   tradingDay: calendar.dayOf,
   utcTimes: bars.map((b) => b.time),
   barIntervalMs: 3_600_000,
+  exchangeSessions: {
+    code: 'reference',
+    zone: 'Europe/London',
+    is24x7: false,
+    windows: { Pre: london('0700', '0800'), Regular: london('0800', '1700'), Post: london('1700', '1800') },
+  },
 };
 
 const keyOf = (run: ReferenceRun): string => (run.variant ? `${run.id}:${run.variant}` : run.id);
