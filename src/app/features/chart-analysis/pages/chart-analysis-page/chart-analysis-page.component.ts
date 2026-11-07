@@ -287,7 +287,6 @@ import {
   type LayerGroupId,
   type LayerGroupsState,
 } from '../../overlays/layer-groups';
-import { LayerGroupsMenuComponent } from '../../overlays/layer-groups-menu.component';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -318,6 +317,7 @@ import { CHART_PAGE } from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
 import { ChartLegendComponent } from './chart-legend.component';
+import { ChartOverlaysMenuComponent } from './chart-overlays-menu.component';
 import { ChartContextMenusComponent } from './chart-context-menus.component';
 import { ChartSidePaneComponent } from './chart-side-pane.component';
 import { ChartStudiesStripComponent } from './chart-studies-strip.component';
@@ -687,7 +687,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ChartSettingsDialogComponent,
     ChartPaletteComponent,
     CompareDialogComponent,
-    LayerGroupsMenuComponent,
+    ChartOverlaysMenuComponent,
     ChartDrawingRailComponent,
     ChartPanelStripComponent,
     ChartLegendComponent,

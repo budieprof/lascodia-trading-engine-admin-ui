@@ -11,7 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { formatDate } from '@angular/common';
 import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
@@ -124,7 +124,6 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     ScriptLivePanelComponent,
     ScriptAlertsTabComponent,
     ScriptBacktestLauncherComponent,
-    RouterLink,
     StrategyScriptCardComponent,
     FirstStrategyChecklistComponent,
     RunComparisonComponent,

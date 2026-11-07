@@ -111,8 +111,8 @@ export const PIPELINE_POLL_MS = 10_000;
             [showCounts]="true"
             ariaLabel="Dry-run gate results"
           />
-        } @else if (p.gateResult?.failureSummary) {
-          <p class="small">{{ p.gateResult?.failureSummary }}</p>
+        } @else if (p.gateResult?.failureSummary; as summary) {
+          <p class="small">{{ summary }}</p>
         }
       } @else if (!loading() && !error()) {
         <p class="muted">No validation pipeline has run for this strategy.</p>
