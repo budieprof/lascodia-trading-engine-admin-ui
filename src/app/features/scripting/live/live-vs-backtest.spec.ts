@@ -12,6 +12,7 @@ import {
   overlayVerdict,
   rollingSlippage,
   stageTimeline,
+  transitionLabel,
 } from './live-vs-backtest';
 
 /** A long trade risking 0.0010 from 1.1000; exit sets its R. */
@@ -134,6 +135,42 @@ describe('stageTimeline + divergence markers', () => {
     });
     expect(m.map((x) => x.stage)).toEqual(['backtest', 'paper', 'current', 'live']);
     expect(m[0].detail).toContain('2024-01-01');
+  });
+
+  it('uses recorded transitions (K1) instead of the current-stage milestone; empty keeps the fallback', () => {
+    const base = {
+      backtest: null,
+      walkForward: null,
+      trades: [],
+      lifecycleStage: 'Paused',
+      lifecycleStageEnteredAt: '2026-02-20T00:00:00Z',
+    };
+    expect(stageTimeline({ ...base, transitions: [] }).map((x) => x.stage)).toEqual(['current']);
+    const t = {
+      strategyId: 1,
+      fromStage: 'Active',
+      toStage: 'Active',
+      fromStatus: 'Active',
+      toStatus: 'Paused',
+      reason: 'Drawdown halt',
+      source: 'Backfill',
+      actor: null,
+      strategyConfigHash: null,
+      occurredAtUtc: '2026-02-20T00:00:00',
+    };
+    const m = stageTimeline({ ...base, transitions: [t, { ...t, occurredAtUtc: 'bad' }] });
+    expect(m).toEqual([
+      {
+        stage: 'transition',
+        label: 'status Active → Paused',
+        time: Date.UTC(2026, 1, 20),
+        detail: 'Drawdown halt · by Backfill · reconstructed from older records',
+      },
+    ]);
+    expect(transitionLabel({ ...t, fromStage: null, toStage: 'Draft', toStatus: null })).toBe(
+      '→ Draft',
+    );
+    expect(transitionLabel({ ...t, fromStatus: 'Paused' })).toBe('Active (re-recorded)');
   });
 
   it('reads divergence times as UTC and keeps the kind', () => {

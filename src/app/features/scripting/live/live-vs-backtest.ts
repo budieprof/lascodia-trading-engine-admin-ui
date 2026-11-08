@@ -1,6 +1,6 @@
 import type { EChartsOption } from 'echarts';
 
-import type { ExecutionQualityLogDto } from '@core/api/api.types';
+import type { ExecutionQualityLogDto, StrategyLifecycleTransitionDto } from '@core/api/api.types';
 
 import type { ReportPalette } from '../report/report-charts';
 import { withAlpha } from '../report/report-charts';
@@ -139,7 +139,7 @@ export function rollingSlippage(
 
 /** One milestone of the strategy's research → paper → live path, from records the engine holds. */
 export interface StageMilestone {
-  stage: 'backtest' | 'walk-forward' | 'paper' | 'live' | 'current';
+  stage: 'backtest' | 'walk-forward' | 'paper' | 'live' | 'current' | 'transition';
   label: string;
   time: number;
   detail: string;
@@ -158,6 +158,33 @@ export interface StageInputs {
   trades: readonly ScriptLiveClosedTrade[];
   lifecycleStage: string | null;
   lifecycleStageEnteredAt: string | null;
+  /**
+   * The engine's recorded stage / status transitions (CONTRACT K1, any order). When there are any they replace the
+   * "entered the current stage" milestone — the newest transition IS that record, with where it came from.
+   */
+  transitions?: readonly StrategyLifecycleTransitionDto[] | null;
+}
+
+/** "Approved → Active", "status Active → Paused", or both; a first row with no `from` reads "→ Draft". */
+export function transitionLabel(t: StrategyLifecycleTransitionDto): string {
+  const parts: string[] = [];
+  if (t.toStage && t.fromStage !== t.toStage)
+    parts.push(`${t.fromStage ?? ''} → ${t.toStage}`.trim());
+  if (t.toStatus && t.fromStatus !== t.toStatus)
+    parts.push(`status ${`${t.fromStatus ?? ''} → ${t.toStatus}`.trim()}`);
+  return parts.length > 0 ? parts.join(' · ') : `${t.toStage} (re-recorded)`;
+}
+
+/** "Reason · by Operator (alice) · config 3f9a1c2b" — every part the row has, nothing invented. */
+export function transitionDetail(t: StrategyLifecycleTransitionDto): string {
+  const who = t.actor ? `${t.source} (${t.actor})` : t.source;
+  const parts = [
+    t.reason?.trim(),
+    who ? `by ${who}` : '',
+    t.source === 'Backfill' ? 'reconstructed from older records' : '',
+  ];
+  if (t.strategyConfigHash) parts.push(`config ${t.strategyConfigHash.slice(0, 8)}`);
+  return parts.filter((p) => !!p).join(' · ');
 }
 
 /** Milestones in time order. Each comes from a stored record; a stage without one is simply absent. */
@@ -201,8 +228,14 @@ export function stageTimeline(input: StageInputs): StageMilestone[] {
       });
     }
   }
+  const transitions = (input.transitions ?? [])
+    .map((t) => ({ t, time: isoMs(t.occurredAtUtc) }))
+    .filter((x): x is { t: StrategyLifecycleTransitionDto; time: number } => x.time !== null);
+  for (const { t, time } of transitions) {
+    out.push({ stage: 'transition', label: transitionLabel(t), time, detail: transitionDetail(t) });
+  }
   const enteredAt = isoMs(input.lifecycleStageEnteredAt);
-  if (input.lifecycleStage && enteredAt !== null) {
+  if (transitions.length === 0 && input.lifecycleStage && enteredAt !== null) {
     out.push({
       stage: 'current',
       label: `Stage: ${input.lifecycleStage}`,

@@ -10,9 +10,14 @@ import {
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-import type { BacktestRunDto, ExecutionQualityLogDto } from '@core/api/api.types';
+import type {
+  BacktestRunDto,
+  ExecutionQualityLogDto,
+  StrategyLifecycleTransitionDto,
+} from '@core/api/api.types';
 import { ExecutionQualityService } from '@core/services/execution-quality.service';
 import { BacktestsService } from '@core/services/backtests.service';
+import { StrategiesService } from '@core/services/strategies.service';
 import { ThemeService } from '@core/theme/theme.service';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 
@@ -78,8 +83,11 @@ import { isEvidenceRun } from '@features/backtests/run-provenance';
       />
 
       @if (milestones().length > 0) {
+        @if (historyNote(); as h) {
+          <p class="hint" data-testid="lvb-history-note">{{ h }}</p>
+        }
         <ol class="timeline" aria-label="Research to live path">
-          @for (m of milestones(); track m.label) {
+          @for (m of milestones(); track $index) {
             <li [attr.data-stage]="m.stage">
               <span class="t-label">{{ m.label }}</span>
               <span class="muted small">{{ when(m.time) }} · {{ m.detail }}</span>
@@ -148,6 +156,9 @@ import { isEvidenceRun } from '@features/backtests/run-provenance';
       .timeline li[data-stage='live'] {
         border-left-color: var(--accent);
       }
+      .timeline li[data-stage='transition'] {
+        border-left-style: dashed;
+      }
       .t-label {
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
@@ -165,6 +176,7 @@ export class LiveVsBacktestPanelComponent {
   private readonly backtests = inject(BacktestsService);
   private readonly execQuality = inject(ExecutionQualityService);
   private readonly research = inject(ResearchApiService);
+  private readonly strategies = inject(StrategiesService);
   private readonly theme = inject(ThemeService);
 
   readonly strategyId = input.required<number>();
@@ -179,6 +191,11 @@ export class LiveVsBacktestPanelComponent {
   readonly walkForward = signal<{ id: number; completedAt: string | null } | null>(null);
   readonly fills = signal<ExecutionQualityLogDto[] | null>(null);
   readonly fillsError = signal<string | null>(null);
+  /**
+   * Recorded lifecycle transitions (K1), newest first as the engine sends them. `null` = the engine has no history
+   * endpoint (404 / error) or none recorded — the timeline then shows the "current stage entered" milestone as before.
+   */
+  readonly transitions = signal<StrategyLifecycleTransitionDto[] | null>(null);
 
   private readonly palette = computed(() => reportPalette(this.theme.theme()));
 
@@ -198,8 +215,17 @@ export class LiveVsBacktestPanelComponent {
       trades: this.trades(),
       lifecycleStage: this.lifecycleStage(),
       lifecycleStageEnteredAt: this.lifecycleStageEnteredAt(),
+      transitions: this.transitions(),
     });
   });
+  readonly historyNote = computed(() => {
+    const n = this.transitions()?.length ?? 0;
+    if (n === 0) return null;
+    return `Stage history: ${n} recorded transition${n === 1 ? '' : 's'}${
+      n >= LiveVsBacktestPanelComponent.HISTORY_LIMIT ? ` (newest ${n})` : ''
+    }, shown with the research milestones in time order.`;
+  });
+  static readonly HISTORY_LIMIT = 100;
   readonly overlay = computed(() =>
     buildOverlayOptions(
       [
@@ -255,7 +281,27 @@ export class LiveVsBacktestPanelComponent {
     this.walkForward.set(null);
     this.fills.set(null);
     this.fillsError.set(null);
-    await Promise.all([this.loadBacktest(id), this.loadWalkForward(id), this.loadFills(id)]);
+    this.transitions.set(null);
+    await Promise.all([
+      this.loadBacktest(id),
+      this.loadWalkForward(id),
+      this.loadFills(id),
+      this.loadHistory(id),
+    ]);
+  }
+
+  /** K1 lifecycle history. Absent endpoint (404), a refusal or an empty list all keep the milestone fallback. */
+  private async loadHistory(id: number): Promise<void> {
+    try {
+      const res = await firstValueFrom(
+        this.strategies.getLifecycleHistory(id, LiveVsBacktestPanelComponent.HISTORY_LIMIT),
+      );
+      if (id !== this.strategyId()) return;
+      const rows = res?.status !== false && Array.isArray(res?.data) ? res.data : [];
+      this.transitions.set(rows.length > 0 ? rows : null);
+    } catch {
+      /* older engine: no history endpoint — the milestone view stays */
+    }
   }
 
   private async loadBacktest(id: number): Promise<void> {
@@ -270,9 +316,7 @@ export class LiveVsBacktestPanelComponent {
         }),
       );
       if (id !== this.strategyId()) return;
-      const run = (res?.data?.data ?? []).find(
-        (r) => isEvidenceRun(r),
-      );
+      const run = (res?.data?.data ?? []).find((r) => isEvidenceRun(r));
       if (!run) {
         this.expectationNote.set('No completed backtest of this strategy to compare with.');
         return;
