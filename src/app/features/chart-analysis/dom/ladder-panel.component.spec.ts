@@ -21,6 +21,7 @@ import { LiveDepthService } from '../orderflow/live-depth.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import { LadderArmingService } from './ladder-arming.service';
 import { LadderPanelComponent } from './ladder-panel.component';
+import { VenueTicketBus } from '../trading/venue-ticket-bus.service';
 import { setInstrumentCatalogue } from '@core/instruments/instrument-math';
 import type { InstrumentDto } from '@core/instruments/instrument.types';
 import { VenuesApiService } from '@features/venues/venues-api.service';
@@ -510,6 +511,14 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
       expect(byId('ladder-route')?.textContent?.trim()).toBe(
         'No route for this account (This trading account has no venue execution account.)',
       );
+    });
+
+    it('FR07: a venue click hands the ladder\'s account to the ticket, so both badges describe one account', async () => {
+      routeAnswer = routed();
+      await open();
+      await fixture.componentInstance.market('Buy');
+      const req = TestBed.inject(VenueTicketBus).request();
+      expect(req).toMatchObject({ symbol: 'BTC-USD', side: 'Buy', orderType: 'Market', tradingAccountId: 17 });
     });
 
     it('without accounts.read the route is unknown, not guessed', async () => {

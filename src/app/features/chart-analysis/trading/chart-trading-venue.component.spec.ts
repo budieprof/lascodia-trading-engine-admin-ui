@@ -194,4 +194,15 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
     ) as HTMLInputElement;
     expect(Number(price.value)).toBe(6001);
   });
+
+  it('FR07: the ladder\'s trading account rides the bus into the venue ticket', () => {
+    fixture.componentRef.setInput('symbol', 'ESZ6');
+    fixture.detectChanges();
+    TestBed.inject(VenueTicketBus).open({ symbol: 'ESZ6', side: 'Buy', orderType: 'Limit', price: 6000, tradingAccountId: 42 });
+    fixture.detectChanges();
+    fixture.detectChanges();
+    const ticket = fixture.debugElement.query((d) => d.componentInstance instanceof VenueOrderTicketComponent)
+      ?.componentInstance as VenueOrderTicketComponent;
+    expect(ticket.prefill()?.tradingAccountId).toBe(42);
+  });
 });

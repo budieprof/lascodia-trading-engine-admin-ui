@@ -1467,6 +1467,7 @@ export class LadderPanelComponent {
       side: intent.direction,
       orderType: intent.kind === 'Stop' ? 'Stop' : 'Limit',
       price: intent.price,
+      tradingAccountId: this.accountId(), // FR07: the ticket opens on the ladder's account
     });
     this.hint.set(`Opened the order ticket: ${intent.direction} ${intent.kind} at ${intent.price}.`);
   }
@@ -1477,7 +1478,13 @@ export class LadderPanelComponent {
       return;
     }
     if (this.venue()) {
-      this.venueBus.open({ symbol: this.symbol(), side: direction, orderType: 'Market', price: null });
+      this.venueBus.open({
+        symbol: this.symbol(),
+        side: direction,
+        orderType: 'Market',
+        price: null,
+        tradingAccountId: this.accountId(), // FR07
+      });
       this.hint.set(`Opened the order ticket: ${direction} at market.`);
       return;
     }

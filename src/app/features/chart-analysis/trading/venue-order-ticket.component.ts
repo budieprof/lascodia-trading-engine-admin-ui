@@ -722,6 +722,8 @@ export class VenueOrderTicketComponent {
     side: VenueSide;
     orderType: VenueOrderType;
     price: number | null;
+    /** FR07: the ladder's trading account — the ticket switches to it (null / absent = keep the ticket's choice). */
+    tradingAccountId?: number | null;
     seq: number;
   } | null>(null);
   readonly closed = output<void>();
@@ -764,7 +766,11 @@ export class VenueOrderTicketComponent {
 
   readonly tradingAccounts = computed(() => {
     const names = new Map(this.scope.accounts().map((a) => [a.id, a]));
-    return venueTradingAccountIds(this.accounts()).map((id) => {
+    const ids = venueTradingAccountIds(this.accounts());
+    // FR07: an account the ladder handed over is offered even without venue accounts (its badge then says so).
+    const chosen = this.tradingAccountId();
+    if (chosen !== null && !ids.includes(chosen)) ids.push(chosen);
+    return ids.map((id) => {
       const t = names.get(id);
       return {
         id,
@@ -930,7 +936,12 @@ export class VenueOrderTicketComponent {
     effect(() => {
       const pf = this.prefill();
       if (!pf) return;
-      untracked(() => this.patch(prefillPatch(this.instrument(), pf)));
+      untracked(() => {
+        // FR07: open on the requester's (the ladder's) trading account so both route badges describe one account.
+        if (typeof pf.tradingAccountId === 'number' && pf.tradingAccountId !== this.tradingAccountId())
+          this.setTradingAccount(String(pf.tradingAccountId));
+        this.patch(prefillPatch(this.instrument(), pf));
+      });
     });
     // Every change of the ticket asks for a new dry run (debounced); a ticket with shape problems is not sent.
     // A re-commit of the same values (an input's change event on blur, as the Send button is pressed) is not a change.

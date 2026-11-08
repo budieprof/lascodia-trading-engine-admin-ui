@@ -458,4 +458,38 @@ describe('VenueOrderTicketComponent — Send', () => {
     );
     expect(tifs).toEqual(['DAY']);
   });
+
+  // ── FR07: a ladder click opens the ticket on the ladder's account ──
+
+  it('FR07: a prefill naming a trading account switches the ticket to it (and its venue account) and asks for its route', async () => {
+    await ready();
+    fixture.componentRef.setInput('prefill', { side: 'Sell', orderType: 'Limit', price: 6001, tradingAccountId: 9, seq: 1 });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.tradingAccountId()).toBe(9);
+    expect(fixture.componentInstance.state().executionAccountId).toBe(5);
+    expect(routeRequests().at(-1)!.request.urlWithParams).toContain('tradingAccountId=9&executionAccountId=5');
+  });
+
+  it('FR07: the ladder\'s account is offered even without venue accounts, and the ticket says it has no route', async () => {
+    await ready();
+    fixture.componentRef.setInput('prefill', { side: 'Buy', orderType: 'Market', price: null, tradingAccountId: 17, seq: 2 });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.tradingAccountId()).toBe(17);
+    expect(fixture.componentInstance.state().executionAccountId).toBeNull();
+    const options = Array.from(el().querySelectorAll('[data-testid="venue-ticket-trading-account"] option')).map((o) => o.getAttribute('value'));
+    expect(options).toContain('17');
+    routeRequests().forEach((r) =>
+      r.flush(ok(routeOf({ kind: 'none', routable: false, reason: 'This trading account has no venue execution account.', venueSymbol: null }))),
+    );
+    fixture.detectChanges();
+    expect(q('[data-testid="ticket-route-why"]')?.textContent).toContain('no venue execution account');
+  });
+
+  it('FR07: a prefill without an account keeps the ticket\'s choice', async () => {
+    await ready();
+    fixture.componentRef.setInput('prefill', { side: 'Buy', orderType: 'Limit', price: 6000, seq: 3 });
+    fixture.detectChanges();
+    expect(fixture.componentInstance.tradingAccountId()).toBe(7);
+    expect(fixture.componentInstance.state().executionAccountId).toBe(3);
+  });
 });
