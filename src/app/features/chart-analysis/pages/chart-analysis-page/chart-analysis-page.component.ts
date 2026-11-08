@@ -291,8 +291,6 @@ import {
 import { ReplayController } from '../../replay/replay-controller';
 import {
   pageSlice,
-  CHART_CONTEXT_MENUS,
-  CONTEXT_MENUS_KEYS,
   CHART_OVERLAYS_MENU,
   OVERLAYS_MENU_KEYS,
   CHART_SIDE_PANE,
@@ -571,11 +569,6 @@ export { normaliseView };
     {
       provide: ChartSessionStore,
       useFactory: (page: ChartAnalysisPageComponent) => page.session,
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_CONTEXT_MENUS,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, CONTEXT_MENUS_KEYS),
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
@@ -5872,10 +5865,6 @@ export class ChartAnalysisPageComponent {
       default:
         this.drawings.reorder(id, action);
     }
-  }
-
-  drawingById(id: string): Drawing | undefined {
-    return this.drawings.allDrawings().find((d) => d.id === id);
   }
 
   /**

@@ -2,13 +2,14 @@ import { InjectionToken, isSignal } from '@angular/core';
 import type { ChartAnalysisPageComponent } from './chart-analysis-page.component';
 
 /**
- * US02: what each section of the chart page's template (context menus, side pane, overlays menu) may read of the page — a SLICE, not the page. Each child injects its own token, typed
+ * US02: what each section of the chart page's template (side pane, overlays menu) may read of the page — a SLICE, not the page. Each child injects its own token, typed
  * as exactly the members it uses ({@link pageSlice}: getters for those members and nothing else at run time), so a
  * section's dependencies are listed here, checked by the compiler against the page, and a spec provides a small fake.
  * (They used to inject the whole page through one `CHART_PAGE` token.)
  *
  * US02b: the main series (symbol, timeframe, bars) is in no slice — a section reads it from the page's
- * ChartSessionStore (chart-session-store.ts), which the page provides; the legend, the panel strip and the studies strip take inputs;
+ * ChartSessionStore (chart-session-store.ts), which the page provides; the legend, the panel strip, the studies strip and the context menus
+ * take inputs;
  * the drawing rail reads the page's ChartDrawingTools.
  */
 type Page = ChartAnalysisPageComponent;
@@ -29,39 +30,6 @@ export function pageSlice<K extends keyof Page>(page: Page, keys: readonly K[]):
   }
   return out;
 }
-
-/** The context menus's slice of the page. */
-export const CONTEXT_MENUS_KEYS = [
-  'chartSettingsOpen',
-  'clearDrawingsFromMenu',
-  'closeContextMenu',
-  'contextMenu',
-  'copySnapshot',
-  'createAlertAtLevel',
-  'createAlertHere',
-  'drawingAction',
-  'drawingById',
-  'drawingMenu',
-  'drawings',
-  'duplicateLayout',
-  'exportChartData',
-  'invertScale',
-  'objectTreeOpen',
-  'openStudiesDialog',
-  'paletteOpen',
-  'precision',
-  'resetScales',
-  'resolutions',
-  'scaleMode',
-  'scaleSide',
-  'settingsFor',
-  'showCountdown',
-  'takeSnapshot',
-] as const;
-export type ChartContextMenusSlice = Pick<Page, (typeof CONTEXT_MENUS_KEYS)[number]>;
-export const CHART_CONTEXT_MENUS = new InjectionToken<ChartContextMenusSlice>(
-  'CHART_CONTEXT_MENUS',
-);
 
 /** The overlays menu's slice of the page. */
 export const OVERLAYS_MENU_KEYS = [

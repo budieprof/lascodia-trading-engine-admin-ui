@@ -1028,7 +1028,30 @@
           />
         }
 
-        <app-chart-context-menus />
+        <app-chart-context-menus
+          [drawingMenu]="drawingMenu()"
+          [contextMenu]="contextMenu()"
+          [precision]="precision()"
+          [(settingsFor)]="settingsFor"
+          [(invertScale)]="invertScale"
+          [(scaleMode)]="scaleMode"
+          [(scaleSide)]="scaleSide"
+          [(showCountdown)]="showCountdown"
+          (drawingAction)="drawingAction($event.id, $event.action)"
+          (closeMenu)="closeContextMenu()"
+          (resetScales)="resetScales()"
+          (chartSettings)="chartSettingsOpen.set(true); closeContextMenu()"
+          (commands)="paletteOpen.set(true); closeContextMenu()"
+          (saveImage)="takeSnapshot()"
+          (copyImage)="copySnapshot()"
+          (exportData)="exportChartData()"
+          (showObjects)="objectTreeOpen.set(true); closeContextMenu()"
+          (addIndicator)="openStudiesDialog(); closeContextMenu()"
+          (alertAtLevel)="createAlertAtLevel($event)"
+          (alertHere)="createAlertHere($event)"
+          (saveLayoutAs)="duplicateLayout(); closeContextMenu()"
+          (removeAllDrawings)="clearDrawingsFromMenu()"
+        />
 
         <app-chart-side-pane />
 
