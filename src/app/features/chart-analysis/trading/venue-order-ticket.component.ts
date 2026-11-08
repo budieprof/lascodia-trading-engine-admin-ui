@@ -284,7 +284,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
           <!-- UI06: the send path ignores a per-order leverage / margin mode — the account's configured values apply —
                so they are shown read-only, as the account holds them, never as an input that does nothing. -->
           <output class="lev" aria-label="Leverage" data-testid="venue-ticket-leverage">{{
-            preview()?.accountLeverage != null ? (preview()!.accountLeverage | number: '1.0-2') + '×' : '—'
+            preview()?.accountLeverage !== null && preview()?.accountLeverage !== undefined
+              ? (preview()!.accountLeverage | number: '1.0-2') + '×'
+              : '—'
           }}</output>
           <output aria-label="Margin mode" data-testid="venue-ticket-margin-mode">{{
             preview()?.accountMarginMode ?? '—'

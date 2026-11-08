@@ -492,4 +492,28 @@ describe('VenueOrderTicketComponent — Send', () => {
     expect(fixture.componentInstance.tradingAccountId()).toBe(7);
     expect(fixture.componentInstance.state().executionAccountId).toBe(3);
   });
+
+  // ── FR08: the leverage output (eqeqeq fix) shows exactly what it showed before ──
+
+  it.each([
+    [5, '5×'],
+    [2.5, '2.5×'],
+    [null, '—'],
+    [undefined, '—'],
+  ])('FR08: account leverage %s reads %s', async (lev, text) => {
+    const perp = {
+      ...ES, symbol: 'BTC-USDT-PERP', assetClass: 'Crypto', exchange: 'BINANCE', future: null, quantityUnit: 'Coins',
+      quantityStep: 0.001, minQuantity: 0.001, tickSize: 0.1,
+      crypto: { kind: 'Perpetual', baseAsset: 'BTC', quoteAsset: 'USDT', settleAsset: 'USDT', isInverse: false, fundingIntervalHours: 8 },
+    } as unknown as InstrumentDto;
+    fixture = TestBed.createComponent(VenueOrderTicketComponent);
+    fixture.componentRef.setInput('instrument', perp);
+    fixture.detectChanges();
+    const pv = preview({ symbol: 'BTC-USDT-PERP' }) as unknown as Record<string, unknown>;
+    if (lev === undefined) delete pv['accountLeverage'];
+    else pv['accountLeverage'] = lev;
+    fixture.componentInstance.preview.set(pv as unknown as VenueTicketPreview);
+    fixture.detectChanges();
+    expect(q('[data-testid="venue-ticket-leverage"]')?.textContent?.trim()).toBe(text);
+  });
 });
