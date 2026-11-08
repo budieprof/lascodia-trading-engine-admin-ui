@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { signal } from '@angular/core';
 import type { ChartAnalysisPageComponent } from './chart-analysis-page.component';
-import { STUDIES_STRIP_KEYS, pageSlice } from './chart-page.token';
+import { CONTEXT_MENUS_KEYS, pageSlice } from './chart-page.token';
 
 describe('US02 page slices (children no longer get the whole page)', () => {
   it('exposes only the listed members: signals as they are, methods bound to the page', () => {
@@ -21,7 +21,7 @@ describe('US02 page slices (children no longer get the whole page)', () => {
   });
 
   it('a section reads a short, listed set of the page', () => {
-    expect(STUDIES_STRIP_KEYS.length).toBeLessThan(25);
-    expect(STUDIES_STRIP_KEYS).toContain('scriptChips');
+    expect(CONTEXT_MENUS_KEYS.length).toBeLessThan(30);
+    expect(CONTEXT_MENUS_KEYS).toContain('contextMenu');
   });
 });

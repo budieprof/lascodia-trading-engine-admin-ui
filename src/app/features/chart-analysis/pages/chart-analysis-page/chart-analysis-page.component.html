@@ -1359,7 +1359,27 @@
     />
   }
 
-  <app-chart-studies-strip />
+  <app-chart-studies-strip
+    [active]="active()"
+    [scriptChips]="scriptChips()"
+    [(scriptError)]="scriptError"
+    [(testerOpen)]="testerOpen"
+    [canPickOnChart]="canPickOnChart()"
+    [studyNote]="studyNoteOf"
+    (scriptVisibility)="toggleScriptVisible($event)"
+    (scriptSettings)="settings.open($event)"
+    (scriptSource)="openScriptSource($event)"
+    (scriptLogs)="openLogs($event)"
+    (scriptAlert)="openScriptAlert($event)"
+    (scriptRemove)="removeScriptFromChart($event)"
+    (scriptOpenAt)="openScriptAt($event.key, $event.where)"
+    (indicatorToggle)="toggleIndicator($event)"
+    (indicatorRemove)="removeIndicator($event)"
+    (paramChange)="setParam($event.uid, $event.key, $event.value)"
+    (timePick)="pickStudyTime($event.uid, $event.key)"
+    (scorecard)="openScorecard()"
+    (studySettings)="studySettingsFor.set($event)"
+  />
   <!-- DR-I8: the pattern & structure scorecard; a row can open as a Pine strategy draft. -->
   @if (scorecardOpen()) {
     <app-pattern-scorecard-dialog

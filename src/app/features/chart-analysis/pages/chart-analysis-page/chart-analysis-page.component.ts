@@ -230,8 +230,6 @@ import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
   parseStudySource,
-  sourceGroups,
-  type SourceGroup,
 } from '../../indicators/study-settings';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
@@ -293,8 +291,6 @@ import {
 import { ReplayController } from '../../replay/replay-controller';
 import {
   pageSlice,
-  CHART_STUDIES_STRIP,
-  STUDIES_STRIP_KEYS,
   CHART_CONTEXT_MENUS,
   CONTEXT_MENUS_KEYS,
   CHART_OVERLAYS_MENU,
@@ -575,11 +571,6 @@ export { normaliseView };
     {
       provide: ChartSessionStore,
       useFactory: (page: ChartAnalysisPageComponent) => page.session,
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_STUDIES_STRIP,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, STUDIES_STRIP_KEYS),
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
@@ -1759,6 +1750,8 @@ export class ChartAnalysisPageComponent {
   /**
    * The line under a study in the studies strip: why a pane is empty (UA03) — the engine's reason or "FX pairs only".
    */
+  /** {@link studyNote} bound to the page, for the studies strip's input. */
+  readonly studyNoteOf = (item: ActiveIndicator): string | null => this.studyNote(item);
   studyNote(item: ActiveIndicator): string | null {
     if (item.defId === 'exchange-sessions') return exchangeSessionsNote(this.exchangeSessions(), this.symbol());
     const pane = this.externalPanes().find((p) => p.uid === item.uid)?.note;
@@ -4441,22 +4434,6 @@ export class ChartAnalysisPageComponent {
     if (point !== null) this.setParam(uid, key, String(point.time));
   }
 
-  /** A time input's value on the studies bar: the picked bar (UTC), or what to do. */
-  studyTimeLabel(v: number | string | undefined): string {
-    const ms = Number(v);
-    return Number.isFinite(ms) && ms > 0
-      ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
-      : 'Pick on chart';
-  }
-
-  /** The Source dropdown's choices for a study (DR-16 / DR-I5). */
-  sourceGroupsFor(item: ActiveIndicator): SourceGroup[] {
-    return sourceGroups(item, this.active(), (s) => {
-      const def = indicatorById(s.defId);
-      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
-    });
-  }
-
   toggleIndicator(uid: string): void {
     this.active.update((list) =>
       list.map((i) => (i.uid === uid ? { ...i, visible: !i.visible } : i)),
@@ -4483,16 +4460,6 @@ export class ChartAnalysisPageComponent {
 
   labelFor(item: ActiveIndicator): string {
     return studyLabel(item.defId, item.params);
-  }
-
-  /** A candlestick- or chart-pattern study (its row offers the scorecard, DR-I8). */
-  isPatternStudy(item: ActiveIndicator): boolean {
-    const k = studyKind(item.defId);
-    return k === 'candle-pattern' || k === 'chart-pattern';
-  }
-
-  inputsFor(item: ActiveIndicator) {
-    return studyMeta(item.defId)?.inputs ?? [];
   }
 
   onLegend(snapshot: LegendSnapshot): void {

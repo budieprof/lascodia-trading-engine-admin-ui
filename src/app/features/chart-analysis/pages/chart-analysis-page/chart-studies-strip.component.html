@@ -1,49 +1,50 @@
 <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
-@if (page.active().length || page.scriptChips().length || page.scriptError()) {
+@if (active().length || scriptChips().length || scriptError()) {
   <aside class="studies">
     <!-- Pine scripts: each with its own run state (PC-05/PC-13/PC-I7). -->
-    @for (c of page.scriptChips(); track c.key) {
+    @for (c of scriptChips(); track c.key) {
       <app-script-chip
         [chip]="c"
-        (visibility)="page.toggleScriptVisible(c.key)"
-        (settings)="page.settings.open(c.key)"
-        (source)="page.openScriptSource(c.key)"
-        (tester)="page.testerOpen.set(!page.testerOpen())"
-        (logs)="page.openLogs(c.key)"
-        (alert)="page.openScriptAlert(c.key)"
-        (removed)="page.removeScriptFromChart(c.key)"
-        (openAt)="page.openScriptAt(c.key, $event)"
+        (visibility)="scriptVisibility.emit(c.key)"
+        (settings)="scriptSettings.emit(c.key)"
+        (source)="scriptSource.emit(c.key)"
+        (tester)="testerOpen.set(!testerOpen())"
+        (logs)="scriptLogs.emit(c.key)"
+        (alert)="scriptAlert.emit(c.key)"
+        (removed)="scriptRemove.emit(c.key)"
+        (openAt)="scriptOpenAt.emit({ key: c.key, where: $event })"
       />
     }
-    @if (page.scriptError()) {
+    @if (scriptError()) {
       <div class="study script-error" role="alert">
-        {{ page.scriptError() }}
-        <button type="button" class="study-remove" (click)="page.scriptError.set(null)">
+        {{ scriptError() }}
+        <button type="button" class="study-remove" (click)="scriptError.set(null)">
           <app-chart-icon name="close" [size]="14" />
         </button>
       </div>
     }
-    @for (item of page.active(); track item.uid) {
+    @for (item of active(); track item.uid) {
       <div class="study" [class.hidden-study]="!item.visible">
         <button
           type="button"
           class="study-toggle"
-          (click)="page.toggleIndicator(item.uid)"
+          (click)="indicatorToggle.emit(item.uid)"
           [attr.aria-pressed]="item.visible"
-          [title]="item.visible ? 'Hide' : 'Show'" [attr.aria-label]="item.visible ? 'Hide' : 'Show'"
+          [title]="item.visible ? 'Hide' : 'Show'"
+          [attr.aria-label]="item.visible ? 'Hide' : 'Show'"
         >
           <app-chart-icon [name]="item.visible ? 'eye' : 'eye-off'" [size]="16" />
         </button>
-        <span class="study-label">{{ page.labelFor(item) }}</span>
-        @if (page.studyNote(item); as note) {
+        <span class="study-label">{{ labelFor(item) }}</span>
+        @if (studyNote()(item); as note) {
           <span class="study-note" [title]="note">{{ note }}</span>
         }
-        @for (input of page.inputsFor(item); track input.key) {
+        @for (input of inputsFor(item); track input.key) {
           <label class="study-input">
             {{ input.label }}
             @switch (input.type) {
               @case ('select') {
-                <select (change)="page.setParam(item.uid, input.key, $any($event.target).value)">
+                <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
                   @for (opt of input.options ?? []; track opt) {
                     <option [value]="opt" [selected]="item.params[input.key] === opt">
                       {{ opt }}
@@ -55,9 +56,9 @@
                 <!-- DR-16 / DR-I5: a price, or another study's plot. -->
                 <select
                   class="source-input"
-                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
                 >
-                  @for (g of page.sourceGroupsFor(item); track g.label) {
+                  @for (g of sourceGroupsFor(item); track g.label) {
                     <optgroup [label]="g.label">
                       @for (c of g.choices; track c.value) {
                         <option [value]="c.value" [selected]="item.params[input.key] === c.value">
@@ -73,7 +74,7 @@
                   type="text"
                   class="symbol-input"
                   [value]="item.params[input.key]"
-                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
                 />
               }
               @case ('session') {
@@ -82,7 +83,7 @@
                   class="session-input"
                   placeholder="0800-1700"
                   [value]="item.params[input.key]"
-                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
                 />
               }
               @case ('time') {
@@ -90,10 +91,10 @@
                 <button
                   type="button"
                   class="pick-input"
-                  [disabled]="!page.canPickOnChart()"
-                  (click)="page.pickStudyTime(item.uid, input.key)"
+                  [disabled]="!canPickOnChart()"
+                  (click)="timePick.emit({ uid: item.uid, key: input.key })"
                 >
-                  {{ page.studyTimeLabel(item.params[input.key]) }}
+                  {{ studyTimeLabel(item.params[input.key]) }}
                 </button>
               }
               @default {
@@ -103,18 +104,18 @@
                   [min]="input.min ?? 0"
                   [max]="input.max ?? 100000"
                   step="any"
-                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
                 />
               }
             }
           </label>
         }
-        @if (page.isPatternStudy(item)) {
+        @if (isPatternStudy(item)) {
           <!-- DR-I8: the scorecard of the patterns this study marks. -->
           <button
             type="button"
             class="study-settings"
-            (click)="page.openScorecard()"
+            (click)="scorecard.emit()"
             title="Pattern scorecard"
             aria-label="Pattern scorecard"
           >
@@ -124,7 +125,7 @@
         <button
           type="button"
           class="study-settings"
-          (click)="page.studySettingsFor.set(item.uid)"
+          (click)="studySettings.emit(item.uid)"
           title="Settings"
           aria-label="Settings"
         >
@@ -133,8 +134,9 @@
         <button
           type="button"
           class="study-remove"
-          (click)="page.removeIndicator(item.uid)"
-          title="Remove" aria-label="Remove"
+          (click)="indicatorRemove.emit(item.uid)"
+          title="Remove"
+          aria-label="Remove"
         >
           <app-chart-icon name="close" [size]="14" />
         </button>
