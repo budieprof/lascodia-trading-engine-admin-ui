@@ -17,7 +17,7 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
@@ -50,7 +50,6 @@ import { tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick'
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { priceScaleFor } from '../../datafeed/symbol-info';
-import { resolveInstrument } from '@core/instruments/instrument-math';
 import {
   decimalsOfPrices,
   instrumentFacts,
@@ -59,13 +58,9 @@ import {
 } from '../../datafeed/instrument-facts';
 import { InstrumentsService } from '@core/instruments/instruments.service';
 import { venueInstrumentFor } from '@features/venues/venues.logic';
-import type { InstrumentAssetClass, InstrumentDto } from '@core/instruments/instrument.types';
-import {
-  ASSET_CLASS_LABEL,
-  InstrumentIconComponent,
-} from '../../watchlist/instrument-icon.component';
+import type { InstrumentDto } from '@core/instruments/instrument.types';
+import { InstrumentIconComponent } from '../../watchlist/instrument-icon.component';
 import { changeText, formatVolume } from '../../chart/legend-format';
-import { toCsv } from '../../chart/snapshot';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
@@ -81,7 +76,6 @@ import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
 import {
-  fundamentalIdOf,
   studyDefaults,
   studyDialogItems,
   studyKind,
@@ -90,17 +84,9 @@ import {
 } from '../../studies';
 import { FxFundamentalsService } from '../../panels/fx-fundamentals.service';
 import { DailyBarsService } from '../../panels/daily-bars.service';
-import { FUNDAMENTAL_PANES, stepDifference, type PanePoint } from '../../panels/fx-fundamentals';
-import type { ChartViewState, ExternalPane } from '../../chart/chart-host.component';
-import {
-  catchError,
-  forkJoin,
-  from,
-  map,
-  of,
-  switchMap as switchMapTo,
-  type Observable,
-} from 'rxjs';
+import type { ChartViewState } from '../../chart/chart-host.component';
+import { ChartFundamentalsLoader } from './chart-fundamentals-loader';
+import { map } from 'rxjs';
 import {
   ChartScriptService,
   editorRunKey,
@@ -193,17 +179,9 @@ import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { ChartEventsService } from '../../overlays/chart-events.service';
-import {
-  blackoutBands,
-  eventsWindow,
-  mergeMarks,
-  missingOnTheLeft,
-  type BlackoutWindow,
-} from '../../overlays/chart-events';
+import { ChartEventsState } from './chart-events-state';
 import { ChartAlertsService } from '../../alerts/chart-alerts.service';
-import { eventRelevance, sameRelevance } from '../../panels/event-relevance';
 import { MarketPanesService } from '../../panels/market-panes.service';
-import { paneApplies, notApplicable, type PaneScope } from '../../panels/market-panes';
 import { volumeStudyNote } from '../../indicators/volume-labels';
 import {
   exchangeSessionsNote,
@@ -217,33 +195,24 @@ import {
   StudySettingsDialogComponent,
   type StudyPick,
 } from '../../indicators/study-settings-dialog.component';
-import { drawingAlertDraft } from '../../drawings/drawing-alert';
 import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
 import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
 import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog.component';
 import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
 import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
-import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
   parseStudySource,
 } from '../../indicators/study-settings';
-import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
-import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
-import { inputOf } from '../../alerts/chart-alert-rules';
+import { ChartAlertsController } from './chart-alerts-controller';
 import { OrdersService } from '@core/services/orders.service';
 import { MartingaleService } from '@core/services/martingale.service';
 import { NewsIntelService } from '@core/services/news-intel.service';
-import type {
-  NewsArticleView,
-  NewsFocusResult,
-} from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageContextService } from '@core/assistant/page-context.service';
 import { UiCommandService } from '@core/assistant/ui-command.service';
 import { chartCommands } from '../../chart-commands';
-import type { EventMark } from '../../overlays/event-marks-renderer';
 import {
   profileWithValueArea,
   supportResistance,
@@ -263,19 +232,13 @@ import {
 import type { ChartMarker } from '../../chart/chart-host.component';
 import {
   CHART_TIMEZONES,
-  midnightOnClock,
   timezoneOffsetMinutes,
   ChartLayoutStore,
-  type StudyTemplate,
 } from '../../workspace/layout-store.service';
 import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
 import { EconomicEventModalComponent } from '../../panels/economic-event-modal.component';
-import {
-  concernsPane,
-  headlineAge,
-  mergeArticles,
-  type NewsArticleIngestedPayload,
-} from '../../panels/news-pane';
+import { headlineAge, type NewsArticleIngestedPayload } from '../../panels/news-pane';
+import { ChartNewsPane } from './chart-news-pane';
 import { ReplayController } from '../../replay/replay-controller';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
@@ -316,7 +279,7 @@ import {
   type ChartSettings,
 } from '../../chart/chart-settings-dialog.component';
 import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
-import { askName, confirmDelete } from '../../dialog/chart-dialogs';
+import { ChartLayoutActions } from './chart-layout-actions';
 import {
   UndoHistory,
   describeChange,
@@ -332,14 +295,10 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ReplayPanelComponent } from '../../replay/replay-panel.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
-import type {
-  EconomicImpact,
-  UpcomingEconomicEvent,
-} from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import { ChartTradingComponent } from '../../trading/chart-trading.component';
 import { ChartAnalysisComponent } from '../../analysis/chart-analysis.component';
-import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/trade-timeline';
+import { ChartTradeTimeline } from './chart-trade-timeline';
 import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import type { TicketPrefill } from '../../trading/ticket-model';
 import {
@@ -410,9 +369,6 @@ export type { ComparePanel } from '../../compare/split-panels.controller';
 
 import {
   RESOLUTION_GROUPS,
-  DAY,
-  GO_TO_DATE_PAGES,
-  RANGE_PRESETS,
   STYLE_GROUPS,
   STYLE_STUDY,
   CHART_STYLES,
@@ -428,6 +384,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartSessionStore } from './chart-session-store';
+import { ChartTimeNavigator } from './chart-time-navigator';
 import { ChartOverlaySettings } from './chart-overlay-settings';
 import { ChartDrawingTools } from './chart-drawing-tools';
 import { ChartDockState } from './chart-dock-state';
@@ -442,9 +399,8 @@ import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 import { MarketSessionService } from '../../datafeed/market-session.service';
 import { volumeUnitTag, type VolumeKind } from '../../datafeed/chart-facts';
-import { continuousInfo, rollMarkers, type FutureRoll } from '../../datafeed/futures-series';
 import { FuturesRollsService } from '../../datafeed/futures-rolls.service';
-import type { SeriesOptions } from '../../datafeed/chart-market-chips.component';
+import { ChartSeriesAdjustments } from './chart-series-adjustments';
 import { intervalNote, noDataMessage } from '../../datafeed/data-availability';
 import {
   panelCandidates,
@@ -477,12 +433,7 @@ import {
   SyntheticTicks,
   type SyntheticSpec,
 } from '../../compare/synthetic';
-import {
-  RemoteSymbolSearch,
-  groupSearch,
-  mergeSearch,
-  searchRowOf,
-} from '../../datafeed/symbol-search';
+import { ChartSymbolSearch } from './chart-symbol-search';
 import { marketView, type MarketView } from '../../datafeed/market-status';
 import {
   instrumentDescription,
@@ -582,9 +533,16 @@ export class ChartAnalysisPageComponent {
   private readonly uiCommands = inject(UiCommandService);
   private readonly chartScripts = inject(ChartScriptService);
   private readonly theme = inject(ThemeService);
-  private readonly fundamentals = inject(FxFundamentalsService);
-  private readonly marketPanes = inject(MarketPanesService);
-  private readonly dailyBars = inject(DailyBarsService);
+  /** b9-maint: the fundamental studies' panes ({@link ChartFundamentalsLoader}). */
+  private readonly fundamentalPanes = new ChartFundamentalsLoader({
+    paneScope: () => this.paneScope(),
+    bars: () => this.bars(),
+    scriptError: () => this.scriptError,
+    fundamentals: inject(FxFundamentalsService),
+    dailyBars: inject(DailyBarsService),
+    marketPanes: inject(MarketPanesService),
+    destroyRef: this.destroyRef,
+  });
   /**
    * The engine's clock, for "is the newest bar's period still open" on the session grid: its
    * periods' opens and closes are the engine's instants, and a browser clock a few seconds off would
@@ -597,7 +555,7 @@ export class ChartAnalysisPageComponent {
   private readonly scriptingApi = inject(ScriptingService);
 
   /** Fetched FX-fundamental series, keyed by the study's uid. */
-  readonly externalPanes = signal<ExternalPane[]>([]);
+  readonly externalPanes = this.fundamentalPanes.panes;
 
   private readonly host = viewChild<ChartHostComponent>('host');
 
@@ -727,99 +685,25 @@ export class ChartAnalysisPageComponent {
       ].filter(Boolean).length + orderFlowCount(this.orderFlow()),
   );
 
-  /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
-  readonly alertPreset = signal<number | null>(null);
-  /** A drawing's alert the form starts from (DR-I6: "Add alert" on the drawing toolbar); null = a price alert. */
-  readonly alertDraft = signal<ChartAlertDto | null>(null);
-  openAlertDraft(ev: Event): void {
-    this.alertPreset.set(null);
-    this.alertDraft.set(null);
-    this.toggleMenu('alert', ev);
-  }
-
-  /**
-   * "Add alert" on a selected line / channel / Fib level (DR-I6): the alert form opens pre-filled with the drawing's
-   * anchors (the engine follows the shape bar by bar on this timeframe); nothing is armed until the operator saves.
-   */
-  addDrawingAlert(e: { id: string; level?: number }): void {
-    const d = this.drawings.allDrawings().find((x) => x.id === e.id);
-    const draft = d
-      ? drawingAlertDraft(d, {
-          symbol: this.symbol(),
-          timeframe: this.resolution(),
-          level: e.level,
-          logScale: this.scaleMode() === 'log',
-        })
-      : null;
-    if (!draft) {
-      this.notify.error(
-        'An alert can watch a line, a channel or a Fib level drawn on the price, with two different times.',
-      );
-      return;
-    }
-    this.alertPreset.set(null);
-    this.alertDraft.set(draft);
-    this.openMenu.set('alert');
-  }
-
-  readonly rangePresets = RANGE_PRESETS;
-  /** A preset waiting for its interval's bars to load before the window is applied. */
-  private pendingRange: { fromMs: number; toMs: number } | 'all' | null = null;
-
-  applyRangePreset(id: string): void {
-    const p = RANGE_PRESETS.find((r) => r.id === id);
-    if (!p) return;
-    const now = Date.now();
-    this.pendingRange =
-      p.spanMs === 'all'
-        ? 'all'
-        : {
-            fromMs:
-              p.spanMs === 'ytd'
-                ? midnightOnClock(new Date(now).getUTCFullYear(), 0, 1, this.timezone())
-                : now - p.spanMs,
-            toMs: now,
-          };
-    if (this.resolution() !== p.resolution) this.selectResolution(p.resolution);
-    else this.flushPendingRange();
-  }
-
-  /**
-   * Centre the chart on a day (`yyyy-mm-dd`) — midnight on the CHART's clock, not UTC's (CC-15) —
-   * loading history back to it first: a date before the loaded bars did nothing. At most
-   * {@link GO_TO_DATE_PAGES} pages of history; past that the oldest loaded bars show, and the
-   * operator is told.
-   */
-  async goToDate(value: string): Promise<void> {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!m) return;
-    const t = midnightOnClock(Number(m[1]), Number(m[2]) - 1, Number(m[3]), this.timezone());
-    // Centre the day: a window the width of what is on screen, around the date.
-    const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
-    const from = t - span / 2;
-    for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
-      const held = this.bars();
-      if (!held.length || held[0].time <= from || this.historyComplete()) break;
-      await this.loadOlder();
-      if (this.bars()[0]?.time === held[0].time) break; // nothing older came back
-    }
-    const oldest = this.bars()[0]?.time;
-    if (oldest !== undefined && oldest > t && !this.historyComplete())
-      this.notify.warning(
-        `History before ${this.barTimeLabel(this.bars()[0])} is not loaded: showing the oldest bars.`,
-      );
-    this.pendingRange = { fromMs: from, toMs: t + span / 2 };
-    this.flushPendingRange();
-  }
-
-  private flushPendingRange(): void {
-    const host = this.host();
-    const r = this.pendingRange;
-    if (!host || !r || !this.bars().length) return;
-    if (r === 'all') host.fitContent();
-    else host.setVisibleRange(r.fromMs, r.toMs);
-    this.pendingRange = null;
-  }
+  /** b9-maint: price alerts — form, manager, alert lines ({@link ChartAlertsController}); the template reads `alerts`. */
+  readonly alerts = new ChartAlertsController({
+    symbol: () => this.symbol(),
+    resolution: () => this.resolution(),
+    logScale: () => this.scaleMode() === 'log',
+    precision: () => this.precision(),
+    host: () => this.host(),
+    contextMenu: () => this.contextMenu(),
+    closeContextMenu: () => this.contextMenu.set(null),
+    openAlertMenu: () => this.openMenu.set('alert'),
+    closeMenus: () => this.openMenu.set(null),
+    toggleAlertMenu: (ev) => this.toggleMenu('alert', ev),
+    alertMoveDialog: () => this.alertMoveDialog(),
+    queryParamMap: this.route.queryParamMap,
+    drawings: inject(DrawingStore),
+    chartAlerts: inject(ChartAlertsService),
+    notify: inject(NotificationService),
+    destroyRef: this.destroyRef,
+  });
 
   toggleEditor(): void {
     if (this.dockTab() === 'editor') {
@@ -1402,7 +1286,7 @@ export class ChartAnalysisPageComponent {
     orders: inject(OrdersService),
     signals: this.signals,
     martingale: inject(MartingaleService),
-    destroyRef: inject(DestroyRef),
+    destroyRef: this.destroyRef,
   });
   protected readonly openPositions = this.tradeLayers.openPositions;
   protected readonly workingOrders = this.tradeLayers.workingOrders;
@@ -1449,7 +1333,7 @@ export class ChartAnalysisPageComponent {
     ...this.signalMarkers(),
     ...this.rungMarkers(),
     ...this.closedTradeMarkers(),
-    ...this.timelineMarkers(),
+    ...this.tradeTimeline.markers(),
     ...this.analysisMarkers(),
     ...this.replay.markers(),
     ...this.rollMarkers(),
@@ -1468,50 +1352,18 @@ export class ChartAnalysisPageComponent {
   }
 
   // ── BX-1 (trading): the chart strategy's trade timeline — backtest, live session, paper and broker fills ──
-  private readonly scriptStrategies = inject(ScriptStrategyService);
-  /** The timeline is drawn (overlays menu "Trade timeline"); it needs an engine strategy script on the chart. */
-  readonly showTradeTimeline = signal(false);
-  readonly tradeTimelineStrategyId = computed(() => this.strategyRun()?.item.strategyId ?? null);
-  private readonly timelineMarkers = signal<ChartMarker[]>([]);
-  /** What the drawn timeline holds, or why nothing is drawn (the overlays menu shows it). */
-  readonly tradeTimelineInfo = signal<string | null>(null);
-  private timelineSeq = 0;
-  private readonly loadTradeTimeline = effect((onCleanup) => {
-    const show = this.showTradeTimeline();
-    const strategyId = this.tradeTimelineStrategyId();
-    const symbol = this.symbol();
-    const seq = ++this.timelineSeq;
-    if (!show || strategyId === null) {
-      this.timelineMarkers.set([]);
-      this.tradeTimelineInfo.set(
-        show ? 'Add an engine strategy script to the chart to draw its trades.' : null,
-      );
-      return;
-    }
-    const oldest = untracked(() => this.bars()[0]?.time ?? null);
-    const sub = this.scriptStrategies
-      .getParityTimeline(strategyId, timelineWindow(oldest, Date.now()))
-      .subscribe({
-        next: (res) => {
-          if (seq !== this.timelineSeq) return;
-          if (!res?.status || !res.data) {
-            this.timelineMarkers.set([]);
-            this.tradeTimelineInfo.set(res?.message || 'The trade timeline could not be loaded.');
-            return;
-          }
-          this.timelineMarkers.set(timelineMarkers(res.data, symbol));
-          this.tradeTimelineInfo.set(
-            res.data.symbol.toUpperCase() === symbol.toUpperCase()
-              ? [timelineSummary(res.data), ...res.data.notes].join(' — ')
-              : `The strategy trades ${res.data.symbol}, not ${symbol}.`,
-          );
-        },
-        error: () => {
-          if (seq === this.timelineSeq) this.tradeTimelineInfo.set('The engine did not answer.');
-        },
-      });
-    onCleanup(() => sub.unsubscribe());
+  /** b9-maint: {@link ChartTradeTimeline}. */
+  private readonly tradeTimeline = new ChartTradeTimeline({
+    // A computed, as before: the timeline reloads when the strategy changes, not on every run of it.
+    strategyId: computed(() => this.strategyRun()?.item.strategyId ?? null),
+    symbol: () => this.symbol(),
+    bars: () => this.bars(),
+    scriptStrategies: inject(ScriptStrategyService),
   });
+  /** The timeline is drawn (overlays menu "Trade timeline"); it needs an engine strategy script on the chart. */
+  readonly showTradeTimeline = this.tradeTimeline.show;
+  /** What the drawn timeline holds, or why nothing is drawn (the overlays menu shows it). */
+  readonly tradeTimelineInfo = this.tradeTimeline.info;
   /** Trade layers, each its own toggle ({@link ChartOverlaySettings}). */
   readonly showPositions = this.overlaySettings.showPositions;
   readonly showOrders = this.overlaySettings.showOrders;
@@ -1609,55 +1461,36 @@ export class ChartAnalysisPageComponent {
   private readonly orders = inject(OrdersService);
   private readonly martingale = inject(MartingaleService);
 
-  /** Economic events on the time axis. */
-  private readonly eventsFeed = inject(ChartEventsService);
-  readonly events = signal<EventMark[]>([]);
   readonly showEvents = this.overlaySettings.showEvents;
   readonly minEventImpact = this.overlaySettings.minEventImpact;
   /** Shade the news blackout around Tier-1 events (CC-I2); saved with the layout. */
   readonly showBlackout = this.overlaySettings.showBlackout;
-  /** The blackout window live applies (`economic-event/news-blackout`), and when it was read. */
-  readonly blackout = signal<BlackoutWindow | null>(null);
-  private blackoutAt = 0;
-  /**
-   * UA01: which scheduled events concern the symbol, by asset class (`panels/event-relevance.ts`): FX its two
-   * currencies (unchanged), crypto the quote's fiat + the coin's events + funding, indices their currency + expiries,
-   * equities USD + earnings, futures + expiry. Drives the chart's marks, the blackout shading and the calendar pane.
-   */
-  readonly eventRelevance = computed(
-    () => {
-      const f = this.facts();
-      const pair = this.currentPair();
-      return eventRelevance({
-        symbol: this.symbol(),
-        assetClass: f.resolving ? null : f.assetClass,
-        pairBase: pair?.baseCurrency,
-        pairQuote: pair?.quoteCurrency,
-        instrument: f.instrument,
-      });
-    },
-    { equal: sameRelevance },
-  );
-  /**
-   * UA03: what decides the symbol's fundamentals panes — FX panes for pairs, derivatives panes for perpetuals (read
-   * from the chart's venue source), roll yield for futures, COT per currency.
-   */
-  readonly paneScope = computed<PaneScope>(
-    () => {
-      const r = this.eventRelevance();
-      const f = this.facts();
-      const source = this.feed.factsOf(this.symbol())?.source ?? f.instrument.candleSource ?? null;
-      return {
-        symbol: this.symbol().toUpperCase(),
-        kind: r.kind,
-        perpetual: r.funding,
-        sourceId: source && source.kind !== 'mt5' && source.id !== 'mt5' ? source.id : null,
-        futureRoot: f.instrument.future?.root ?? null,
-        currencies: r.kind === 'fx' || r.kind === 'future' ? r.currencies.filter((c) => c.length === 3) : [],
-      };
-    },
-    { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
-  );
+  /** b9-maint: economic events, blackout shading and event relevance ({@link ChartEventsState}); aliased below. */
+  readonly eventsState = new ChartEventsState({
+    symbol: () => this.symbol(),
+    facts: () => this.facts(),
+    currentPair: () => this.currentPair(),
+    bars: () => this.bars(),
+    replayActive: () => this.replayActive(),
+    displayBars: () => this.displayBars(),
+    showEvents: this.overlaySettings.showEvents,
+    minEventImpact: this.overlaySettings.minEventImpact,
+    showBlackout: () => this.showBlackout(),
+    feed: this.feed,
+    instruments: this.instruments,
+    eventsFeed: inject(ChartEventsService),
+  });
+  /** Economic events on the time axis. */
+  readonly events = this.eventsState.events;
+  readonly blackout = this.eventsState.blackout;
+  readonly eventRelevance = this.eventsState.eventRelevance;
+  readonly paneScope = this.eventsState.paneScope;
+  readonly exchangeSessions = this.eventsState.exchangeSessions;
+  readonly technicalsSessionWords = this.eventsState.technicalsSessionWords;
+  readonly pairCurrencies = this.eventsState.pairCurrencies;
+  readonly chartEvents = this.eventsState.chartEvents;
+  readonly blackoutTitle = this.eventsState.blackoutTitle;
+  readonly eventBands = this.eventsState.eventBands;
   /**
    * The line under a study in the studies strip: why a pane is empty (UA03) — the engine's reason or "FX pairs only".
    */
@@ -1671,69 +1504,6 @@ export class ChartAnalysisPageComponent {
     if (!this.feed.factsOf(this.symbol())) return null;
     return volumeStudyNote(item.defId, this.volumeKind(), this.facts().instrument.baseCurrency, item.params);
   }
-  /**
-   * UA02: the symbol's own Pre / Regular / Post sessions, from its trading calendar (C1 `calendarCode`, else the
-   * instrument's) — the Exchange-sessions study and the pre / regular / post session profiles.
-   */
-  readonly exchangeSessions = signal<ExchangeSessions | null>(null);
-  private readonly exchangeCalendarCode = computed(
-    () =>
-      this.feed.factsOf(this.symbol())?.calendarCode ?? this.facts().instrument.tradingCalendarCode ?? null,
-  );
-  private readonly exchangeSessionsLoad = effect(() => {
-    const code = this.exchangeCalendarCode();
-    untracked(() => {
-      if (!code) {
-        this.exchangeSessions.set(null);
-        return;
-      }
-      if (this.exchangeSessions()?.code === code) return;
-      void this.instruments.calendar(code).then((cal) => {
-        if (this.exchangeCalendarCode() !== code) return;
-        this.exchangeSessions.set(cal ? exchangeSessionsOf(cal) : null);
-      });
-    });
-  });
-  /** UA05: how the Technicals view's session bars are cut, in words (FX unchanged). */
-  readonly technicalsSessionWords = computed(() => {
-    if (this.eventRelevance().kind === 'fx') return 'days roll at 17:00 New York';
-    const code = this.feed.factsOf(this.symbol())?.calendarCode;
-    return code ? `trading days of the ${code} calendar` : "the instrument's trading days";
-  });
-  /** The economic-calendar currencies the chart asks for (FX: the pair's two, as before). */
-  readonly pairCurrencies = computed(() => this.eventRelevance().currencies, {
-    equal: (a, b) => a.join() === b.join(),
-  });
-  /**
-   * The events the chart draws: in replay, none after the head — the calendar of the replayed past,
-   * not its future (their actuals would be look-ahead).
-   */
-  readonly chartEvents = computed(() => {
-    const events = this.events();
-    if (!this.replayActive()) return events;
-    const shown = this.displayBars();
-    const head = shown[shown.length - 1];
-    return head ? events.filter((e) => e.time <= head.time) : [];
-  });
-  /** What the blackout chip shades, in the policy's numbers. */
-  readonly blackoutTitle = computed(() => {
-    const w = this.blackout();
-    if (!w) return 'Shade the news blackout around high-impact events';
-    if (!w.active)
-      return `The news blackout is off (${w.explanation ?? 'no window'}): nothing is refused around events`;
-    const enforced = this.eventRelevance().blackoutCurrencies;
-    if (!enforced.length)
-      return `Live's news blackout does not block ${this.symbol().toUpperCase()}: no calendar currency is enforced for it`;
-    const ccy = enforced.join('/');
-    return `Shade the ${w.minutesBefore} min before and ${w.minutesAfter} min after each high-impact ${ccy} event: live refuses new entries then`;
-  });
-  /** The blackout spans to shade (UTC ms). */
-  readonly eventBands = computed(() =>
-    this.showEvents() && this.showBlackout()
-      ? blackoutBands(this.chartEvents(), this.blackout(), this.eventRelevance().blackoutCurrencies)
-      : [],
-  );
-
   // ── Watchlist ────────────────────────────────────────────────────────────
   //
   // Prices come from the same throttled `priceUpdated` stream the chart uses,
@@ -1783,27 +1553,27 @@ export class ChartAnalysisPageComponent {
   }
 
   // ── Side panes: Details and News ─────────────────────────────────────────
-  private readonly newsIntel = inject(NewsIntelService);
-  readonly sidePane = signal<'none' | 'details' | 'news' | 'calendar' | 'datawindow'>('none');
-  /** Economic calendar pane: every currency rather than the pair's two; minimum importance. */
-  readonly calendarAll = signal(false);
-  readonly calendarMinImpact = signal<EconomicImpact>('Low');
-  /** The calendar event whose AI reading is open. */
-  readonly calendarEvent = signal<UpcomingEconomicEvent | null>(null);
-  readonly calendarCurrencies = computed(
-    () =>
-      // UA01: FX keeps the pair's two; anything else the currencies its releases come from (AAPL → USD, BTC-USD → USD).
-      this.eventRelevance().kind === 'fx'
-        ? [this.details().base, this.details().quote].filter((c) => c && c !== '—')
-        : this.eventRelevance().currencies,
-    { equal: (a, b) => a.join() === b.join() },
-  );
-  readonly articles = signal<NewsArticleView[]>([]);
-  /** The news item long-pressed for its AI analysis modal. */
-  readonly newsAnalysis = signal<NewsArticleView | null>(null);
-
-  readonly newsLoading = signal(false);
-  readonly newsFocus = signal<NewsFocusResult | null>(null);
+  /** b9-maint: the side panes, calendar filters and news ({@link ChartNewsPane}); aliased below. */
+  readonly newsPane = new ChartNewsPane({
+    symbol: () => this.symbol(),
+    symbols: () => this.symbols(),
+    eventRelevance: () => this.eventRelevance(),
+    pairCurrencies: () => this.pairCurrencies(),
+    details: () => this.details(),
+    watchlistOpen: () => this.watchlistOpen(),
+    chartPanels: this.chartPanels,
+    newsIntel: inject(NewsIntelService),
+    destroyRef: this.destroyRef,
+  });
+  readonly sidePane = this.newsPane.sidePane;
+  readonly calendarAll = this.newsPane.calendarAll;
+  readonly calendarMinImpact = this.newsPane.calendarMinImpact;
+  readonly calendarEvent = this.newsPane.calendarEvent;
+  readonly calendarCurrencies = this.newsPane.calendarCurrencies;
+  readonly articles = this.newsPane.articles;
+  readonly newsAnalysis = this.newsPane.newsAnalysis;
+  readonly newsLoading = this.newsPane.newsLoading;
+  readonly newsFocus = this.newsPane.newsFocus;
 
   /**
    * Symbol facts for the Details pane, assembled from what the console already
@@ -1903,6 +1673,21 @@ export class ChartAnalysisPageComponent {
    * scripts run to it (PC-08, PC-I8) — never a bar past it, nor the bar forming from intrabar steps.
    */
   readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
+  /** b9-maint: range presets, go-to-date and Bar Replay's controls ({@link ChartTimeNavigator}); the template reads `timeNav`. */
+  readonly timeNav = new ChartTimeNavigator({
+    bars: () => this.bars(),
+    historyComplete: () => this.historyComplete(),
+    resolution: () => this.resolution(),
+    timezone: () => this.timezone(),
+    host: () => this.host(),
+    loadOlder: () => this.loadOlder(),
+    selectResolution: (r) => this.selectResolution(r),
+    replay: this.replay,
+    stopReplayRuns: () => this.engine.replayRuns.stopAll(),
+    barTimeLabel: (bar) => this.barTimeLabel(bar),
+    formatTime: (ms) => this.formatTime(ms),
+    notify: inject(NotificationService),
+  });
   /** The indicators' engine replay sessions: a head moving forward executes only the new bars (CC-I4). */
   private readonly replayScripts = new ReplayScriptSessions(inject(ScriptingRunService));
   /** US02b: the drawing-tool state (armed tool, magnet, stay-in-drawing, the rail's families and flyouts). */
@@ -2044,7 +1829,6 @@ export class ChartAnalysisPageComponent {
     /** A derived level under the click (PR-7): its alert is offered at the level's exact price. */
     level?: AlertableLevel | null;
   } | null>(null);
-  readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
   /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
   private readonly dialogs = inject(ScriptDialogService);
@@ -2117,73 +1901,18 @@ export class ChartAnalysisPageComponent {
     });
   });
   // ── UD11: continuous futures (adjusted / raw, roll markers) and equity adjustment ──
-  private readonly futuresRolls = inject(FuturesRollsService);
-  /** The rolls of the continuous future on the chart: null = not one / not read; [] = none recorded. */
-  private readonly rolls = signal<{ root: string; rolls: FutureRoll[] | null } | null>(null);
-  private readonly rollsLoad = effect(() => {
-    const info = continuousInfo(this.symbol());
-    untracked(() => {
-      if (!info) {
-        this.rolls.set(null);
-        return;
-      }
-      if (this.rolls()?.root === info.root) return;
-      this.rolls.set({ root: info.root, rolls: null });
-      void this.futuresRolls.rolls(info.root).then((rolls) => {
-        if (continuousInfo(this.symbol())?.root === info.root)
-          this.rolls.set({ root: info.root, rolls });
-      });
-    });
+  readonly seriesAdjustments = new ChartSeriesAdjustments({
+    symbol: () => this.symbol(),
+    bars: () => this.bars(),
+    precision: () => this.precision(),
+    assetClass: () => this.facts().assetClass,
+    selectSymbol: (symbol) => this.selectSymbol(symbol),
+    reload: () => this.reload(),
+    feed: this.feed,
+    futuresRolls: inject(FuturesRollsService),
   });
-  readonly rollMarkers = computed(() => {
-    const info = continuousInfo(this.symbol());
-    const held = this.rolls();
-    if (!info || !held?.rolls?.length || held.root !== info.root) return [];
-    return rollMarkers(held.rolls, info, this.bars(), this.precision());
-  });
-  readonly seriesOptions = computed<SeriesOptions | null>(() => {
-    const symbol = this.symbol();
-    const info = continuousInfo(symbol);
-    const held = this.rolls();
-    const facts = this.feed.factsOf(symbol);
-    const ac = facts?.assetClass ?? this.facts().assetClass;
-    const n = held?.rolls?.length ?? 0;
-    const continuous = info
-      ? {
-          adjusted: info.adjusted,
-          rollsNote:
-            held?.rolls == null
-              ? 'rolls not read'
-              : n
-                ? `${n} roll${n === 1 ? '' : 's'}`
-                : 'no rolls recorded yet',
-        }
-      : null;
-    const equity =
-      ac === 'Equity' || ac === 'Etf'
-        ? { asked: this.seriesAdjustment(), applied: facts?.adjustment ?? null }
-        : null;
-    return continuous || equity ? { continuous, equity } : null;
-  });
-  /** The equity adjustment asked for the chart's symbol (mirrors the feed's; a signal for the template). */
-  private readonly seriesAdjustment = signal<'none' | 'splits' | 'all' | null>(null);
-  private readonly seriesAdjustmentFollow = effect(() => {
-    const symbol = this.symbol();
-    untracked(() => this.seriesAdjustment.set(this.feed.adjustmentOf(symbol)));
-  });
-  /** Switch a continuous future between its back-adjusted and raw series (`ES1!` ⇄ `ES1!U`). */
-  switchContinuousSeries(): void {
-    const info = continuousInfo(this.symbol());
-    if (info) this.selectSymbol(info.counterpart);
-  }
-  /** An equity's corporate-action adjustment: the feed asks chart-bars with it, and the chart reloads. */
-  setSeriesAdjustment(adjustment: 'none' | 'splits' | 'all' | null): void {
-    const symbol = this.symbol();
-    if (this.feed.adjustmentOf(symbol) === adjustment) return;
-    this.feed.setAdjustment(symbol, adjustment);
-    this.seriesAdjustment.set(adjustment);
-    void this.reload();
-  }
+  readonly rollMarkers = this.seriesAdjustments.rollMarkers;
+  readonly seriesOptions = this.seriesAdjustments.seriesOptions;
 
   /** The legend's three-state tone (kept for older bindings): open / closed / stale. */
   readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => this.marketView().tone);
@@ -2394,79 +2123,15 @@ export class ChartAnalysisPageComponent {
   }
 
   /** The search's asset-class filter (null = all); the chips show only when the catalogue holds more than FX. */
-  readonly symbolClass = signal<InstrumentAssetClass | null>(null);
-  readonly symbolClasses = computed(() =>
-    // Only once the engine serves its instrument master: in front of today's engine the menu is unchanged.
-    this.instruments.source() === 'instruments'
-      ? [
-          ...new Set([
-            ...this.instruments.assetClasses(),
-            ...this.remoteSearch.rows().map((r) => r.assetClass),
-          ]),
-        ]
-      : [],
-  );
-  readonly assetClassLabel = ASSET_CLASS_LABEL;
-
-  /**
-   * What the symbol search lists: every tradable instrument of the catalogue (FX derived from the currency pairs while
-   * the engine has no instrument master — the same active pairs as before), else the pairs themselves.
-   */
-  private readonly searchable = computed(() => {
-    const all = this.instruments.all().filter((i) => i.status !== 'Inactive');
-    if (all.length) return all;
-    return this.symbols().map((p) => ({
-      symbol: (p.symbol ?? '').toUpperCase(),
-      description:
-        p.baseCurrency && p.quoteCurrency
-          ? `${p.baseCurrency}/${p.quoteCurrency}`
-          : (p.symbol ?? ''),
-      assetClass: resolveInstrument(p.symbol, { assetClass: p.assetClass ?? null }).assetClass,
-    }));
+  /** b9-maint: the symbol search's lists ({@link ChartSymbolSearch}); the template reads it as `symbolSearch`. */
+  readonly symbolSearch = new ChartSymbolSearch({
+    open: () => this.symbolMenuOpen(),
+    query: () => this.symbolQuery(),
+    symbols: () => this.symbols(),
+    selectSymbol: (symbol) => this.selectSymbol(symbol),
+    instruments: this.instruments,
+    destroyRef: this.destroyRef,
   });
-
-  /** The search row's second column: the master's description, or "AUD/CAD" where it only repeats an FX symbol. */
-  symbolDescription(symbol: string, description: string | null | undefined): string {
-    const d = (description ?? '').trim();
-    if (d && d.toUpperCase() !== symbol.toUpperCase()) return d;
-    return /^[A-Z]{6}$/i.test(symbol)
-      ? `${symbol.slice(0, 3)}/${symbol.slice(3)}`.toUpperCase()
-      : d;
-  }
-
-  /**
-   * UD09: the engine searches the whole catalogue from two characters (debounced, paged); its rows join the loaded
-   * catalogue's below them, keyed by symbol + exchange, those without data marked "no data yet".
-   */
-  readonly remoteSearch = (() => {
-    const search = new RemoteSymbolSearch((q, o) => this.instruments.search(q, o));
-    inject(DestroyRef).onDestroy(() => search.dispose());
-    return search;
-  })();
-  private readonly remoteSearchFollow = effect(() => {
-    const open = this.symbolMenuOpen();
-    const query = this.symbolQuery();
-    const cls = this.symbolClass();
-    // Only once the engine serves its instrument master (in front of an older engine: the menu as it was).
-    const master = this.instruments.source() === 'instruments';
-    untracked(() => this.remoteSearch.set(open && master ? query : '', cls));
-  });
-  readonly filteredSymbols = computed(() =>
-    mergeSearch(
-      this.searchable().map((i) => searchRowOf(i as InstrumentDto, true)),
-      this.remoteSearch.rows(),
-      this.symbolQuery(),
-      this.symbolClass(),
-    ),
-  );
-  /** {@link filteredSymbols} by asset class, for the menu (one group: no headers). */
-  readonly symbolGroups = computed(() => groupSearch(this.filteredSymbols()));
-
-  /** Enter in the symbol search: the first (best) match, as on TradingView (CC-I13). */
-  pickFirstSymbol(): void {
-    const first = this.filteredSymbols()[0]?.symbol;
-    if (first) this.selectSymbol(first);
-  }
 
   /** Legend colour follows the bar's direction, as on TradingView. */
   readonly legendUp = computed(() => {
@@ -2819,7 +2484,7 @@ export class ChartAnalysisPageComponent {
       setSplitLayout: (id) => this.setSplitLayout(id),
       selectTool: (kind) => this.tool.set(kind),
       clearDrawings: () => this.drawings.clearVisible(),
-      takeSnapshot: () => this.takeSnapshot(),
+      takeSnapshot: () => this.layoutActions.takeSnapshot(),
       knownSymbols: () =>
         this.symbols()
           .map((p) => p.symbol ?? '')
@@ -2869,7 +2534,7 @@ export class ChartAnalysisPageComponent {
       },
       applyStudyTemplate: (id) => {
         const found = this.layoutStore.templates().find((t) => t.id === id);
-        if (found) this.applyTemplate(found);
+        if (found) this.layoutActions.applyTemplate(found);
       },
       removeStudyTemplate: (id) => this.layoutStore.removeTemplate(id),
 
@@ -2880,12 +2545,12 @@ export class ChartAnalysisPageComponent {
         playing: this.replayPlaying(),
         speed: this.replaySpeed(),
       }),
-      startReplay: () => this.startReplay(),
-      exitReplay: () => this.exitReplay(),
-      stepReplay: (d) => this.stepReplay(d),
-      toggleReplayPlay: () => this.toggleReplayPlay(),
-      setReplaySpeed: (x) => this.setReplaySpeed(String(x)),
-      setReplayIndex: (i) => this.setReplayIndex(String(i)),
+      startReplay: () => this.timeNav.startReplay(),
+      exitReplay: () => this.timeNav.exitReplay(),
+      stepReplay: (d) => this.timeNav.stepReplay(d),
+      toggleReplayPlay: () => this.timeNav.toggleReplayPlay(),
+      setReplaySpeed: (x) => this.timeNav.setReplaySpeed(String(x)),
+      setReplayIndex: (i) => this.timeNav.setReplayIndex(String(i)),
 
       loadOlder: () => this.loadOlder(),
       eventImpact: () => this.minEventImpact(),
@@ -2902,7 +2567,7 @@ export class ChartAnalysisPageComponent {
       },
       watchlistOpen: this.watchlistOpen,
       objectTreeOpen: this.objectTreeOpen,
-      toggleFullscreen: () => this.toggleFullscreen(),
+      toggleFullscreen: () => this.layoutActions.toggleFullscreen(),
       isFullscreen: () => this.isFullscreen(),
       showVolumeProfile: this.showVolumeProfile,
       showSupportResistance: this.showSupportResistance,
@@ -2955,24 +2620,13 @@ export class ChartAnalysisPageComponent {
       for (const s of this.warmSessions.all()) this.releaseWarm(s.key);
     });
     // EV-1: a headline labelled for the pair's currencies re-reads the news pane (and the watchlist's headline).
-    let newsTimer: ReturnType<typeof setTimeout> | undefined;
-    this.destroyRef.onDestroy(() => clearTimeout(newsTimer));
-    this.realtime
-      .on<NewsArticleIngestedPayload>('newsArticleIngested')
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((article) => {
-        if (this.sidePane() !== 'news' && !this.watchlistOpen()) return;
-        if (!concernsPane(article, this.pairCurrencies())) return;
-        // A classification batch pushes several at once: one re-read for all of them.
-        clearTimeout(newsTimer);
-        newsTimer = setTimeout(() => this.loadNews(), 1500);
-      });
+    this.newsPane.followIngested(this.realtime.on<NewsArticleIngestedPayload>('newsArticleIngested'));
 
     // UA01: the instrument resolved after the events were read (catalogue lookup, the first chart-bars answer): ask again.
     effect(() => {
       this.eventRelevance();
       untracked(() => {
-        if (this.eventsHeld?.key.startsWith(`${this.symbol().toUpperCase()}|`)) this.loadEvents();
+        if (this.eventsState.holdsEventsFor(this.symbol())) this.loadEvents();
       });
     });
     // Ticking clock, and presets applied once their interval's bars are in.
@@ -2984,7 +2638,7 @@ export class ChartAnalysisPageComponent {
       untracked(() => {
         this.tickClock();
         queueMicrotask(() => {
-          this.flushPendingRange();
+          this.timeNav.flushPendingRange();
           this.flushPendingView();
         });
       });
@@ -3081,98 +2735,6 @@ export class ChartAnalysisPageComponent {
     this.tradeRefreshTimer = setTimeout(() => this.loadTradingOverlays(), 400);
   }
 
-  // ── Replay controls ──────────────────────────────────────────────────────
-
-  /**
-   * Bar Replay on: the whole chart shows and the next click on it picks the bar replay starts at
-   * (TradingView's "Select bar"); the replay bar also takes a date and time.
-   */
-  startReplay(): void {
-    const total = this.bars().length;
-    if (total === 0) return;
-    this.replay.start(total);
-    void this.pickReplayStart();
-  }
-
-  /** The next click on the chart picks the bar replay starts at; Esc keeps where it is. */
-  async pickReplayStart(): Promise<void> {
-    const host = this.host();
-    if (!host || !this.replayActive()) return;
-    this.replay.pause();
-    this.replay.selecting.set(true);
-    const pick = await host.pickPoint('time');
-    this.replay.selecting.set(false);
-    if (pick && this.replayActive()) this.replay.startAt(pick.time);
-  }
-
-  /**
-   * Start replay at a date and time on the chart's clock (`yyyy-mm-ddThh:mm`), loading history back to
-   * it first — as go-to-date does, at most {@link GO_TO_DATE_PAGES} pages — and showing it.
-   */
-  async startReplayAt(value: string): Promise<void> {
-    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(value);
-    if (!m) return;
-    const t =
-      midnightOnClock(Number(m[1]), Number(m[2]) - 1, Number(m[3]), this.timezone()) +
-      Number(m[4] ?? 0) * 3_600_000 +
-      Number(m[5] ?? 0) * 60_000;
-    this.host()?.cancelPick();
-    await this.loadBackTo(t);
-    const oldest = this.bars()[0];
-    if (!oldest) return;
-    if (oldest.time > t && !this.historyComplete())
-      this.notify.warning(
-        `History before ${this.barTimeLabel(oldest)} is not loaded: replay starts at the oldest bar.`,
-      );
-    if (!this.replayActive()) this.replay.start(this.bars().length);
-    this.replay.startAt(t);
-    const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
-    this.pendingRange = { fromMs: t - span * 0.8, toMs: t + span * 0.2 };
-    this.flushPendingRange();
-  }
-
-  /** Load history pages until the bars reach back to `t` (at most {@link GO_TO_DATE_PAGES} pages). */
-  private async loadBackTo(t: number): Promise<void> {
-    for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
-      const held = this.bars();
-      if (!held.length || held[0].time <= t || this.historyComplete()) break;
-      await this.loadOlder();
-      if (this.bars()[0]?.time === held[0].time) break; // nothing older came back
-    }
-  }
-
-  /** The series changed in replay: history back to the head's instant, and the head on its bar there. */
-  private async reanchorReplay(anchor: number): Promise<void> {
-    this.engine.replayRuns.stopAll();
-    this.replay.reanchor(anchor);
-    if ((this.bars()[0]?.time ?? anchor) > anchor) {
-      await this.loadBackTo(anchor);
-      if (this.replayActive()) this.replay.reanchor(anchor);
-    }
-  }
-
-  exitReplay(): void {
-    this.host()?.cancelPick();
-    this.replay.exit();
-    this.engine.replayRuns.stopAll();
-  }
-
-  stepReplay(delta: number): void {
-    const dir = delta < 0 ? -1 : 1;
-    const n = Math.max(1, Math.abs(Math.trunc(delta)) || 1);
-    if (n === 1) {
-      void this.replay.step(dir);
-      return;
-    }
-    // Many at once (the assistant): whole bars.
-    const c = this.replay.cursor();
-    this.replay.moveTo({ index: c.index + dir * n, sub: null });
-  }
-
-  toggleReplayPlay(): void {
-    this.replay.togglePlay();
-  }
-
   setBoxSize(raw: string): void {
     const value = Number(raw);
     if (Number.isFinite(value) && value > 0) this.boxSizeAtr.set(value);
@@ -3204,173 +2766,30 @@ export class ChartAnalysisPageComponent {
     this.style() === 'kagi' ? 'Reversal' : this.style() === 'range' ? 'Range' : 'Box size',
   );
 
-  setReplaySpeed(raw: string): void {
-    this.replay.setSpeed(Number(raw));
-  }
-
-  setReplayIndex(raw: string): void {
-    this.replay.setIndex(Number(raw));
-  }
-
-  /**
-   * The time at the replay head, for the replay bar: the bar's, or — while a bar forms from intrabar
-   * steps — the last intrabar bar's open on the chart's clock.
-   */
-  replayTime(): string {
-    const head = this.replay.headBar();
-    if (!head) return '';
-    if (this.replay.cursor().sub === null) return this.barTimeLabel(head);
-    const zone = this.timezone();
-    return this.formatTime(
-      head.time + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, head.time) * 60_000),
-    );
-  }
-
-  /** What the events on the chart were fetched for, and the window they cover (UTC ms). */
-  private eventsHeld: { key: string; from: number; to: number } | null = null;
-  /** Bumped by every full load: a reply for an older one (another symbol, importance) is dropped. */
-  private eventsLoad = 0;
-
-  /**
-   * Load the pair's economic events onto the time axis (CC-07, SP-08, contract C3): the loaded bars'
-   * window through two weeks ahead, the pair's currencies and the chart's minimum importance filtered
-   * on the engine. `extend` (scroll-back loaded older bars): fetch only what the held window does not
-   * cover on the left, and merge it — the events used to stay at the first load's window.
-   */
+  /** b9-maint: {@link ChartEventsState.loadEvents} (the history pager, the session store and the specs call it here). */
   private loadEvents(extend = false): void {
-    if (!this.showEvents()) {
-      this.eventsLoad++;
-      this.eventsHeld = null;
-      this.events.set([]);
-      return;
-    }
-    const currencies = this.pairCurrencies();
-    const minImpact = this.minEventImpact();
-    const symbol = this.symbol().toUpperCase();
-    const relevance = this.eventRelevance();
-    const sourceId = this.feed.factsOf(symbol)?.source?.id ?? null;
-    const key = `${symbol}|${currencies.join(',')}|${minImpact}|${relevance.marketKeys.join(',')}|${relevance.expiryMs}|${relevance.funding}|${sourceId}`;
-    const loaded = this.bars();
-    const wanted = eventsWindow(loaded.length ? loaded[0].time : null, Date.now());
-    const held = this.eventsHeld?.key === key ? this.eventsHeld : null;
-    const span = extend ? (held ? missingOnTheLeft(held, wanted) : null) : wanted;
-    if (!span) return;
-    const load = extend ? this.eventsLoad : ++this.eventsLoad;
-    if (!extend) this.eventsHeld = null;
-    this.refreshBlackout();
-    void this.eventsFeed
-      .load({ currencies, minImpact, from: span.from, to: span.to, relevance, symbol, sourceId })
-      .then((marks) => {
-        // A newer load (another symbol, importance or toggle) owns the layer now.
-        if (load !== this.eventsLoad || !marks) return;
-        if (extend) {
-          const now = this.eventsHeld;
-          if (!now || now.key !== key) return;
-          this.events.set(mergeMarks(this.events(), marks));
-          this.eventsHeld = { key, from: Math.min(now.from, span.from), to: now.to };
-        } else {
-          this.events.set(marks);
-          this.eventsHeld = { key, from: span.from, to: span.to };
-          // History loaded on the left while this was in flight.
-          this.loadEvents(true);
-        }
-      });
-  }
-
-  /** Read the blackout window again when it is older than ten minutes (it is config). */
-  private refreshBlackout(): void {
-    if (Date.now() - this.blackoutAt < 600_000) return;
-    this.blackoutAt = Date.now();
-    void this.eventsFeed.blackout().then((w) => {
-      if (w) this.blackout.set(w);
-      else this.blackoutAt = 0;
-    });
+    this.eventsState.loadEvents(extend);
   }
 
   toggleEvents(): void {
-    this.showEvents.set(!this.showEvents());
-    this.loadEvents();
+    this.eventsState.toggleEvents();
   }
 
-  /** The minimum importance is filtered on the engine: a change asks again. */
   cycleEventImpact(): void {
-    const order: Array<'High' | 'Medium' | 'Low'> = ['High', 'Medium', 'Low'];
-    const next = order[(order.indexOf(this.minEventImpact()) + 1) % order.length];
-    this.minEventImpact.set(next);
-    this.loadEvents();
+    this.eventsState.cycleEventImpact();
   }
 
   openSidePane(pane: 'details' | 'news' | 'calendar' | 'datawindow'): void {
-    this.sidePane.set(this.sidePane() === pane ? 'none' : pane);
-    // One side pane at a time: the page's own close the SP-I9 panels.
-    if (this.sidePane() !== 'none') this.chartPanels.close();
-    if (this.sidePane() === 'news') this.loadNews();
+    this.newsPane.openSidePane(pane);
   }
 
-  /** A right-rail SP-I9 panel (notes, broker depth, sentiment, account) — it replaces any open side pane. */
   openPanel(panel: SidePanel): void {
-    this.sidePane.set('none');
-    this.chartPanels.toggle(panel);
+    this.newsPane.openPanel(panel);
   }
 
-  private newsSeq = 0;
-
-  /**
-   * Headlines for the charted pair's currencies — the base AND the quote (SP-07: it read the base only).
-   *
-   * Filtered to the two currencies the pair is made of, for the same reason the
-   * economic events are: an operator charting EURUSD does not want JPY
-   * headlines competing for the same space. Each currency is read separately so
-   * each gets its own budget (a busy USD tape cannot crowd EUR out), then merged
-   * once per article, newest first.
-   */
   private loadNews(): void {
-    const pair = this.symbols().find(
-      (p) => (p.symbol ?? '').toUpperCase() === this.symbol().toUpperCase(),
-    );
-    const currencies = [...new Set([pair?.baseCurrency, pair?.quoteCurrency])]
-      .map((c) => c?.toUpperCase())
-      .filter((c): c is string => !!c);
-    const n = ++this.newsSeq;
-    this.newsLoading.set(true);
-    // The news module can be disabled entirely; an empty pane says that
-    // better than an error toast the operator cannot act on.
-    const reads = (currencies.length ? currencies : [undefined]).map((currency) =>
-      this.newsIntel.getArticles({ currency, hours: 48, take: 40 }).pipe(catchError(() => of([]))),
-    );
-    forkJoin(reads)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((lists) => {
-        // A slower reply for the previous symbol must not replace this one's headlines.
-        if (n !== this.newsSeq) return;
-        this.articles.set(
-          mergeArticles(...lists.map((rows) => (Array.isArray(rows) ? rows : []))).slice(0, 60),
-        );
-        this.newsLoading.set(false);
-      });
-
-    // The headlines above are the RECORD layer. This is the module's actual
-    // read on the pair — the base-minus-quote bias and, more importantly, how
-    // much of it is still live. A deeply negative score whose liveShare has
-    // decayed to nothing is a story the market has finished repricing; showing
-    // headlines without it invites trading news that is already in the price.
-    this.newsFocus.set(null);
-    this.newsIntel
-      .getFocus(this.symbol().toUpperCase())
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (r) => this.newsFocus.set(r ?? null),
-        error: () => this.newsFocus.set(null),
-      });
+    this.newsPane.loadNews();
   }
-
-  /**
-   * Format a leg for the pane: score, story count and live share.
-   *
-   * `liveShare === null` is NOT the same as zero — the type documents it as
-   * "no weight to divide" versus "measured, and none of it is live" — so it
-   * renders as an em dash rather than 0%.
-   */
 
   /**
    * Keep the watchlist's last price and a reference for the change column.
@@ -3470,7 +2889,7 @@ export class ChartAnalysisPageComponent {
       const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
       this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
       this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
-      if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
+      if (this.replayActive() && replayAnchor !== null) void this.timeNav.reanchorReplay(replayAnchor);
       this.session.resetFormingState(bars, resolution);
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
@@ -3633,100 +3052,8 @@ export class ChartAnalysisPageComponent {
     return calendar;
   }
 
-  private fundamentalsRequest = 0;
   private loadFundamentals(items: ActiveIndicator[], symbol: string): void {
-    const request = ++this.fundamentalsRequest;
-    if (!items.length) {
-      this.externalPanes.set([]);
-      return;
-    }
-    const base = symbol.slice(0, 3);
-    const quote = symbol.slice(3, 6);
-    const scope = this.paneScope();
-    const loaded = this.bars();
-    const window = { from: loaded[0]?.time ?? Date.now() - 7 * 86_400_000, to: Date.now() };
-    const one = (a: ActiveIndicator): Observable<ExternalPane> => {
-      const id = fundamentalIdOf(a.defId);
-      const pane = (lines: ExternalPane['lines']): ExternalPane => ({ uid: a.uid, lines });
-      // UA03: a pane saved with a layout on a symbol it does not apply to says why instead of slicing the symbol.
-      if (!paneApplies(id, scope)) return of({ uid: a.uid, lines: [], note: notApplicable(id, scope) });
-      switch (id) {
-        case 'rate-differential':
-          return this.fundamentals
-            .rateDifferential(symbol)
-            .pipe(
-              map((pts) =>
-                pane([{ title: `${base}−${quote} rate %`, color: '#2962FF', points: pts }]),
-              ),
-            );
-        case 'swap-carry':
-          return from(this.dailyBars.daily(symbol)).pipe(
-            switchMapTo((daily) => this.fundamentals.carryPanes(symbol, daily)),
-            map((c) => {
-              if (c.swapIssue) this.scriptError.set(`Swap / carry: ${c.swapIssue}`);
-              return pane([
-                { title: 'Swap long / lot', color: '#26A69A', points: c.swapLong },
-                { title: 'Swap short / lot', color: '#EF5350', points: c.swapShort },
-              ]);
-            }),
-          );
-        case 'news-pressure':
-          return this.fundamentals
-            .newsPressureDifference(base, quote)
-            .pipe(
-              map((pts) =>
-                pane([
-                  { title: `News ${base}−${quote}`, color: '#AB47BC', points: pts, precision: 3 },
-                ]),
-              ),
-            );
-        case 'economic-surprise': {
-          const side = String(a.params['side'] ?? 'base − quote');
-          const halfLifeDays = Number(a.params['halfLifeDays'] ?? 30);
-          const series = (ccy: string) => this.fundamentals.surpriseIndex(ccy, { halfLifeDays });
-          const pts$: Observable<PanePoint[]> =
-            side === 'base'
-              ? series(base)
-              : side === 'quote'
-                ? series(quote)
-                : forkJoin([series(base), series(quote)]).pipe(
-                    map(([x, y]) => stepDifference(x, y)),
-                  );
-          return pts$.pipe(
-            map((pts) =>
-              pane([
-                {
-                  title: `Surprise ${side === 'base − quote' ? `${base}−${quote}` : side === 'base' ? base : quote}`,
-                  color: '#FF6D00',
-                  points: pts,
-                },
-              ]),
-            ),
-          );
-        }
-        default:
-          return from(this.marketPanes.load(id, a.params, scope, window)).pipe(
-            map((r) => ({ uid: a.uid, lines: r.lines, stepped: r.stepped, note: r.note })),
-          );
-      }
-    };
-    forkJoin(
-      items.map((a) =>
-        one(a).pipe(
-          catchError((err: unknown) => {
-            const title = FUNDAMENTAL_PANES.find((f) => f.id === fundamentalIdOf(a.defId))?.title;
-            this.scriptError.set(
-              `${title ?? a.defId}: ${err instanceof Error ? err.message : 'unavailable'}`,
-            );
-            return of({ uid: a.uid, lines: [] } as ExternalPane);
-          }),
-        ),
-      ),
-    )
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((panes) => {
-        if (request === this.fundamentalsRequest) this.externalPanes.set(panes);
-      });
+    this.fundamentalPanes.load(items, symbol);
   }
 
   openStudiesDialog(tab: DialogTab = 'indicators'): void {
@@ -5282,175 +4609,22 @@ export class ChartAnalysisPageComponent {
     equal: (a, b) => JSON.stringify(a) === JSON.stringify(b),
   });
 
-  // ── Layout menu (server-backed) ──────────────────────────────────────────
-
-  async newLayout(): Promise<void> {
-    this.layoutMenuOpen.set(false);
-    const name = await askName(this.dialogs, {
-      title: 'New layout',
-      label: 'Layout name',
-      value: 'Unnamed',
-      confirmLabel: 'Create',
-    });
-    if (name !== null) void this.workspace.newLayout(name);
-  }
-
-  async renameLayout(): Promise<void> {
-    this.layoutMenuOpen.set(false);
-    const name = await askName(this.dialogs, {
-      title: 'Rename layout',
-      label: 'Layout name',
-      value: this.workspace.active().name,
-      confirmLabel: 'Rename',
-    });
-    if (name !== null) void this.workspace.rename(name);
-  }
-
-  async duplicateLayout(): Promise<void> {
-    this.layoutMenuOpen.set(false);
-    const name = await askName(this.dialogs, {
-      title: 'Copy layout',
-      message: 'The copy keeps this layout’s symbol, studies, scripts and drawings settings.',
-      label: 'Name of the copy',
-      value: `${this.workspace.active().name} copy`,
-      confirmLabel: 'Copy',
-    });
-    if (name !== null) void this.workspace.duplicate(name);
-  }
-
-  switchLayout(id: number): void {
-    this.layoutMenuOpen.set(false);
-    void this.workspace.switchTo(id);
-  }
-
-  removeLayout(id: number, ev: Event): void {
-    ev.stopPropagation();
-    const l = this.workspace.layouts().find((x) => x.id === id);
-    void confirmDelete(this.dialogs, `layout “${l?.name ?? id}”`).then((yes) => {
-      if (yes) void this.workspace.remove(id);
-    });
-  }
-
-  async saveTemplate(): Promise<void> {
-    if (this.active().length === 0) return;
-    this.layoutMenuOpen.set(false);
-    const name = await askName(this.dialogs, {
-      title: 'Save indicator template',
-      message: 'The studies on this chart, with their inputs and styles.',
-      label: 'Template name',
-      value: 'My studies',
-      confirmLabel: 'Save',
-    });
-    if (name !== null) this.layoutStore.saveTemplate(name, this.active());
-  }
-
-  applyTemplate(template: StudyTemplate): void {
-    this.layoutMenuOpen.set(false);
-    this.active.set(this.layoutStore.instantiate(template));
-  }
-
-  removeTemplate(id: string, ev: Event): void {
-    ev.stopPropagation();
-    this.layoutStore.removeTemplate(id);
-  }
-
-  /** The snapshot's title: symbol, timeframe and style, as the chart's title reads. */
-  private snapshotTitle(): string {
-    return `${this.symbol()} · ${this.resolutionLabel(this.resolution())} · ${this.styleLabel()}`;
-  }
-
-  private exportName(ext: string): string {
-    return `${this.symbol()}-${this.resolutionLabel(this.resolution())}-${new Date()
-      .toISOString()
-      .slice(0, 16)
-      .replace(/[:T]/g, '')}.${ext}`;
-  }
-
-  /**
-   * Download the chart as a PNG — the chart with its legend, the scripts' tables and a title
-   * (CC-22). Says when it could not: the assistant's chart.snapshot reported success with no image.
-   */
-  takeSnapshot(): { ok: boolean; message: string } {
-    this.contextMenu.set(null);
-    const canvas = this.host()?.snapshotCanvas(this.snapshotTitle());
-    let data: string | null = null;
-    try {
-      data = canvas ? canvas.toDataURL('image/png') : null;
-    } catch {
-      data = null;
-    }
-    if (!data || data === 'data:,') {
-      const message =
-        'The chart could not be captured: it is not drawn yet, or the browser refused.';
-      this.notify.error(message);
-      return { ok: false, message };
-    }
-    const name = this.exportName('png');
-    const a = document.createElement('a');
-    a.href = data;
-    a.download = name;
-    a.click();
-    return { ok: true, message: `Snapshot saved as ${name}.` };
-  }
-
-  /** Copy the snapshot to the clipboard as an image (CC-I7), where the browser allows it. */
-  async copySnapshot(): Promise<void> {
-    this.contextMenu.set(null);
-    const canvas = this.host()?.snapshotCanvas(this.snapshotTitle());
-    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
-    if (!canvas) {
-      this.notify.error('The chart could not be captured: it is not drawn yet.');
-      return;
-    }
-    if (!clipboard?.write || typeof ClipboardItem === 'undefined') {
-      this.notify.error('This browser does not allow copying images; use Save image instead.');
-      return;
-    }
-    try {
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error('no image');
-      await clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      this.notify.success('Chart image copied to the clipboard.');
-    } catch {
-      this.notify.error('The image could not be copied to the clipboard.');
-    }
-  }
-
-  /**
-   * Download the chart's data as CSV (CC-I7): each bar's UTC time, prices and volume, and every
-   * value the data window lists for it — studies, and scripts' plots when they provide them.
-   */
-  exportChartData(): void {
-    this.contextMenu.set(null);
-    const rows = this.host()?.exportRows() ?? [];
-    if (rows.length < 2) {
-      this.notify.error('There are no bars to export yet.');
-      return;
-    }
-    const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = this.exportName('csv');
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1_000);
-  }
-
-  async toggleFullscreen(): Promise<void> {
-    const el = document.querySelector('.chart-page');
-    if (!el) return;
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        this.isFullscreen.set(false);
-      } else {
-        await (el as HTMLElement).requestFullscreen();
-        this.isFullscreen.set(true);
-      }
-    } catch {
-      // Fullscreen is refused without a user gesture in some contexts; the
-      // chart is perfectly usable without it, so this is not worth surfacing.
-    }
-  }
+  // ── Layout menu (server-backed), templates, exports, fullscreen ─────────────
+  /** b9-maint: {@link ChartLayoutActions}; the template and the assistant's commands call it as `layoutActions`. */
+  readonly layoutActions = new ChartLayoutActions({
+    layoutMenuOpen: this.layoutMenuOpen,
+    active: this.active,
+    isFullscreen: this.isFullscreen,
+    // The snapshot's title: symbol, timeframe and style, as the chart's title reads.
+    title: () => `${this.symbol()} · ${this.resolutionLabel(this.resolution())} · ${this.styleLabel()}`,
+    fileStem: () => `${this.symbol()}-${this.resolutionLabel(this.resolution())}`,
+    closeContextMenu: () => this.contextMenu.set(null),
+    host: () => this.host(),
+    workspace: this.workspace,
+    layoutStore: this.layoutStore,
+    dialogs: this.dialogs,
+    notify: this.notify,
+  });
 
   openContextMenu(ev: MouseEvent): void {
     ev.preventDefault();
@@ -5472,158 +4646,9 @@ export class ChartAnalysisPageComponent {
    * "Add alert at POC 1.16234" (PR-7): the right-clicked profile or structure level's exact price into the
    * same alert form as "Add alert at …" — nothing is armed until the operator saves it.
    */
-  createAlertAtLevel(ev?: Event): void {
-    // The same click would reach the page's (document:click) close-all and shut the popover it opens.
-    ev?.stopPropagation();
-    const level = this.contextMenu()?.level;
-    this.contextMenu.set(null);
-    if (!level || !Number.isFinite(level.price) || level.price <= 0) return;
-    this.alertPreset.set(level.price);
-    this.alertDraft.set(null);
-    this.openMenu.set('alert');
-  }
-
-  // ── Chart alerts (alerts v2) ─────────────────────────────────────────────
-  //
-  // ChartAlert rows evaluated by the engine on every tick (a CROSSING of the price on the alert's side, bid by
-  // default), not the old polled PriceLevel rule that compared the mid price every 30 s and fired at once when set at
-  // the last close (SP-02/SP-03).
-
-  /**
-   * Add an alert at the right-clicked price: opens the alert form at that level. The operator still sees the direction
-   * (pre-set to the way price must travel to reach it), the side and the rest before anything is armed.
-   */
-  createAlertHere(ev?: Event): void {
-    // The same click would reach the page's (document:click) close-all and shut the popover it opens.
-    ev?.stopPropagation();
-    const menu = this.contextMenu();
-    this.contextMenu.set(null);
-    const price = menu?.price;
-    if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return;
-    this.alertPreset.set(price);
-    this.alertDraft.set(null);
-    this.openMenu.set('alert');
-  }
-
-  /** The form saved an alert. */
-  onAlertSaved(): void {
-    this.openMenu.set(null);
-    const drawing = this.alertDraft() !== null;
-    this.alertDraft.set(null);
-    this.notify.success(
-      drawing
-        ? 'Alert set — it fires when price crosses the drawing.'
-        : 'Alert set — it fires when price crosses the level.',
-    );
-  }
-
-  /** The alert manager (right rail) and the alert a bell link asked to show. */
-  readonly alertManagerOpen = signal(false);
-  readonly alertFocusId = signal<number | null>(null);
-
-  toggleAlertManager(): void {
-    if (this.alertManagerOpen()) this.closeAlertManager();
-    else this.alertManagerOpen.set(true);
-  }
-
-  closeAlertManager(): void {
-    this.alertManagerOpen.set(false);
-    this.alertFocusId.set(null);
-    this.scriptAlertFocusId.set(null);
-  }
-
-  /** The alert on a chart script a bell link asked to show (`?scriptAlert=12`, SS-I1). */
-  readonly scriptAlertFocusId = signal<number | null>(null);
-  private readonly scriptAlertQuery = toSignal(
-    this.route.queryParamMap.pipe(map((q) => q.get('scriptAlert'))),
-    { initialValue: null },
-  );
-  private readonly followScriptAlertQuery = effect(() => {
-    const id = Number(this.scriptAlertQuery());
-    if (!Number.isFinite(id) || id <= 0) return;
-    untracked(() => {
-      this.scriptAlertFocusId.set(id);
-      this.alertManagerOpen.set(true);
-    });
-  });
-
-  /** `?alert=12` (the bell's link to a fired chart alert): open the manager on it. */
-  private readonly alertQuery = toSignal(
-    this.route.queryParamMap.pipe(map((q) => q.get('alert'))),
-    {
-      initialValue: null,
-    },
-  );
-  private readonly followAlertQuery = effect(() => {
-    const id = Number(this.alertQuery());
-    if (!Number.isFinite(id) || id <= 0) return;
-    untracked(() => {
-      this.alertFocusId.set(id);
-      this.alertManagerOpen.set(true);
-    });
-  });
-
-  /** The price alerts of this symbol as dashed lines; dragging one asks before moving the alert. */
-  private readonly alertLines = new AlertLinesPrimitive(
-    () => this.precision(),
-    (move) => this.askMoveAlert(move),
-  );
-  private readonly attachAlertLines = effect((onCleanup) => {
-    const host = this.host();
-    if (!host) return;
-    untracked(() => this.chartAlerts.ensureLoaded());
-    onCleanup(host.attachPricePrimitive(this.alertLines));
-  });
-  private readonly drawAlertLines = effect(() =>
-    this.alertLines.setLines(
-      alertLinesFor(this.chartAlerts.alerts(), this.symbol(), this.precision()),
-    ),
-  );
-
-  readonly pendingAlertMove = signal<{
-    alertId: number;
-    label: string;
-    from: number;
-    to: number;
-    move: AlertLineMove;
-  } | null>(null);
+  /** The bell links and the alert lines (their effects keep this place in the page's effect order). */
+  private readonly alertEffects = this.alerts.connect();
   private readonly alertMoveDialog = viewChild<ElementRef<HTMLDialogElement>>('alertMoveDialog');
-
-  private askMoveAlert(move: AlertLineMove): void {
-    const alert = this.chartAlerts.alerts().find((a) => a.id === move.line.alertId);
-    if (!alert) return;
-    if (!movedBounds(alert, move.line.bound, move.price)) {
-      this.notify.warning('The upper level of a channel must stay above its lower level.');
-      return;
-    }
-    this.pendingAlertMove.set({
-      alertId: alert.id,
-      label: alert.name || alert.symbol,
-      from: move.line.price,
-      to: move.price,
-      move,
-    });
-    this.alertMoveDialog()?.nativeElement.showModal();
-  }
-
-  confirmAlertMove(): void {
-    const pending = this.pendingAlertMove();
-    this.alertMoveDialog()?.nativeElement.close();
-    const alert = pending ? this.chartAlerts.alerts().find((a) => a.id === pending.alertId) : null;
-    if (!pending || !alert) return;
-    const bounds = movedBounds(alert, pending.move.line.bound, pending.to);
-    if (!bounds) return;
-    this.chartAlerts
-      .update(alert.id, { ...inputOf(alert), price: bounds.price, upperPrice: bounds.upperPrice })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res) =>
-          res?.status
-            ? this.notify.success('Alert moved.')
-            : this.notify.error(res?.message || 'The alert could not be moved.'),
-        error: () => this.notify.error('The alert could not be moved — the engine did not answer.'),
-      });
-  }
 
   closeContextMenu(): void {
     this.contextMenu.set(null);
@@ -5852,7 +4877,7 @@ export class ChartAnalysisPageComponent {
           this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
         else if (action === 'percent')
           this.scaleMode.set(this.scaleMode() === 'percent' ? 'normal' : 'percent');
-        else this.takeSnapshot();
+        else this.layoutActions.takeSnapshot();
         return;
       }
       const kind = DRAWING_HOTKEYS[ev.code];
