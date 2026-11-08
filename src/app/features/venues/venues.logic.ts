@@ -174,11 +174,28 @@ export function credentialFieldsFor(kind: string): CredentialField[] {
 /** The FIX gateway's venue profiles (LascodiaFixGateway/profiles): a fix44 account's venue is one of them. */
 export const FIX_PROFILES = ['fix-generic', 'lmax', 'ctrader-fix', 'currenex', 'integral'] as const;
 
+/**
+ * The venue a crypto account of each kind carries: where its markets are mapped (engine `CryptoAdapterKinds.VenueOf`,
+ * FR06). Derivatives kinds have their OWN venue — a binance-usdm account left on "binance" would never route its perps.
+ */
+export const CRYPTO_KIND_VENUES: Readonly<Record<string, string>> = {
+  binance: 'binance',
+  'binance-usdm': 'binance-usdm',
+  coinbase: 'coinbase',
+  kraken: 'kraken',
+  'kraken-futures': 'kraken-futures',
+  'bybit-spot': 'bybit',
+  'bybit-linear': 'bybit-linear',
+  okx: 'okx',
+  'okx-swap': 'okx-swap',
+};
+
 /** Venue codes that fit an adapter kind (the create form's suggestions; free text stays allowed). */
 export function venueSuggestions(kind: string): string[] {
   const k = kind.toLowerCase();
   if (k === 'fix44') return [...FIX_PROFILES];
   if (k === 'oanda' || k === 'ctrader') return [k];
+  if (CRYPTO_KIND_VENUES[k]) return [CRYPTO_KIND_VENUES[k]];
   return [];
 }
 
