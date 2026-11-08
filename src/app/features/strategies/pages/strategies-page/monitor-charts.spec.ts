@@ -6,6 +6,7 @@ import {
   cumulativePnl,
   equityCurveChart,
   monthlyPnl,
+  monitorCurveScope,
   monthlyPnlChart,
   rollingProfitFactor,
   rollingProfitFactorChart,
@@ -76,6 +77,20 @@ describe('monitor charts (real closed trades)', () => {
     expect(rollingWinRateChart(more)).not.toBeNull();
     expect(rollingProfitFactorChart(more)).not.toBeNull();
     expect(equityCurveChart(more)).not.toBeNull();
+  });
+
+  it('labels the axis and scope by the unit / accounts the engine answered', () => {
+    const two = [t('2026-11-01T00:00:00Z', 0.5), t('2026-11-02T00:00:00Z', -1)];
+    expect((equityCurveChart(two, 'R')!.yAxis as { name: string }).name).toBe('R');
+    expect((equityCurveChart(two)!.yAxis as { name: string }).name).toBe('P&L');
+    expect((monthlyPnlChart(two, 'R')!.yAxis as { name: string }).name).toBe('R');
+    expect(monitorCurveScope('Currency', 'All')).toBe(
+      'all accounts, live + paper · account currency',
+    );
+    expect(monitorCurveScope('R', 'Paper', true)).toBe(
+      'paper only · R per trade decision · newest 5,000 (older trades not shown)',
+    );
+    expect(monitorCurveScope('Currency', 'Live')).toContain('live accounts only');
   });
 
   it('the strategies page never draws a random series again', () => {

@@ -1787,12 +1787,27 @@ export interface StrategyEquityCurveDto {
   pointCount: number;
   finalCumulativePnL: number;
   points: EquityCurvePointDto[];
+  /** What the P&L columns are in (engine fu-engine item 5). Absent on older engines = Currency. */
+  unit?: EquityCurveUnit;
+  /** Which accounts the curve covers. Absent on older engines = All. */
+  accountKind?: EquityCurveAccountKind;
+  /** True when older points exist than the first one returned (newest-N window). */
+  truncated?: boolean;
 }
 
-/** Body for `POST /strategy/{id}/equity-curve`. */
+/** `Currency`: realised P&L per closed position; `R`: one point per trade decision at its mean R. */
+export type EquityCurveUnit = 'Currency' | 'R';
+/** `Live` = real positions on real accounts, `Paper` = paper positions / IsPaper accounts. */
+export type EquityCurveAccountKind = 'All' | 'Live' | 'Paper';
+
+/** Body for `POST /strategy/{id}/equity-curve`. Every field optional (older engines ignore the new ones). */
 export interface GetStrategyEquityCurveRequest {
   from?: string | null;
   to?: string | null;
+  /** Newest N points, 1..5000 (engine default 5000). */
+  limit?: number | null;
+  unit?: EquityCurveUnit;
+  accountKind?: EquityCurveAccountKind;
 }
 
 /**
