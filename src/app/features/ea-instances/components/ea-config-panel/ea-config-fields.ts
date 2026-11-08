@@ -1,3 +1,5 @@
+import type { EAConfigInputs, UpdateInstanceConfigRequest } from '@core/api/api.types';
+
 /**
  * The EA settings the config panel edits, in operator words.
  *
@@ -74,6 +76,13 @@ export interface FieldDef {
   max?: number;
   /** Shown beside the input when the value is 0 (e.g. "Off"). */
   zeroMeans?: string;
+  /**
+   * Batch 8: the engine never forwards a 0 for this setting (0 / omitted = keep current), so 0 is refused as an
+   * edit instead of being "pushed" as a silent no-op. Set on the ten circuit-breaker limits.
+   */
+  zeroKeepsCurrent?: boolean;
+  /** Shown beside the EA's CURRENT value when it is 0 (never beside an edit) — e.g. a gate the EA reports as off. */
+  currentZeroMeans?: string;
   options?: readonly string[];
   badge: ReloadBadge;
   takesEffect: string;
@@ -138,6 +147,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'positions',
         step: 1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CCircuitBreaker.HotReload — next safety check.',
       },
@@ -149,6 +159,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'lots',
         step: 0.01,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect:
           'CCircuitBreaker.HotReload + COrderExecutor.SetMaxLotPerOrder — next OrderSend.',
@@ -161,6 +172,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'points',
         step: 1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CCircuitBreaker.HotReload — next pre-send check.',
       },
@@ -172,6 +184,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'losses',
         step: 1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CCircuitBreaker.HotReload — next loss tally.',
       },
@@ -183,18 +196,20 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'min',
         step: 5,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CCircuitBreaker.HotReload — applies when the pause is next armed.',
       },
       {
         key: 'maxDailyLossPerSymbolPct',
         label: 'Max daily loss per symbol',
-        help: 'Stops new entries on a symbol once its loss today reaches this share of equity.',
+        help: 'Stops new entries on a symbol once its loss today reaches this share of equity. Blank or 0 keeps the current value — to remove the limit use “Switch off the gate”.',
         kind: 'double',
         unit: '% equity',
         step: 0.1,
         min: 0,
-        zeroMeans: 'Off',
+        currentZeroMeans: 'Off — gate switched off',
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CCircuitBreaker.HotReload — next daily-PnL check.',
       },
@@ -212,6 +227,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'positions',
         step: 1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CGlobalCircuitBreaker.HotReload — next position-count check.',
       },
@@ -223,6 +239,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'lots',
         step: 0.1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CGlobalCircuitBreaker.HotReload — next position-open check.',
       },
@@ -234,6 +251,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: '% equity',
         step: 0.1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CGlobalCircuitBreaker.HotReload — next equity check.',
       },
@@ -245,6 +263,7 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         unit: 'orders/min',
         step: 1,
         min: 0,
+        zeroKeepsCurrent: true,
         badge: 'live',
         takesEffect: 'CGlobalCircuitBreaker.HotReload — next rate-limit window.',
       },
@@ -773,6 +792,143 @@ export const RESTART_UNITS: Record<string, string> = {
 
 // ── Pure helpers (table-tested in ea-config-fields.spec.ts) ───────────────
 
+/** Edits as the panel holds them: raw typed strings for numbers/text, booleans for switches, a CSV for symbols. */
+export type ConfigEdits = Partial<Record<HotReloadKey, string | boolean>>;
+
+/**
+ * The POST /admin/ea/{id}/config body for the given edited settings — ONLY those keys, never a default or a blank
+ * (the engine forwards every field it receives to the EA). Returns null when nothing is left to send, so the caller
+ * sends no request at all. A 0 on a `zeroKeepsCurrent` limit is dropped defensively (validation already refuses it):
+ * it would be a no-op, and it is never the way to switch a gate off — see `buildDisableDailyLossPerSymbolBody`.
+ */
+export function buildConfigBody(
+  instanceId: string,
+  fields: readonly FieldDef[],
+  edits: ConfigEdits,
+): UpdateInstanceConfigRequest | null {
+  const body: Record<string, number | string | boolean> = {};
+  for (const f of fields) {
+    const raw = edits[f.key];
+    if (raw === undefined) continue;
+    if (f.kind === 'bool') {
+      if (typeof raw === 'boolean') body[f.key] = raw;
+      continue;
+    }
+    const text = String(raw).trim();
+    if (text === '') continue;
+    if (f.kind === 'symbols') {
+      const list = parseSymbolCsv(text);
+      if (list.length > 0) body[f.key] = list.join(',');
+    } else if (f.kind === 'int' || f.kind === 'double') {
+      const n = Number(text);
+      if (!Number.isFinite(n)) continue;
+      if (f.zeroKeepsCurrent && n <= 0) continue;
+      body[f.key] = n;
+    } else {
+      body[f.key] = text;
+    }
+  }
+  if (Object.keys(body).length === 0) return null;
+  // The server DTO marks `instanceId` required, so it is echoed in the body too.
+  return { instanceId, ...body } as UpdateInstanceConfigRequest;
+}
+
+/**
+ * The only request that switches the EA's per-symbol daily-loss gate off. A bare 0 keeps the current value (engine
+ * batch 8) and EA ≥ 8.47.287 refuses one, so the intent travels as an explicit flag and nothing else rides along.
+ */
+export function buildDisableDailyLossPerSymbolBody(
+  instanceId: string,
+): UpdateInstanceConfigRequest {
+  return { instanceId, disableMaxDailyLossPerSymbol: true };
+}
+
+// ── Tick gap fill (batch 8 runtime override of InpMdGapFill*) ─────────────
+
+/** `inputs` = no override: the EA runs on its chart inputs. */
+export type GapFillMode = 'on' | 'off' | 'inputs';
+
+export interface GapFillState {
+  /** False when the EA build does not report `mdGapFillOverride` (before 8.47.287): it cannot take an override. */
+  supported: boolean;
+  mode: GapFillMode;
+  /** Effective values (override or chart inputs). */
+  enabled: boolean;
+  remote: boolean;
+  maxAgeHours: number | null;
+  /** The filler is running right now (`mdGapFillActive`); null = not reported. */
+  active: boolean | null;
+}
+
+export interface GapFillEdit {
+  mode?: GapFillMode;
+  remote?: boolean;
+  /** Raw typed text. */
+  maxAgeHours?: string;
+}
+
+export const GAP_FILL_MAX_AGE_MIN = 1;
+export const GAP_FILL_MAX_AGE_MAX = 168;
+
+export function gapFillState(inputs: EAConfigInputs | null | undefined): GapFillState {
+  const i = inputs ?? {};
+  const supported = typeof i.mdGapFillOverride === 'boolean';
+  const enabled = i.mdGapFill === true;
+  return {
+    supported,
+    mode: i.mdGapFillOverride === true ? (enabled ? 'on' : 'off') : 'inputs',
+    enabled,
+    remote: i.mdGapFillRemote === true,
+    maxAgeHours: typeof i.mdGapFillMaxAgeHours === 'number' ? i.mdGapFillMaxAgeHours : null,
+    active: typeof i.mdGapFillActive === 'boolean' ? i.mdGapFillActive : null,
+  };
+}
+
+/** Plain-language error for the max-age box, or null. */
+export function validateGapFillMaxAge(raw: string | undefined): string | null {
+  if (raw === undefined || raw.trim() === '') return null;
+  const n = Number(raw.trim());
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return 'Enter a whole number of hours.';
+  if (n < GAP_FILL_MAX_AGE_MIN || n > GAP_FILL_MAX_AGE_MAX)
+    return `Between ${GAP_FILL_MAX_AGE_MIN} and ${GAP_FILL_MAX_AGE_MAX} hours.`;
+  return null;
+}
+
+/**
+ * The gap-fill part of a config push, or null when the edit changes nothing (or is invalid).
+ *  - "Use chart inputs" while an override is in force → `{ mdGapFillOverride: 'clear' }` alone (the EA ignores the
+ *    other fields beside a clear).
+ *  - On / Off → `mdGapFill` when the mode changes (choosing the value the inputs already give still sends it: it pins
+ *    that value as an override). Remote / max age only when they differ from the effective value; they are not sent
+ *    while the EA stays on its chart inputs, because any one of them would start an override.
+ */
+export function buildGapFillPatch(
+  state: GapFillState,
+  edit: GapFillEdit,
+): Pick<
+  UpdateInstanceConfigRequest,
+  'mdGapFill' | 'mdGapFillRemote' | 'mdGapFillMaxAgeHours' | 'mdGapFillOverride'
+> | null {
+  if (!state.supported) return null;
+  const mode = edit.mode ?? state.mode;
+  if (mode === 'inputs') return state.mode === 'inputs' ? null : { mdGapFillOverride: 'clear' };
+  if (validateGapFillMaxAge(edit.maxAgeHours) !== null) return null;
+  const patch: {
+    mdGapFill?: boolean;
+    mdGapFillRemote?: boolean;
+    mdGapFillMaxAgeHours?: number;
+  } = {};
+  if (mode !== state.mode) patch.mdGapFill = mode === 'on';
+  if (edit.remote !== undefined && edit.remote !== state.remote)
+    patch.mdGapFillRemote = edit.remote;
+  const age =
+    edit.maxAgeHours !== undefined && edit.maxAgeHours.trim() !== ''
+      ? Number(edit.maxAgeHours.trim())
+      : undefined;
+  if (age !== undefined && age !== state.maxAgeHours) patch.mdGapFillMaxAgeHours = age;
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
 /** "eurusd, GBPUSD,,eurusd" → ["EURUSD","GBPUSD"] — the EA's own parse (trim, upper, dedupe). */
 export function parseSymbolCsv(csv: string | null | undefined): string[] {
   const out: string[] = [];
@@ -847,6 +1003,10 @@ export function validateField(f: FieldDef, raw: unknown): string | null {
     const n = Number(s);
     if (s === '' || !Number.isFinite(n)) return 'Enter a number.';
     if (f.kind === 'int' && !Number.isInteger(n)) return 'Enter a whole number.';
+    if (f.zeroKeepsCurrent && n === 0)
+      return f.key === 'maxDailyLossPerSymbolPct'
+        ? '0 is not sent — it keeps the current value. To remove this limit, use “Switch off the gate”.'
+        : '0 is not sent — it keeps the current value. Enter a positive limit.';
     if (f.min !== undefined && n < f.min) return `At least ${f.min}.`;
     if (f.max !== undefined && n > f.max) return `At most ${f.max}.`;
     return null;

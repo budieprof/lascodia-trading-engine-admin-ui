@@ -45,15 +45,22 @@ import {
   MT5_TIMEFRAMES,
   RESTART_HELP,
   RESTART_UNITS,
+  buildConfigBody,
+  buildDisableDailyLossPerSymbolBody,
+  buildGapFillPatch,
+  gapFillState,
+  validateGapFillMaxAge,
   formatSymbolMap,
   normalizeTimeframes,
   parseSymbolCsv,
   parseSymbolMap,
   sameSymbolSet,
   validateField,
+  type ConfigEdits,
   type FieldDef,
   type FieldGroup,
-  type HotReloadKey,
+  type GapFillEdit,
+  type GapFillMode,
   type ReloadBadge,
 } from './ea-config-fields';
 import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.component';
@@ -233,6 +240,16 @@ import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.c
                   }
                 </button>
               }
+              @if (showGapFill()) {
+                <button type="button" class="cat" (click)="scrollTo('Tick gap fill')">
+                  <span class="cat-name">Tick gap fill</span>
+                  @if (gapFillPatch()) {
+                    <span class="cat-dirty">1</span>
+                  } @else {
+                    <span class="cat-count">3</span>
+                  }
+                </button>
+              }
             </nav>
 
             <div class="groups">
@@ -351,6 +368,16 @@ import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.c
                         } @else if (!hasCurrent(field)) {
                           <span class="was">This EA build does not report it.</span>
                         }
+                        @if (field.key === 'maxDailyLossPerSymbolPct' && !dailyLossGateOff()) {
+                          <button
+                            type="button"
+                            class="link-btn gate-off"
+                            (click)="askGateOff()"
+                            [disabled]="submitting()"
+                          >
+                            Switch off the gate…
+                          </button>
+                        }
                       </div>
 
                       <div class="row-act">
@@ -363,6 +390,144 @@ import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.c
                             title="Push just this setting (⏎)"
                           >
                             Save
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </section>
+              }
+              @if (showGapFill()) {
+                <section class="grp" [id]="anchorId('Tick gap fill')">
+                  <header class="grp-head">
+                    <h4>Tick gap fill</h4>
+                    <span>
+                      Re-reads holes in the tick stream the EA already sent (at least 5 min old) and
+                      sends the missing ticks. "Use chart input" drops the engine override.
+                    </span>
+                  </header>
+                  @if (!gapFill().supported) {
+                    <p class="help gf-note">
+                      This EA build does not report its gap-fill state, so it cannot take this
+                      setting from here. Update the EA first.
+                    </p>
+                  } @else {
+                    <p class="help gf-note">
+                      Now:
+                      <strong>{{ gapFill().active ? 'running' : 'not running' }}</strong>
+                      ·
+                      {{
+                        gapFill().mode === 'inputs'
+                          ? 'from the chart input'
+                          : 'engine override (' + (gapFill().enabled ? 'on' : 'off') + ')'
+                      }}
+                      @if (gapFill().enabled) {
+                        · remote holes {{ gapFill().remote ? 'on' : 'off' }} · up to
+                        {{ gapFill().maxAgeHours ?? '—' }} h back
+                      }
+                    </p>
+                    <div class="row" [class.dirty]="gapFillEdit.mode !== undefined">
+                      <div class="row-text">
+                        <div class="row-label"><span class="label">Gap fill</span></div>
+                        <p class="help">
+                          On / Off override the chart input on this EA (kept across restarts).
+                        </p>
+                      </div>
+                      <div class="row-ctl">
+                        <div class="seg seg-ctl" role="radiogroup" aria-label="Tick gap fill">
+                          @for (m of GAP_FILL_MODES; track m.value) {
+                            <button
+                              type="button"
+                              role="radio"
+                              [class.on]="gapFillMode() === m.value"
+                              [attr.aria-checked]="gapFillMode() === m.value"
+                              [disabled]="submitting()"
+                              (click)="setGapFill({ mode: m.value })"
+                            >
+                              {{ m.label }}
+                            </button>
+                          }
+                        </div>
+                      </div>
+                      <div class="row-act"></div>
+                    </div>
+                    <div class="row" [class.dirty]="gapFillEdit.remote !== undefined">
+                      <div class="row-text">
+                        <div class="row-label">
+                          <span class="label">Fill remote holes</span>
+                        </div>
+                        <p class="help">
+                          Also holes that span a broker disconnect, a stalled read or a restart —
+                          their ticks may need a history download from the broker.
+                        </p>
+                      </div>
+                      <div class="row-ctl">
+                        <button
+                          type="button"
+                          role="switch"
+                          class="switch"
+                          [class.on]="gapFillRemote()"
+                          [attr.aria-checked]="gapFillRemote()"
+                          aria-label="Fill remote holes"
+                          [disabled]="gapFillMode() === 'inputs' || submitting()"
+                          (click)="setGapFill({ remote: !gapFillRemote() })"
+                        >
+                          <span class="knob"></span>
+                        </button>
+                        <span class="switch-text">{{ gapFillRemote() ? 'On' : 'Off' }}</span>
+                      </div>
+                      <div class="row-act"></div>
+                    </div>
+                    <div
+                      class="row"
+                      [class.dirty]="gapFillEdit.maxAgeHours !== undefined && !gapFillAgeError()"
+                      [class.invalid]="!!gapFillAgeError()"
+                    >
+                      <div class="row-text">
+                        <div class="row-label"><span class="label">Max age</span></div>
+                        <p class="help">Holes older than this are not filled (1–168 h).</p>
+                      </div>
+                      <div class="row-ctl">
+                        <div class="num">
+                          <input
+                            type="text"
+                            inputmode="numeric"
+                            class="input"
+                            autocomplete="off"
+                            aria-label="Gap fill max age"
+                            [disabled]="gapFillMode() === 'inputs' || submitting()"
+                            [ngModel]="gapFillMaxAge()"
+                            (ngModelChange)="setGapFill({ maxAgeHours: $event })"
+                          />
+                          <span class="unit">h</span>
+                        </div>
+                        @if (gapFillAgeError(); as err) {
+                          <span class="err">{{ err }}</span>
+                        }
+                        @if (gapFillMode() === 'inputs') {
+                          <span class="was"
+                            >Set by the chart input while no override is in force.</span
+                          >
+                        }
+                      </div>
+                      <div class="row-act">
+                        @if (gapFillPatch()) {
+                          <button
+                            type="button"
+                            class="btn btn-save"
+                            [disabled]="submitting()"
+                            (click)="saveGapFill()"
+                          >
+                            Save
+                          </button>
+                        }
+                        @if (
+                          gapFillEdit.mode !== undefined ||
+                          gapFillEdit.remote !== undefined ||
+                          gapFillEdit.maxAgeHours !== undefined
+                        ) {
+                          <button type="button" class="link-btn" (click)="revertGapFill()">
+                            Undo
                           </button>
                         }
                       </div>
@@ -599,6 +764,9 @@ import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.c
         @if (field.zeroMeans && isZero(field)) {
           <span class="zero">{{ field.zeroMeans }}</span>
         }
+        @if (field.currentZeroMeans && showsCurrentZero(field)) {
+          <span class="zero zero-off">{{ field.currentZeroMeans }}</span>
+        }
       </div>
     </ng-template>
 
@@ -624,6 +792,25 @@ import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.c
           </li>
         }
       </ul>
+    </app-ea-action-dialog>
+
+    <app-ea-action-dialog
+      [open]="confirmingGateOff()"
+      title="Switch off the per-symbol daily-loss gate"
+      description="This EA will stop pausing a symbol after a losing day — only the account-wide daily loss limit remains. It stays off (also across restarts) until a positive limit is pushed again."
+      warning="This removes a safety gate."
+      confirmLabel="Switch off"
+      tone="bad"
+      [askReason]="false"
+      [busy]="submitting()"
+      [confirmDisabled]="!gateOffAck"
+      (confirmed)="switchGateOff()"
+      (cancelled)="confirmingGateOff.set(false)"
+    >
+      <label class="ack">
+        <input type="checkbox" [(ngModel)]="gateOffAck" />
+        <span>Switch the per-symbol daily-loss gate off on this EA.</span>
+      </label>
     </app-ea-action-dialog>
 
     <app-ea-action-dialog
@@ -688,7 +875,7 @@ export class EAConfigPanelComponent {
    * typing doesn't snap back), switches a boolean, symbols a CSV. A key is
    * only present while it differs from the EA's value or is being typed.
    */
-  protected edits: Partial<Record<HotReloadKey, string | boolean>> = {};
+  protected edits: ConfigEdits = {};
   protected readonly tab = signal<'editable' | 'readonly'>('editable');
   protected readonly submitting = signal(false);
   protected readonly reviewing = signal(false);
@@ -790,6 +977,24 @@ export class EAConfigPanelComponent {
     const e = this.edits[f.key];
     return typeof e === 'boolean' ? e : this.current(f) === true;
   }
+
+  /** The control shows the EA's own value (no edit) and that value is 0. */
+  protected showsCurrentZero(f: FieldDef): boolean {
+    this.dirtyRevision();
+    return this.edits[f.key] === undefined && this.current(f) === 0;
+  }
+
+  /** The gap-fill group follows the search / filters like a normal group. */
+  protected readonly showGapFill = computed(() => {
+    this.dirtyRevision();
+    this.inputs();
+    const q = this.searchTerm().trim().toLowerCase();
+    if (q && !'tick gap fill remote holes max age mdgapfill'.includes(q)) return false;
+    const bf = this.badgeFilter();
+    if (bf !== 'all' && bf !== 'live') return false;
+    if (this.dirtyOnly() && !this.gapFillPatch()) return false;
+    return true;
+  });
 
   protected isZero(f: FieldDef): boolean {
     const v = this.display(f).trim();
@@ -1023,33 +1228,96 @@ export class EAConfigPanelComponent {
     this.reviewing.set(true);
   }
 
-  private packField(body: UpdateInstanceConfigRequest, f: FieldDef): void {
-    const raw = this.edits[f.key];
-    let value: number | string | boolean;
-    if (f.kind === 'bool') value = raw as boolean;
-    else if (f.kind === 'symbols') value = parseSymbolCsv(String(raw)).join(',');
-    else if (f.kind === 'int' || f.kind === 'double') value = Number(String(raw).trim());
-    else value = String(raw).trim();
-    (body as Record<string, number | string | boolean>)[f.key] = value;
-  }
-
   protected submit(): void {
     if (!this.hasDirty() || this.errorCount() > 0) return;
-    // The server DTO marks `instanceId` required, so it is echoed in the body too.
-    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
     const fields = HOT_RELOAD_FIELDS.filter((f) => this.isDirty(f));
-    for (const f of fields) this.packField(body, f);
-    this.pushBody(body, fields);
+    const body = buildConfigBody(this.instanceId(), fields, this.edits);
+    if (body) this.pushBody(body, fields);
   }
 
   protected saveField(f: FieldDef): void {
     if (!this.isDirty(f) || this.submitting()) return;
-    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
-    this.packField(body, f);
-    this.pushBody(body, [f]);
+    const body = buildConfigBody(this.instanceId(), [f], this.edits);
+    if (body) this.pushBody(body, [f]);
   }
 
-  private pushBody(body: UpdateInstanceConfigRequest, fields: FieldDef[]): void {
+  // ── Per-symbol daily-loss gate: explicit switch-off ─────────────────
+
+  protected readonly confirmingGateOff = signal(false);
+  protected gateOffAck = false;
+
+  /** The EA reports the gate as off (0). */
+  protected dailyLossGateOff(): boolean {
+    return this.inputs()?.maxDailyLossPerSymbolPct === 0;
+  }
+
+  protected askGateOff(): void {
+    if (this.submitting() || this.dailyLossGateOff()) return;
+    this.gateOffAck = false;
+    this.confirmingGateOff.set(true);
+  }
+
+  protected switchGateOff(): void {
+    if (!this.gateOffAck || this.submitting()) return;
+    this.pushBody(buildDisableDailyLossPerSymbolBody(this.instanceId()), [], {
+      label: 'Per-symbol daily-loss gate off',
+      onDone: () => this.confirmingGateOff.set(false),
+    });
+  }
+
+  // ── Tick gap fill ───────────────────────────────────────────────────
+
+  protected gapFillEdit: GapFillEdit = {};
+  protected readonly GAP_FILL_MODES: ReadonlyArray<{ value: GapFillMode; label: string }> = [
+    { value: 'on', label: 'On' },
+    { value: 'off', label: 'Off' },
+    { value: 'inputs', label: 'Use chart input' },
+  ];
+  protected readonly gapFill = computed(() => gapFillState(this.inputs()));
+
+  protected gapFillMode(): GapFillMode {
+    this.dirtyRevision();
+    return this.gapFillEdit.mode ?? this.gapFill().mode;
+  }
+  protected gapFillRemote(): boolean {
+    this.dirtyRevision();
+    return this.gapFillEdit.remote ?? this.gapFill().remote;
+  }
+  protected gapFillMaxAge(): string {
+    this.dirtyRevision();
+    return this.gapFillEdit.maxAgeHours ?? String(this.gapFill().maxAgeHours ?? '');
+  }
+  protected gapFillAgeError(): string | null {
+    this.dirtyRevision();
+    return validateGapFillMaxAge(this.gapFillEdit.maxAgeHours);
+  }
+  protected gapFillPatch() {
+    this.dirtyRevision();
+    return buildGapFillPatch(this.gapFill(), this.gapFillEdit);
+  }
+  protected setGapFill(edit: Partial<GapFillEdit>): void {
+    this.gapFillEdit = { ...this.gapFillEdit, ...edit };
+    this.markEdited();
+  }
+  protected revertGapFill(): void {
+    this.gapFillEdit = {};
+    this.markEdited();
+  }
+  protected saveGapFill(): void {
+    const patch = this.gapFillPatch();
+    if (!patch || this.submitting()) return;
+    this.pushBody({ instanceId: this.instanceId(), ...patch }, [], {
+      label:
+        patch.mdGapFillOverride === 'clear' ? 'Tick gap fill back to chart input' : 'Tick gap fill',
+      onDone: () => this.revertGapFill(),
+    });
+  }
+
+  private pushBody(
+    body: UpdateInstanceConfigRequest,
+    fields: FieldDef[],
+    extra?: { label: string; onDone: () => void },
+  ): void {
     this.submitting.set(true);
     this.admin
       .updateInstanceConfig(this.instanceId(), body)
@@ -1062,7 +1330,8 @@ export class EAConfigPanelComponent {
       .subscribe({
         next: (res) => {
           if (res.status) {
-            const label = fields.length === 1 ? fields[0].label : `${fields.length} settings`;
+            const label =
+              extra?.label ?? (fields.length === 1 ? fields[0].label : `${fields.length} settings`);
             if (this.ops) {
               this.ops.trackLatestCommand(
                 this.instanceId(),
@@ -1074,6 +1343,7 @@ export class EAConfigPanelComponent {
               this.notify.success(`${label} queued.`);
             }
             for (const f of fields) delete this.edits[f.key];
+            extra?.onDone();
             this.reviewing.set(false);
             this.markEdited();
             this.configPushed.emit();

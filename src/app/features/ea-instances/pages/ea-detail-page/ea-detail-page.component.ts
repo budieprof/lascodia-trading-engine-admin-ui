@@ -23,7 +23,6 @@ import type {
   EAFleetItem,
   EAInstanceDetail,
   EAInstanceDto,
-  UpdateEAConfigRequest,
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
@@ -67,20 +66,6 @@ type EAView = Omit<EAInstanceDto, 'id'> & { id: number | null };
 
 /** Fleet rows carry `id` from the 2026-10-19 engine on (`EAFleetItem.id`); older engines omit it. */
 type FleetRow = EAFleetItem & { id?: number | null };
-
-interface ConfigForm {
-  // Per-instance safety
-  maxPosPerSymbol: string;
-  maxLotPerOrder: string;
-  maxSpreadPoints: string;
-  maxConsecLosses: string;
-  consecLossPauseMin: string;
-  maxDailyLossPerSymbolPct: string;
-  // Global safety
-  maxOpenPositions: string;
-  maxDailyLossPct: string;
-  maxOrdersPerMin: string;
-}
 
 @Component({
   selector: 'app-ea-detail-page',
@@ -1245,121 +1230,6 @@ interface ConfigForm {
           </div>
         </div>
       }
-
-      @if (configOpen()) {
-        <div class="modal-overlay" (click)="cancelConfig()">
-          <div
-            class="modal wide"
-            (click)="$event.stopPropagation()"
-            role="dialog"
-            aria-modal="true"
-            appModalA11y
-            (dismiss)="cancelConfig()"
-          >
-            <header class="modal-head">
-              <h2>Push EA safety config</h2>
-              <button type="button" class="close-btn" (click)="cancelConfig()" aria-label="Close">
-                ×
-              </button>
-            </header>
-            <p class="modal-target">
-              Target <strong class="mono">{{ ea()?.instanceId }}</strong>
-            </p>
-            <p class="modal-desc">
-              Empty fields stay at the EA's current value. Hot-reloads on the next command poll.
-            </p>
-
-            <fieldset class="config-fieldset">
-              <legend>Per-instance safety</legend>
-              <div class="form-grid">
-                <label class="field">
-                  <span>Max positions per symbol</span>
-                  <input type="number" min="0" step="1" [(ngModel)]="configForm.maxPosPerSymbol" />
-                </label>
-                <label class="field">
-                  <span>Max lot per order</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    [(ngModel)]="configForm.maxLotPerOrder"
-                  />
-                </label>
-                <label class="field">
-                  <span>Max spread (points)</span>
-                  <input type="number" min="0" step="1" [(ngModel)]="configForm.maxSpreadPoints" />
-                </label>
-                <label class="field">
-                  <span>Max consecutive losses</span>
-                  <input type="number" min="0" step="1" [(ngModel)]="configForm.maxConsecLosses" />
-                </label>
-                <label class="field">
-                  <span>Consec-loss pause (min)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    [(ngModel)]="configForm.consecLossPauseMin"
-                  />
-                </label>
-                <label class="field">
-                  <span>Max daily loss per symbol %</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="50"
-                    step="0.1"
-                    [(ngModel)]="configForm.maxDailyLossPerSymbolPct"
-                  />
-                </label>
-              </div>
-            </fieldset>
-
-            <fieldset class="config-fieldset">
-              <legend>Global safety</legend>
-              <div class="form-grid">
-                <label class="field">
-                  <span>Max open positions (total)</span>
-                  <input type="number" min="0" step="1" [(ngModel)]="configForm.maxOpenPositions" />
-                </label>
-                <label class="field">
-                  <span>Max daily loss % (global)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="50"
-                    step="0.1"
-                    [(ngModel)]="configForm.maxDailyLossPct"
-                  />
-                </label>
-                <label class="field">
-                  <span>Max orders / minute</span>
-                  <input type="number" min="0" step="1" [(ngModel)]="configForm.maxOrdersPerMin" />
-                </label>
-              </div>
-            </fieldset>
-
-            <footer class="modal-foot">
-              <button
-                type="button"
-                class="btn btn-secondary"
-                (click)="cancelConfig()"
-                data-autofocus
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                (click)="confirmConfigPush()"
-                [disabled]="!hasAnyValue() || submitting()"
-              >
-                {{ submitting() ? 'Pushing…' : 'Push config' }}
-              </button>
-            </footer>
-          </div>
-        </div>
-      }
     </div>
   `,
   styleUrl: './ea-detail-page.component.scss',
@@ -1861,61 +1731,6 @@ export class EaDetailPageComponent {
           }
         },
         error: () => this.notify.error('Command queue failed.'),
-      });
-  }
-
-  // Config-push modal ----------------------------------------------------
-  protected readonly configOpen = signal(false);
-  protected configForm: ConfigForm = blankConfigForm();
-
-  protected openConfigPush(): void {
-    this.configForm = blankConfigForm();
-    this.configOpen.set(true);
-  }
-
-  protected cancelConfig(): void {
-    if (this.submitting()) return;
-    this.configOpen.set(false);
-  }
-
-  protected hasAnyValue(): boolean {
-    return (Object.values(this.configForm) as string[]).some((v) => v.trim() !== '');
-  }
-
-  protected confirmConfigPush(): void {
-    const ea = this.ea();
-    if (!ea || !this.hasAnyValue()) return;
-    this.submitting.set(true);
-    const payload = buildPayload(this.configForm, ea.instanceId);
-    this.service
-      .updateEAConfig(payload)
-      .pipe(
-        finalize(() => {
-          this.submitting.set(false);
-          this.configOpen.set(false);
-          this.resource.refresh();
-        }),
-      )
-      .subscribe({
-        next: (res) => {
-          if (res.status) {
-            this.notify.success(`Config push queued for EA ${ea.instanceId}.`);
-            this.auditTrail
-              .create({
-                entityType: 'EAInstance',
-                entityId: ea.id ?? 0,
-                decisionType: 'EAUpdateConfig',
-                outcome: 'Queued',
-                reason: null,
-                contextJson: JSON.stringify(payload),
-                source: 'AdminUI',
-              })
-              .subscribe({ error: () => undefined });
-          } else {
-            this.notify.error(res.message ?? 'Config push failed.');
-          }
-        },
-        error: () => this.notify.error('Config push failed.'),
       });
   }
 
@@ -2424,39 +2239,4 @@ export class EaDetailPageComponent {
           .subscribe({ error: () => undefined });
       });
   }
-}
-
-function blankConfigForm(): ConfigForm {
-  return {
-    maxPosPerSymbol: '',
-    maxLotPerOrder: '',
-    maxSpreadPoints: '',
-    maxConsecLosses: '',
-    consecLossPauseMin: '',
-    maxDailyLossPerSymbolPct: '',
-    maxOpenPositions: '',
-    maxDailyLossPct: '',
-    maxOrdersPerMin: '',
-  };
-}
-
-function buildPayload(form: ConfigForm, targetInstanceId: string): UpdateEAConfigRequest {
-  const num = (s: string): number | undefined => {
-    const trimmed = s.trim();
-    if (trimmed === '') return undefined;
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : undefined;
-  };
-  return {
-    targetInstanceId,
-    maxPosPerSymbol: num(form.maxPosPerSymbol),
-    maxLotPerOrder: num(form.maxLotPerOrder),
-    maxSpreadPoints: num(form.maxSpreadPoints),
-    maxConsecLosses: num(form.maxConsecLosses),
-    consecLossPauseMin: num(form.consecLossPauseMin),
-    maxDailyLossPerSymbolPct: num(form.maxDailyLossPerSymbolPct),
-    maxOpenPositions: num(form.maxOpenPositions),
-    maxDailyLossPct: num(form.maxDailyLossPct),
-    maxOrdersPerMin: num(form.maxOrdersPerMin),
-  };
 }
