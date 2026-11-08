@@ -30,6 +30,7 @@ import type {
   CryptoFundamentals,
   ExecutionAccount,
   VenueOrderType,
+  VenueRoute,
   VenueTicketPreview,
   VenueTif,
 } from '@features/venues/venues.types';
@@ -52,6 +53,14 @@ import {
   type VenueSide,
   type VenueTicketState,
 } from './venue-ticket-model';
+import {
+  routeBadgeText,
+  routeKey,
+  routeLine,
+  routeSendBlock,
+  routeStateOf,
+  withRouteTerms,
+} from './venue-route';
 import {
   confirmLines,
   defaultExecutionAccount,
@@ -103,10 +112,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
       <header class="ticket-head">
         <strong>{{ instrument().symbol }}</strong>
         <span class="ticket-sub">{{ kindLabel() }}</span>
-        <!-- UI05: which route this ticket is — always visible. -->
-        <span class="route-badge" data-testid="ticket-route" title="Placed by the engine at this venue, never via MT5"
-          >Venue: {{ instrument().exchange || 'exchange' }}</span
-        >
+        <!-- FR01: where this order would ACTUALLY route for the chosen account — the engine's answer, never the
+             catalogue's exchange. -->
+        <span class="route-badge" data-testid="ticket-route" [title]="routeTitle()">{{ routeBadge() }}</span>
         <button
           type="button"
           class="ticket-x"
@@ -118,6 +126,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
         </button>
       </header>
 
+      @if (routeWhy(); as why) {
+        <p class="ticket-why" data-testid="ticket-route-why">{{ why }}</p>
+      }
       <div class="ticket-row">
         <span>Trading acct</span>
         <select
@@ -778,6 +789,35 @@ export class VenueOrderTicketComponent {
   private readonly currentPreview = computed(() =>
     this.previewKey() === this.ticketKey() ? this.preview() : null,
   );
+  // ── FR01: the route answer for the chosen trading / venue account ──
+  private readonly routeAnswer = signal<{ key: string; route: VenueRoute } | null>(null);
+  private readonly routeError = signal<{ key: string; message: string } | null>(null);
+  private readonly routeQuestion = computed(() =>
+    routeKey(this.instrument().symbol, this.tradingAccountId(), this.state().executionAccountId),
+  );
+  private readonly canReadRoute = computed(() => this.auth.hasPermission(Permission.AccountsRead));
+  readonly routeState = computed(() => {
+    const key = this.routeQuestion();
+    const answer = this.routeAnswer();
+    const error = this.routeError();
+    return routeStateOf({
+      exchangeTraded: true,
+      hasAccount: this.tradingAccountId() !== null || this.state().executionAccountId !== null,
+      permitted: this.canReadRoute(),
+      answer: answer?.key === key ? answer.route : null,
+      error: error?.key === key ? error.message : null,
+    });
+  });
+  readonly routeBadge = computed(() => routeBadgeText(this.routeState()));
+  readonly routeTitle = computed(() => routeLine(this.routeState()));
+  /** The reason under the header when there is no route (or it is unknown). */
+  readonly routeWhy = computed(() => {
+    const r = this.routeState();
+    return r.kind === 'none' || r.kind === 'unknown' ? routeLine(r) : null;
+  });
+  /** The instrument as the ROUTED venue trades it (minimum value, TIF set, fractional, minimum quantity). */
+  readonly terms = computed(() => withRouteTerms(this.instrument(), this.routeState()));
+
   readonly blockedReason = computed(() =>
     sendBlockedReason({
       canSend: this.canSend(),
@@ -788,7 +828,7 @@ export class VenueOrderTicketComponent {
       loading:
         this.loading() || (this.previewKey() !== this.ticketKey() && this.previewError() === null),
       submitting: this.submitting(),
-    }),
+    }) ?? routeSendBlock(this.routeState()),
   );
   readonly confirm = computed(() => {
     const pv = this.currentPreview();
@@ -823,7 +863,7 @@ export class VenueOrderTicketComponent {
   );
   readonly unit = computed(() => unitWord(this.instrument().quantityUnit, this.state().quantity));
   readonly unitOne = computed(() => unitWord(this.instrument().quantityUnit, 1));
-  readonly tifs = computed<VenueTif[]>(() => tifChoices(this.state().orderType, this.instrument()));
+  readonly tifs = computed<VenueTif[]>(() => tifChoices(this.state().orderType, this.terms()));
   readonly fmt = computed(() => {
     const d = Math.max(this.instrument().priceDecimals, stepDecimals(this.instrument().tickSize));
     return `1.${d}-${d}`;
@@ -834,10 +874,10 @@ export class VenueOrderTicketComponent {
     return ticketEntry(this.state(), q ? { bid: q.bid, ask: q.ask } : null);
   });
   readonly problems = computed(() =>
-    venueTicketProblems(this.state(), this.instrument(), { refPrice: this.refPrice() }),
+    venueTicketProblems(this.state(), this.terms(), { refPrice: this.refPrice() }),
   );
   /** Said, not refused (UI06): near expiry, not shortable, fractional unknown, inverse money. */
-  readonly warnings = computed(() => venueTicketWarnings(this.state(), this.instrument()));
+  readonly warnings = computed(() => venueTicketWarnings(this.state(), this.terms()));
   /** Crypto perpetual funding, shown next to the liquidation price (UI06); null until read / when not served. */
   readonly funding = signal<CryptoFundamentals | null>(null);
   readonly brackets = computed(() => {
@@ -907,6 +947,38 @@ export class VenueOrderTicketComponent {
         this.schedulePreview(inst.symbol, s, bad);
       });
     });
+    // FR01: ask the engine where the order would route whenever the symbol or the chosen account changes.
+    effect(() => {
+      const key = this.routeQuestion();
+      const symbol = this.instrument().symbol;
+      const trading = this.tradingAccountId();
+      const exec = this.state().executionAccountId;
+      untracked(() => {
+        if ((trading === null && exec === null) || !this.canReadRoute() || !symbol) return;
+        if (this.routeAnswer()?.key === key) return;
+        this.routeError.set(null);
+        this.api
+          .route(symbol, trading, exec)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (route) => {
+              if (this.routeQuestion() === key) this.routeAnswer.set({ key, route });
+            },
+            error: (e) => {
+              if (this.routeQuestion() === key)
+                this.routeError.set({ key, message: errorText(e, 'no answer') });
+            },
+          });
+      });
+    });
+    // FR04: when the routed adapter's TIF set arrives (or changes), keep the ticket's TIF one it accepts.
+    effect(() => {
+      const terms = this.terms();
+      untracked(() => {
+        const next = patchVenueTicket(this.state(), {}, terms);
+        if (next.tif !== this.state().tif) this.state.set(next);
+      });
+    });
     // The picker starts on the scope's trading account (or the only one with venue accounts) and its only Active one.
     effect(() => {
       const accounts = this.accounts();
@@ -935,7 +1007,7 @@ export class VenueOrderTicketComponent {
   }
 
   patch(p: Partial<VenueTicketState>): void {
-    this.state.update((s) => patchVenueTicket(s, p, this.instrument()));
+    this.state.update((s) => patchVenueTicket(s, p, this.terms()));
   }
 
   setAccount(v: string): void {

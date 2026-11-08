@@ -156,15 +156,17 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
     );
   });
 
-  it('UI05: every ticket wears its route — MT5 broker / Venue: CME', () => {
+  it('UI05/FR01: every ticket wears its route — MT5 broker / the engine\'s route, never the catalogue exchange', () => {
     render('EURUSD');
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
     ).toContain('MT5 broker');
     render('ESZ6');
-    expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
-    ).toContain('Venue: CME');
+    const badge =
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent ?? '';
+    // No venue account is chosen in this fixture: the engine has not been asked, so no venue is named.
+    expect(badge).not.toContain('CME');
+    expect(badge).toMatch(/route/i);
   });
 
   it('UI05: while the instrument resolves, neither ticket is offered', () => {

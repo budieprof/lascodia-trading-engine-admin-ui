@@ -13,6 +13,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
@@ -47,6 +48,9 @@ import { LiveDepthService, type LiveDepth } from '../orderflow/live-depth.servic
 import { pickBookStream } from '../orderflow/stream-depth';
 import { parseDepth } from '../panels/side/depth';
 import { routeBadge, type InstrumentFacts } from '../datafeed/instrument-facts';
+import { VenuesApiService } from '@features/venues/venues-api.service';
+import type { VenueRoute } from '@features/venues/venues.types';
+import { routeKey, routeLine, routeStateOf } from '../trading/venue-route';
 import type { MdSource } from '@core/realtime/marketdata.types';
 import { ladderQuantityText, ladderQuantityTitle, ladderSourceLabel } from './ladder-source';
 
@@ -140,7 +144,7 @@ type LadderAction =
     <div class="lp-head">
       <!-- UI05: which route a click takes, always visible; nothing is placed while the instrument is resolving. -->
       <p class="lp-note" data-testid="ladder-route">
-        <span class="lp-route">{{ routeLabel() }}</span>
+        <span class="lp-route" [class.lp-noroute]="noRoute()">{{ routeLabel() }}</span>
       </p>
       <p class="lp-note" data-testid="ladder-source">
         {{ sourceLabel() }}
@@ -155,7 +159,7 @@ type LadderAction =
         <!-- Multi-asset WS7 7.6: an exchange-traded instrument — rows on its tick, sizes in its unit, and a click opens
              the venue ticket at that price (the MT5 manual-signal path below does not apply to it). -->
         <p class="lp-note" data-testid="ladder-venue">
-          {{ v.exchange || 'Exchange' }} · tick {{ v.tickSize }} · sizes in {{ venueUnit() }}. A click opens the order
+          Exchange-traded · tick {{ v.tickSize }} · sizes in {{ venueUnit() }}. A click opens the order
           ticket at that price (bid column: buy, ask column: sell; Shift: stop). One-click and OCO are off here.
         </p>
       }
@@ -591,6 +595,9 @@ type LadderAction =
       .lp-foot {
         padding: 4px 8px;
       }
+      .lp-noroute {
+        color: #ef5350;
+      }
       .lp-warn {
         margin: 2px 0;
         color: #f9a825;
@@ -842,11 +849,35 @@ export class LadderPanelComponent {
    */
   readonly facts = input<InstrumentFacts | null>(null);
   readonly resolving = computed(() => this.facts()?.resolving ?? false);
+  /**
+   * FR01: an exchange-traded symbol's badge is the ENGINE's route for the ladder's account ("Routes to Coinbase ·
+   * BTC-USD", or "No route for this account (why)") — never the catalogue's exchange. MT5 symbols: "MT5 broker" as before.
+   */
+  private readonly venuesApi = inject(VenuesApiService);
+  private readonly routeAnswer = signal<{ key: string; route: VenueRoute } | null>(null);
+  private readonly routeError = signal<{ key: string; message: string } | null>(null);
+  private readonly routeQuestion = computed(() => routeKey(this.symbol(), this.accountId(), null));
+  readonly routeState = computed(() => {
+    const key = this.routeQuestion();
+    const answer = this.routeAnswer();
+    const error = this.routeError();
+    return routeStateOf({
+      exchangeTraded: this.venue() !== null,
+      hasAccount: this.accountId() !== null,
+      permitted: this.auth.hasPermission(Permission.AccountsRead),
+      answer: answer?.key === key ? answer.route : null,
+      error: error?.key === key ? error.message : null,
+    });
+  });
+  readonly noRoute = computed(() => {
+    const k = this.routeState().kind;
+    return k === 'none' || k === 'unknown';
+  });
   readonly routeLabel = computed(() => {
     const f = this.facts();
-    if (f) return routeBadge(f.route);
-    const v = this.venue();
-    return v ? `Venue: ${v.exchange || 'exchange'}` : 'MT5 broker';
+    if (f?.resolving) return routeBadge(f.route);
+    if (this.venue()) return routeLine(this.routeState());
+    return f ? routeBadge(f.route) : 'MT5 broker';
   });
 
   readonly zooms = [1, 2, 5, 10, 25, 50];
@@ -1070,6 +1101,31 @@ export class LadderPanelComponent {
     // Remember which source is shown (a plain field: the frame listener reads it outside Angular).
     effect(() => {
       this.shownSource = this.view().sourceId;
+    });
+
+    // FR01: ask the engine where an order on this symbol would route for the ladder's account (exchange-traded only).
+    effect(() => {
+      const key = this.routeQuestion();
+      const venue = this.venue();
+      const symbol = this.symbol();
+      const account = this.accountId();
+      untracked(() => {
+        if (!venue || account === null || !this.auth.hasPermission(Permission.AccountsRead)) return;
+        if (this.routeAnswer()?.key === key) return;
+        this.routeError.set(null);
+        this.venuesApi
+          .route(symbol, account)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (route) => {
+              if (this.routeQuestion() === key) this.routeAnswer.set({ key, route });
+            },
+            error: (e: unknown) => {
+              if (this.routeQuestion() === key)
+                this.routeError.set({ key, message: e instanceof Error ? e.message : 'no answer' });
+            },
+          });
+      });
     });
 
     // Default account: the scope's single account, else the only live one. Changing it (or the symbol) disarms.

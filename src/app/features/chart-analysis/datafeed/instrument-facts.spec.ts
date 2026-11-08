@@ -171,7 +171,7 @@ describe('instrumentFacts — other asset classes', () => {
     expect(pnlForMove(f, 5000, 5010, 2)).toBeCloseTo(1000, 9); // 40 ticks × 12.5 × 2
     expect(formatFactsQuantity(f, 1)).toBe('1 contract');
     expect(f.route).toMatchObject({ kind: 'venue', name: 'CME' });
-    expect(routeBadge(f.route)).toBe('Venue: CME');
+    expect(routeBadge(f.route)).toBe('Exchange-traded'); // FR01: never the catalogue exchange as a route
   });
 
   it('BTC spot (linear): coins on a 0.001 step, P&L = move × coins', () => {

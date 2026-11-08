@@ -16,7 +16,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
-import type { ExecutionAccount, VenueTicketPreview } from '@features/venues/venues.types';
+import type { ExecutionAccount, VenueRoute, VenueTicketPreview } from '@features/venues/venues.types';
 
 import { VenueOrderTicketComponent } from './venue-order-ticket.component';
 import { SWITCHED_OFF_MESSAGE } from './venue-ticket-send';
@@ -126,6 +126,32 @@ function preview(p: Partial<VenueTicketPreview> = {}): VenueTicketPreview {
   };
 }
 
+function routeOf(p: Partial<VenueRoute> = {}): VenueRoute {
+  return {
+    symbol: 'ESZ6',
+    kind: 'venue',
+    routable: true,
+    reason: null,
+    exchangeTraded: true,
+    executionAccountId: 3,
+    executionAccountName: 'CQG paper',
+    adapterKind: 'cqg',
+    mode: 'Paper',
+    venue: 'CME',
+    venueName: 'CQG (CME)',
+    venueSymbol: 'ESZ6',
+    venueTickSize: 0.25,
+    venueQuantityStep: 1,
+    venueMinQuantity: 1,
+    minNotional: null,
+    minNotionalCurrency: null,
+    fractionable: null,
+    timeInForce: ['Day', 'Gtc', 'Ioc'],
+    candidates: [],
+    ...p,
+  };
+}
+
 const ACCOUNTS = [
   acct({ id: 3, name: 'CQG paper', tradingAccountId: 7 }),
   acct({ id: 4, name: 'EA route', adapterKind: 'mt5-ea', tradingAccountId: 7 }),
@@ -181,8 +207,16 @@ describe('VenueOrderTicketComponent — Send', () => {
   const q = <T extends Element>(sel: string) => el().querySelector(sel) as T | null;
 
   /** Renders the ticket, answers accounts + health, sets a limit price and answers the dry run. */
+  const routeRequests = (): TestRequest[] =>
+    http.match((r) => r.url.startsWith(`${BASE}/execution-console/route`));
+
   async function ready(
-    opts: { switches?: Record<string, string>; pv?: Partial<VenueTicketPreview> } = {},
+    opts: {
+      switches?: Record<string, string>;
+      pv?: Partial<VenueTicketPreview>;
+      /** The engine's route answer (null = leave the question unanswered). */
+      route?: Partial<VenueRoute> | null;
+    } = {},
   ): Promise<void> {
     fixture = TestBed.createComponent(VenueOrderTicketComponent);
     fixture.componentRef.setInput('instrument', ES);
@@ -193,6 +227,9 @@ describe('VenueOrderTicketComponent — Send', () => {
         .expectOne(`${BASE}/execution-console/health`)
         .flush(ok({ switches: opts.switches ?? ON, accounts: [], workers: [] }));
     }
+    fixture.detectChanges();
+    // FR01: answer every route question asked (an answer for a question no longer current is dropped by the ticket).
+    if (opts.route !== null) routeRequests().forEach((r) => r.flush(ok(routeOf(opts.route ?? {}))));
     fixture.detectChanges();
     fixture.componentInstance.patch({ price: 6000 });
     fixture.detectChanges();
@@ -383,5 +420,42 @@ describe('VenueOrderTicketComponent — Send', () => {
     fixture.detectChanges();
     expect(q('[data-testid="venue-ticket-confirm-step"]')).toBeNull();
     expect(venueTicketPosts().length).toBe(0);
+  });
+
+  // ── FR01: the badge is the engine's route for the chosen account ──
+
+  it('FR01: asks the engine for the chosen trading + venue account, and the badge says where it routes', async () => {
+    await ready();
+    expect(q('[data-testid="ticket-route"]')?.textContent?.trim()).toBe('Routes to CQG (CME) · ESZ6 (paper)');
+    expect(q('[data-testid="ticket-route-why"]')).toBeNull();
+    expect(q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.disabled).toBe(false);
+  });
+
+  it('FR01: while the route is being asked, the badge says so and Send waits', async () => {
+    await ready({ route: null });
+    const asked = routeRequests();
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.at(-1)!.request.urlWithParams).toContain('symbol=ESZ6&tradingAccountId=7&executionAccountId=3');
+    expect(q('[data-testid="ticket-route"]')?.textContent?.trim()).toBe('Route: resolving…');
+    expect(q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.disabled).toBe(true);
+    expect(q('[data-testid="venue-ticket-why"]')?.textContent).toContain('where this order would route');
+  });
+
+  it('FR01: no route → "No route for this account (why)" in the engine\'s words, and Send is disabled', async () => {
+    const reason = 'The execution account has no verified credential: the dispatcher could not sign in.';
+    await ready({ route: { kind: 'none', routable: false, reason } });
+    expect(q('[data-testid="ticket-route"]')?.textContent?.trim()).toBe('No route for this account');
+    expect(q('[data-testid="ticket-route-why"]')?.textContent).toContain(reason);
+    expect(q('[data-testid="ticket-route"]')?.textContent).not.toContain('CME');
+    expect(q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.disabled).toBe(true);
+    expect(q('[data-testid="venue-ticket-why"]')?.textContent).toContain(reason);
+  });
+
+  it('FR04: the time-in-force choices are the routed adapter\'s', async () => {
+    await ready({ route: { timeInForce: ['Day'] } });
+    const tifs = Array.from(el().querySelectorAll('select[aria-label="Time in force"] option')).map((o) =>
+      o.textContent?.trim(),
+    );
+    expect(tifs).toEqual(['DAY']);
   });
 });

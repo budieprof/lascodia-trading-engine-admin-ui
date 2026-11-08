@@ -348,11 +348,15 @@ export function decimalsOfPrices(prices: readonly number[]): number | null {
   return best;
 }
 
-/** The badge a ticket wears: "MT5 broker", "Venue: Coinbase", "Resolving instrument…". */
+/**
+ * The instrument-level badge: "MT5 broker", "Exchange-traded", "Resolving instrument…". FR01: an exchange-traded
+ * instrument's route depends on the account, so this never names a venue (the catalogue's exchange is where it is
+ * listed, not where an order goes); the ticket and the ladder show the engine's route (`trading/venue-route.ts`).
+ */
 export function routeBadge(route: TicketRoute): string {
   switch (route.kind) {
     case 'venue':
-      return `Venue: ${route.name}`;
+      return 'Exchange-traded';
     case 'mt5':
       return 'MT5 broker';
     default:
