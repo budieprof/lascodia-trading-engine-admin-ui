@@ -434,7 +434,32 @@
     </div>
 
     <!-- On-chart data: volume, trades, events, analysis overlays -->
-    <app-chart-overlays-menu />
+    <app-chart-overlays-menu
+      [open]="openMenu() === 'overlays'"
+      [overlayCount]="overlayCount()"
+      [(showVolume)]="showVolume"
+      [(sessionBreaks)]="sessionBreaks"
+      [(showTradeTimeline)]="showTradeTimeline"
+      [tradeTimelineInfo]="tradeTimelineInfo()"
+      [blackoutTitle]="blackoutTitle()"
+      [deltaOn]="deltaOn()"
+      [autoAnalysis]="autoAnalysis()"
+      [autoAnalysisOn]="autoAnalysisOn()"
+      [autoAnalysisLayers]="autoAnalysisLayers"
+      [footprintRowUnit]="footprintRowUnit()"
+      [footprintRowChoices]="footprintRowChoices()"
+      [orderFlowFeed]="orderFlowFeed"
+      [consolidatableSources]="consolidatableSources()"
+      (menuToggle)="toggleMenu('overlays', $event)"
+      (eventsToggle)="toggleEvents()"
+      (eventImpactCycle)="cycleEventImpact()"
+      (deltaToggle)="toggleDelta()"
+      (autoAnalysisToggle)="toggleAutoAnalysis()"
+      (autoLayerToggle)="toggleAutoLayer($event)"
+      (scorecard)="openScorecard()"
+      (volumeProfileModePick)="setVolumeProfileMode($event)"
+      (consolidatedSourceToggle)="toggleConsolidatedSource($event)"
+    />
 
     <div class="tb-sep"></div>
 
@@ -841,7 +866,16 @@
   <div class="chart-body" [style.--dock-width.px]="dockWidth()">
     <app-chart-drawing-rail />
 
-    <app-chart-panel-strip />
+    <app-chart-panel-strip
+      [(watchlistOpen)]="watchlistOpen"
+      [(objectTreeOpen)]="objectTreeOpen"
+      [sidePane]="sidePane()"
+      [alertManagerOpen]="alertManagerOpen()"
+      [showFundamentals]="!!venueInstrument()"
+      (sidePaneToggle)="openSidePane($event)"
+      (panelToggle)="openPanel($event)"
+      (alertManagerToggle)="toggleAlertManager()"
+    />
     @if (watchlistOpen()) {
       <aside class="watch-dock">
         <div
@@ -873,7 +907,24 @@
         (contextmenu)="openContextMenu($event)"
         (pointerdown)="drawingMenu.set(null)"
       >
-        <app-chart-legend />
+        <app-chart-legend
+          [marketView]="marketView()"
+          [symbolChips]="symbolChips()"
+          [seriesOptions]="seriesOptions()"
+          [legend]="legend()"
+          [legendUp]="legendUp()"
+          [legendChange]="legendChange()"
+          [legendVolume]="legendVolume()"
+          [legendVolumeUnit]="legendVolumeUnit()"
+          [legendTime]="legendTime()"
+          [precision]="precision()"
+          [compareSeries]="compareSeries()"
+          [scriptRows]="legendScriptRows()"
+          (bottomChange)="legendBottom.set($event)"
+          (switchSeries)="switchContinuousSeries()"
+          (adjustmentChange)="setSeriesAdjustment($event)"
+          (scriptAction)="onScriptAction($event)"
+        />
         <!-- US05: the symbol, its market state and (at most every 30 s) its price, for screen readers. -->
         <div class="sr-only" role="status" aria-live="polite" data-testid="chart-live">{{ liveMessage() }}</div>
 
@@ -1002,9 +1053,53 @@
           />
         }
 
-        <app-chart-context-menus />
+        <app-chart-context-menus
+          [drawingMenu]="drawingMenu()"
+          [contextMenu]="contextMenu()"
+          [precision]="precision()"
+          [(settingsFor)]="settingsFor"
+          [(invertScale)]="invertScale"
+          [(scaleMode)]="scaleMode"
+          [(scaleSide)]="scaleSide"
+          [(showCountdown)]="showCountdown"
+          (drawingAction)="drawingAction($event.id, $event.action)"
+          (closeMenu)="closeContextMenu()"
+          (resetScales)="resetScales()"
+          (chartSettings)="chartSettingsOpen.set(true); closeContextMenu()"
+          (commands)="paletteOpen.set(true); closeContextMenu()"
+          (saveImage)="takeSnapshot()"
+          (copyImage)="copySnapshot()"
+          (exportData)="exportChartData()"
+          (showObjects)="objectTreeOpen.set(true); closeContextMenu()"
+          (addIndicator)="openStudiesDialog(); closeContextMenu()"
+          (alertAtLevel)="createAlertAtLevel($event)"
+          (alertHere)="createAlertHere($event)"
+          (saveLayoutAs)="duplicateLayout(); closeContextMenu()"
+          (removeAllDrawings)="clearDrawingsFromMenu()"
+        />
 
-        <app-chart-side-pane />
+        <app-chart-side-pane
+          [sidePane]="sidePane()"
+          [details]="details()"
+          [marketView]="marketView()"
+          [newsFocus]="newsFocus()"
+          [newsLoading]="newsLoading()"
+          [articles]="articles()"
+          [timezone]="timezone()"
+          [calendarCurrencies]="calendarCurrencies()"
+          [eventRelevance]="eventRelevance()"
+          [(calendarAll)]="calendarAll"
+          [(calendarMinImpact)]="calendarMinImpact"
+          [precision]="precision()"
+          [facts]="facts()"
+          [orderFlowReplayClip]="orderFlowReplayClip()"
+          [orderFlowSourceId]="orderFlow().sourceId"
+          [tickReplayBook]="tickReplayBook()"
+          [dataWindowSections]="dataWindowSections()"
+          (articleAnalysis)="newsAnalysis.set($event)"
+          (calendarEventOpened)="calendarEvent.set($event)"
+          (symbolSelected)="selectSymbol($event)"
+        />
 
         <!-- Object tree (DR-03 / DR-I10): every drawing of the symbol, hidden ones included. -->
         @if (objectTreeOpen() && drawings.symbolDrawings().length) {
@@ -1333,7 +1428,27 @@
     />
   }
 
-  <app-chart-studies-strip />
+  <app-chart-studies-strip
+    [active]="active()"
+    [scriptChips]="scriptChips()"
+    [(scriptError)]="scriptError"
+    [(testerOpen)]="testerOpen"
+    [canPickOnChart]="canPickOnChart()"
+    [studyNote]="studyNoteOf"
+    (scriptVisibility)="toggleScriptVisible($event)"
+    (scriptSettings)="settings.open($event)"
+    (scriptSource)="openScriptSource($event)"
+    (scriptLogs)="openLogs($event)"
+    (scriptAlert)="openScriptAlert($event)"
+    (scriptRemove)="removeScriptFromChart($event)"
+    (scriptOpenAt)="openScriptAt($event.key, $event.where)"
+    (indicatorToggle)="toggleIndicator($event)"
+    (indicatorRemove)="removeIndicator($event)"
+    (paramChange)="setParam($event.uid, $event.key, $event.value)"
+    (timePick)="pickStudyTime($event.uid, $event.key)"
+    (scorecard)="openScorecard()"
+    (studySettings)="studySettingsFor.set($event)"
+  />
   <!-- DR-I8: the pattern & structure scorecard; a row can open as a Pine strategy draft. -->
   @if (scorecardOpen()) {
     <app-pattern-scorecard-dialog

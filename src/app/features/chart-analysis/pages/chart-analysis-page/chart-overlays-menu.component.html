@@ -2,39 +2,39 @@
   <button
     type="button"
     class="tb-btn"
-    (click)="page.toggleMenu('overlays', $event)"
-    [class.open]="page.openMenu() === 'overlays'"
-    [class.active]="page.overlayCount() > 0"
+    (click)="menuToggle.emit($event)"
+    [class.open]="open()"
+    [class.active]="overlayCount() > 0"
     title="Chart overlays"
     data-testid="overlays-button"
   >
     <app-chart-icon name="layers" [size]="28" />
-    @if (page.overlayCount() > 0) {
-      <span class="tb-badge">{{ page.overlayCount() }}</span>
+    @if (overlayCount() > 0) {
+      <span class="tb-badge">{{ overlayCount() }}</span>
     }
   </button>
-  @if (page.openMenu() === 'overlays') {
+  @if (open()) {
     <div class="tb-menu tb-overlays-menu" role="menu" (click)="$event.stopPropagation()">
       <!-- PR-5: layer groups — show/hide and opacity per group, saved with the layout. -->
       <app-layer-groups-menu
-        [groups]="page.layerGroups()"
-        (groupsChange)="page.layerGroups.set($event)"
+        [groups]="overlays.layerGroups()"
+        (groupsChange)="overlays.layerGroups.set($event)"
       />
       <div class="tb-menu-sep"></div>
       <div class="tb-menu-heading">Data</div>
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showVolume()"
-        (click)="page.showVolume.set(!page.showVolume())"
+        [class.on]="showVolume()"
+        (click)="showVolume.set(!showVolume())"
       >
         <app-chart-icon name="volume" [size]="28" /> Volume
       </button>
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showPositions()"
-        (click)="page.togglePositions()"
+        [class.on]="overlays.showPositions()"
+        (click)="overlays.showPositions.set(!overlays.showPositions())"
         title="Open positions for the selected account: entry, SL and TP lines"
       >
         <app-chart-icon name="trades" [size]="28" /> Open positions
@@ -42,8 +42,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showOrders()"
-        (click)="page.toggleOrders()"
+        [class.on]="overlays.showOrders()"
+        (click)="overlays.showOrders.set(!overlays.showOrders())"
         title="Pending orders for the selected account: limit/stop price and O·SL / O·TP lines"
       >
         <app-chart-icon name="trades" [size]="28" /> Pending orders
@@ -51,8 +51,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showOverlays()"
-        (click)="page.toggleOverlays()"
+        [class.on]="overlays.showOverlays()"
+        (click)="overlays.showOverlays.set(!overlays.showOverlays())"
         title="Trade-signal markers and martingale rungs"
       >
         <app-chart-icon name="trades" [size]="28" /> Signals
@@ -60,8 +60,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showClosedTrades()"
-        (click)="page.showClosedTrades.set(!page.showClosedTrades())"
+        [class.on]="overlays.showClosedTrades()"
+        (click)="overlays.showClosedTrades.set(!overlays.showClosedTrades())"
         title="Entry and exit fills of this symbol's closed trades for the selected account (paper in purple)"
       >
         <app-chart-icon name="trades" [size]="28" /> Closed trades
@@ -69,10 +69,10 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showTradeTimeline()"
-        (click)="page.showTradeTimeline.set(!page.showTradeTimeline())"
+        [class.on]="showTradeTimeline()"
+        (click)="showTradeTimeline.set(!showTradeTimeline())"
         [title]="
-          page.tradeTimelineInfo() ??
+          tradeTimelineInfo() ??
           'The chart strategy\'s trades on one timeline: backtest, live session, paper and account fills, each with its slippage'
         "
         data-testid="toggle-trade-timeline"
@@ -82,19 +82,19 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showWatchMarks()"
-        (click)="page.showWatchMarks.set(!page.showWatchMarks())"
+        [class.on]="overlays.showWatchMarks()"
+        (click)="overlays.showWatchMarks.set(!overlays.showWatchMarks())"
         title="This symbol's watches and monitors: their fired, step and called-off marks and their price lines"
         data-testid="toggle-watch-marks"
       >
         <app-chart-icon name="alert" [size]="28" /> Watches &amp; monitors
       </button>
-      @if (page.showPositions() || page.showOrders()) {
+      @if (overlays.showPositions() || overlays.showOrders()) {
         <button
           type="button"
           class="tb-menu-item tb-check"
-          [class.on]="page.fitTradeLines()"
-          (click)="page.fitTradeLines.set(!page.fitTradeLines())"
+          [class.on]="overlays.fitTradeLines()"
+          (click)="overlays.fitTradeLines.set(!overlays.fitTradeLines())"
           title="Keep every position and order line in view (off: a distant target no longer squashes the candles)"
         >
           <app-chart-icon name="trades" [size]="28" /> Fit trade lines
@@ -104,28 +104,28 @@
         <button
           type="button"
           class="tb-menu-item tb-check"
-          [class.on]="page.showEvents()"
-          (click)="page.toggleEvents()"
+          [class.on]="overlays.showEvents()"
+          (click)="eventsToggle.emit()"
           title="Economic events on the time axis"
         >
           <app-chart-icon name="calendar" [size]="28" /> Economic events
         </button>
-        @if (page.showEvents()) {
+        @if (overlays.showEvents()) {
           <button
             type="button"
             class="tb-chip"
-            (click)="page.cycleEventImpact()"
+            (click)="eventImpactCycle.emit()"
             title="Minimum impact shown"
           >
-            {{ page.minEventImpact() }}+
+            {{ overlays.minEventImpact() }}+
           </button>
           <button
             type="button"
             class="tb-chip"
-            [class.on]="page.showBlackout()"
-            [attr.aria-pressed]="page.showBlackout()"
-            (click)="page.showBlackout.set(!page.showBlackout())"
-            [title]="page.blackoutTitle()"
+            [class.on]="overlays.showBlackout()"
+            [attr.aria-pressed]="overlays.showBlackout()"
+            (click)="overlays.showBlackout.set(!overlays.showBlackout())"
+            [title]="blackoutTitle()"
           >
             Blackout
           </button>
@@ -134,8 +134,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.sessionBreaks()"
-        (click)="page.sessionBreaks.set(!page.sessionBreaks())"
+        [class.on]="sessionBreaks()"
+        (click)="sessionBreaks.set(!sessionBreaks())"
         title="A line where each trading day begins (17:00 New York for FX) on intraday charts"
       >
         <app-chart-icon name="calendar" [size]="28" /> Session breaks
@@ -145,20 +145,20 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showVolumeProfile()"
-        (click)="page.showVolumeProfile.set(!page.showVolumeProfile())"
+        [class.on]="overlays.showVolumeProfile()"
+        (click)="overlays.showVolumeProfile.set(!overlays.showVolumeProfile())"
       >
         <app-chart-icon name="volume-profile" [size]="28" /> Volume profile
       </button>
-      @if (page.showVolumeProfile()) {
+      @if (overlays.showVolumeProfile()) {
         <div class="tb-menu-chips">
-          @for (m of page.volumeProfileModes; track m.id) {
+          @for (m of overlays.volumeProfileModes; track m.id) {
             <button
               type="button"
               role="menuitem"
               class="tb-chip"
-              [class.on]="page.volumeProfileMode() === m.id"
-              (click)="page.setVolumeProfileMode(m.id)"
+              [class.on]="overlays.volumeProfileMode() === m.id"
+              (click)="volumeProfileModePick.emit(m.id)"
               [title]="m.hint"
             >
               {{ m.label }}
@@ -171,21 +171,21 @@
             type="button"
             role="menuitemcheckbox"
             class="tb-chip"
-            [class.on]="page.profileExtras().nakedPocs"
-            [attr.aria-checked]="page.profileExtras().nakedPocs"
-            (click)="page.toggleProfileExtra('nakedPocs')"
+            [class.on]="overlays.profileExtras().nakedPocs"
+            [attr.aria-checked]="overlays.profileExtras().nakedPocs"
+            (click)="overlays.toggleProfileExtra('nakedPocs')"
             title="POCs of the last 10 finished trading days (or Asia / London / New York sessions) carried right until price trades through them"
           >
             Naked POCs
           </button>
-          @if (page.volumeProfileMode() !== 'visible') {
+          @if (overlays.volumeProfileMode() !== 'visible') {
             <button
               type="button"
               role="menuitemcheckbox"
               class="tb-chip"
-              [class.on]="page.profileExtras().developing"
-              [attr.aria-checked]="page.profileExtras().developing"
-              (click)="page.toggleProfileExtra('developing')"
+              [class.on]="overlays.profileExtras().developing"
+              [attr.aria-checked]="overlays.profileExtras().developing"
+              (click)="overlays.toggleProfileExtra('developing')"
               title="Where the POC, VAH and VAL stood bar by bar as each period developed"
             >
               Developing POC / VA
@@ -196,8 +196,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showSupportResistance()"
-        (click)="page.showSupportResistance.set(!page.showSupportResistance())"
+        [class.on]="overlays.showSupportResistance()"
+        (click)="overlays.showSupportResistance.set(!overlays.showSupportResistance())"
         title="Auto support &amp; resistance from swing pivots"
       >
         <app-chart-icon name="sr-levels" [size]="28" /> Support &amp; resistance
@@ -205,8 +205,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.showStructure()"
-        (click)="page.showStructure.set(!page.showStructure())"
+        [class.on]="overlays.showStructure()"
+        (click)="overlays.showStructure.set(!overlays.showStructure())"
         title="Balance range, value area, stop pools, climax/spring/upthrust bars"
       >
         <app-chart-icon name="structure" [size]="28" /> Market structure
@@ -215,21 +215,21 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.autoAnalysisOn()"
-        (click)="page.toggleAutoAnalysis()"
+        [class.on]="autoAnalysisOn()"
+        (click)="autoAnalysisToggle.emit()"
         title="Trendlines fitted and scored, the next higher timeframe's levels, Fib of the last zig-zag leg"
       >
         <app-chart-icon name="sr-levels" [size]="28" /> Auto analysis
       </button>
-      @if (page.autoAnalysisOn()) {
+      @if (autoAnalysisOn()) {
         <div class="tb-menu-chips">
-          @for (l of page.autoAnalysisLayers; track l.id) {
+          @for (l of autoAnalysisLayers(); track l.id) {
             <button
               type="button"
               role="menuitem"
               class="tb-chip"
-              [class.on]="page.autoAnalysis()[l.id]"
-              (click)="page.toggleAutoLayer(l.id)"
+              [class.on]="autoAnalysis()[l.id]"
+              (click)="autoLayerToggle.emit(l.id)"
               [title]="l.hint"
             >
               {{ l.label }}
@@ -241,7 +241,7 @@
       <button
         type="button"
         class="tb-menu-item"
-        (click)="page.openScorecard()"
+        (click)="scorecard.emit()"
         title="Sample size, hit rate, mean R, MFE/MAE net of spread — and export as Pine"
       >
         <app-chart-icon name="structure" [size]="28" /> Pattern scorecard…
@@ -249,8 +249,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.deltaOn()"
-        (click)="page.toggleDelta()"
+        [class.on]="deltaOn()"
+        (click)="deltaToggle.emit()"
         title="Order-flow delta ESTIMATED from OHLCV — no aggressor tape for FX"
       >
         <app-chart-icon name="delta" [size]="28" /> Delta (estimated)
@@ -261,13 +261,13 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().heatmap"
-        (click)="page.toggleOrderFlow('heatmap')"
+        [class.on]="overlays.orderFlow().heatmap"
+        (click)="overlays.toggleOrderFlow('heatmap')"
         title="Liquidity heatmap behind the candles from one broker's MT5 depth of book (kept 7 days)"
       >
         <app-chart-icon name="volume-profile" [size]="28" /> Liquidity heatmap (broker DOM)
       </button>
-      @if (page.orderFlow().heatmap) {
+      @if (overlays.orderFlow().heatmap) {
         <label
           class="tb-menu-chips"
           style="align-items: center; font-size: 12px"
@@ -279,8 +279,8 @@
             min="0.1"
             max="1"
             step="0.05"
-            [value]="page.orderFlow().heatmapOpacity"
-            (input)="page.setHeatmapOpacity(+$any($event.target).value)"
+            [value]="overlays.orderFlow().heatmapOpacity"
+            (input)="overlays.setHeatmapOpacity(+$any($event.target).value)"
             aria-label="Heatmap opacity"
           />
         </label>
@@ -288,8 +288,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().cvd"
-        (click)="page.toggleOrderFlow('cvd')"
+        [class.on]="overlays.orderFlow().cvd"
+        (click)="overlays.toggleOrderFlow('cvd')"
         title="Cumulative delta in its own pane: real aggressor volume where the venue publishes trades (crypto), else ESTIMATED with the tick rule (quote up-ticks minus down-ticks; spot FX has no traded volume). The pane title says which."
       >
         <app-chart-icon name="delta" [size]="28" /> Delta (CVD)
@@ -297,24 +297,28 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().footprint"
-        (click)="page.toggleOrderFlow('footprint')"
+        [class.on]="overlays.orderFlow().footprint"
+        (click)="overlays.toggleOrderFlow('footprint')"
         title="Per price row: traded volume (sell × buy) where the venue publishes trades, else estimated tick counts (down × up, tick rule), with 3:1 diagonal imbalances — zoom in to see it"
       >
         <app-chart-icon name="structure" [size]="28" /> Footprint
       </button>
-      @if (page.orderFlow().footprint) {
+      @if (overlays.orderFlow().footprint) {
         <div
           class="tb-menu-chips"
-          [title]="page.footprintRowUnit() === 'points' ? 'Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)' : 'Footprint row height in the instrument\'s ticks'"
+          [title]="
+            footprintRowUnit() === 'points'
+              ? 'Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)'
+              : 'Footprint row height in the instrument\'s ticks'
+          "
         >
-          @for (r of page.footprintRowChoices(); track r.label) {
+          @for (r of footprintRowChoices(); track r.label) {
             <button
               type="button"
               role="menuitem"
               class="tb-chip"
-              [class.on]="page.orderFlow().footprintRowPoints === r.points"
-              (click)="page.setFootprintRows(r.points)"
+              [class.on]="overlays.orderFlow().footprintRowPoints === r.points"
+              (click)="overlays.setFootprintRows(r.points)"
               [title]="r.hint"
             >
               {{ r.label }}
@@ -325,8 +329,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().ribbon"
-        (click)="page.toggleOrderFlow('ribbon')"
+        [class.on]="overlays.orderFlow().ribbon"
+        (click)="overlays.toggleOrderFlow('ribbon')"
         title="Broker spread (avg, min–max) and ticks per minute in a thin pane; marks bars where liquidity was pulled"
       >
         <app-chart-icon name="sr-levels" [size]="28" /> Spread &amp; tick rate
@@ -334,8 +338,8 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().fills"
-        (click)="page.toggleOrderFlow('fills')"
+        [class.on]="overlays.orderFlow().fills"
+        (click)="overlays.toggleOrderFlow('fills')"
         title="Fills of the accounts in scope at their price, requested vs filled and the slippage"
       >
         <app-chart-icon name="alert" [size]="28" /> Fills &amp; slippage
@@ -343,14 +347,14 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().trades"
-        (click)="page.toggleOrderFlow('trades')"
+        [class.on]="overlays.orderFlow().trades"
+        (click)="overlays.toggleOrderFlow('trades')"
         data-testid="of-trades"
         title="Each real trade as a bubble (size = area, colour = aggressor) — only sources with a tape (CME futures, venues); spot FX brokers have none"
       >
         <app-chart-icon name="volume-profile" [size]="28" /> Trades (venue tape)
       </button>
-      @if (page.orderFlow().trades) {
+      @if (overlays.orderFlow().trades) {
         <label
           class="tb-menu-chips"
           style="align-items: center; font-size: 12px"
@@ -362,8 +366,8 @@
             min="0"
             step="1"
             style="width: 72px"
-            [value]="page.orderFlow().tradeMinSize"
-            (change)="page.setTradeMinSize(+$any($event.target).value)"
+            [value]="overlays.orderFlow().tradeMinSize"
+            (change)="overlays.setTradeMinSize(+$any($event.target).value)"
             aria-label="Minimum trade size"
           />
         </label>
@@ -371,19 +375,19 @@
       <button
         type="button"
         class="tb-menu-item tb-check"
-        [class.on]="page.orderFlow().cmeFlow"
-        (click)="page.toggleOrderFlow('cmeFlow')"
+        [class.on]="overlays.orderFlow().cmeFlow"
+        (click)="overlays.toggleOrderFlow('cmeFlow')"
         data-testid="of-cme"
         title="From the real CME futures tape and book (cme-trades / cme-l2): large lots, sweeps / stop runs, iceberg-like levels and absorption, in spot terms (basis-adjusted). Pick a CME source to make the CVD and footprint show the real aggressor delta."
       >
         <app-chart-icon name="volume-profile" [size]="28" /> CME order flow (futures)
       </button>
       @if (
-        page.orderFlow().heatmap ||
-        page.orderFlow().trades ||
-        page.orderFlow().cmeFlow ||
-        page.orderFlow().cvd ||
-        page.orderFlow().footprint
+        overlays.orderFlow().heatmap ||
+        overlays.orderFlow().trades ||
+        overlays.orderFlow().cmeFlow ||
+        overlays.orderFlow().cvd ||
+        overlays.orderFlow().footprint
       ) {
         <label
           class="tb-menu-chips"
@@ -392,22 +396,24 @@
         >
           Source
           <select
-            [value]="page.isConsolidatedPick() ? 'consolidated' : (page.orderFlow().sourceId ?? '')"
-            (change)="page.setOrderFlowSource($any($event.target).value)"
+            [value]="
+              overlays.isConsolidatedPick() ? 'consolidated' : (overlays.orderFlow().sourceId ?? '')
+            "
+            (change)="overlays.setOrderFlowSource($any($event.target).value)"
             aria-label="Market-data source"
             data-testid="of-source"
           >
             <option value="">Automatic</option>
             <option value="consolidated">Consolidated — all your sources (spot, base units)</option>
-            @for (src of page.orderFlowFeed.mdSources() ?? []; track src.sourceId) {
-              @let refused = page.orderFlowFeed.sourceNotEntitled(src);
+            @for (src of orderFlowFeed().mdSources() ?? []; track src.sourceId) {
+              @let refused = orderFlowFeed().sourceNotEntitled(src);
               <option [value]="src.sourceId" [disabled]="!!refused">
                 {{ src.displayName }}{{ refused ? ' — ' + refused : '' }}
               </option>
             }
           </select>
         </label>
-        @if (page.isConsolidatedPick() && page.consolidatableSources().length > 1) {
+        @if (overlays.isConsolidatedPick() && consolidatableSources().length > 1) {
           <div
             class="tb-menu-chips"
             style="font-size: 12px; flex-wrap: wrap"
@@ -415,12 +421,12 @@
             aria-label="Sources in the consolidated heatmap"
             data-testid="of-consolidated-sources"
           >
-            @for (src of page.consolidatableSources(); track src.sourceId) {
+            @for (src of consolidatableSources(); track src.sourceId) {
               <label style="display: inline-flex; align-items: center; gap: 3px">
                 <input
                   type="checkbox"
-                  [checked]="page.consolidatedHas(src.sourceId)"
-                  (change)="page.toggleConsolidatedSource(src.sourceId)"
+                  [checked]="overlays.consolidatedHas(src.sourceId)"
+                  (change)="consolidatedSourceToggle.emit(src.sourceId)"
                 />
                 {{ src.displayName }}
               </label>

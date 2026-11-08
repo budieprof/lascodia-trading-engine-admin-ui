@@ -1,6 +1,5 @@
 import {
   consolidatedId,
-  consolidatedSubset,
   isConsolidatedId,
   type MdSource,
 } from '@core/realtime/marketdata.types';
@@ -45,19 +44,8 @@ import {
   resolutionMs,
   type TvResolution,
 } from '../../datafeed/resolution';
-import {
-  applyStoredTick,
-  foldBars,
-  lastCompleteBarTime,
-  mergeForming,
-} from '../../datafeed/aggregate';
-import {
-  SessionRollover,
-  applySessionTick,
-  currentDayBars,
-  mergeSessionTail,
-} from '../../datafeed/session-bars';
-import { TradingCalendar, nextSessionPeriod, type SessionSpec } from '../../datafeed/session-calendar';
+import { currentDayBars } from '../../datafeed/session-bars';
+import { TradingCalendar, type SessionSpec } from '../../datafeed/session-calendar';
 import { tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
@@ -193,7 +181,6 @@ import {
   INDICATORS,
   defaultParams,
   indicatorById,
-  indicatorLabel,
 } from '../../indicators/registry';
 import {
   ChartHostComponent,
@@ -241,8 +228,6 @@ import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
   parseStudySource,
-  sourceGroups,
-  type SourceGroup,
 } from '../../indicators/study-settings';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
@@ -253,7 +238,6 @@ import { NewsIntelService } from '@core/services/news-intel.service';
 import type {
   NewsArticleView,
   NewsFocusResult,
-  NewsPressureLeg,
 } from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageContextService } from '@core/assistant/page-context.service';
@@ -267,16 +251,7 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
-import { DEFAULT_PROFILE_EXTRAS, type ProfileExtrasSettings } from '../../overlays/profile-levels';
 import type { AlertableLevel } from '../../overlays/overlay-hits';
-import {
-  DEFAULT_LAYER_GROUPS,
-  effectiveOpacity,
-  persistLayerGroups,
-  restoreLayerGroups,
-  type LayerGroupId,
-  type LayerGroupsState,
-} from '../../overlays/layer-groups';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -302,23 +277,6 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ReplayController } from '../../replay/replay-controller';
-import {
-  pageSlice,
-  CHART_LEGEND,
-  LEGEND_KEYS,
-  CHART_STUDIES_STRIP,
-  STUDIES_STRIP_KEYS,
-  CHART_CONTEXT_MENUS,
-  CONTEXT_MENUS_KEYS,
-  CHART_PANEL_STRIP,
-  PANEL_STRIP_KEYS,
-  CHART_OVERLAYS_MENU,
-  OVERLAYS_MENU_KEYS,
-  CHART_DRAWING_RAIL,
-  DRAWING_RAIL_KEYS,
-  CHART_SIDE_PANE,
-  SIDE_PANE_KEYS,
-} from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
 import { ChartLegendComponent } from './chart-legend.component';
@@ -403,11 +361,8 @@ import {
 import { drawingTemplates } from '../../drawings/drawing-templates';
 import {
   DEFAULT_STYLE,
-  RAIL_LAYOUT,
-  RAIL_STANDALONE,
   TOOLS,
   toolFor,
-  type ToolSpec,
   type DashStyle,
   type Drawing,
   type DrawingKind,
@@ -421,12 +376,7 @@ import { bookToSnapshot } from '../../orderflow/stream-depth';
 import { footprintRowsFromTape } from '../../replay/tick-replay';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { replayClipUtc } from '../../orderflow/orderflow-replay';
-import {
-  DEFAULT_ORDER_FLOW,
-  orderFlowCount,
-  restoredOrderFlow,
-  type OrderFlowSettings,
-} from '../../orderflow/orderflow.types';
+import { orderFlowCount } from '../../orderflow/orderflow.types';
 
 /** A Pine script's latest run on the chart. */
 export interface ChartScriptRun {
@@ -477,7 +427,9 @@ import {
   type ToolbarMenu,
   type StyleChoice,
 } from './chart-page.config';
-import { ChartHistoryPager } from './chart-history-pager';
+import { ChartSessionStore } from './chart-session-store';
+import { ChartOverlaySettings } from './chart-overlay-settings';
+import { ChartDrawingTools } from './chart-drawing-tools';
 import { ChartDockState } from './chart-dock-state';
 import { ChartEditorState } from './chart-editor-state';
 import {
@@ -590,39 +542,20 @@ export { normaliseView };
   // The template's sections (rail, strip, legend, menus, side pane, studies) render this page's state.
   // US02: each template section gets its slice of the page, not the page.
   providers: [
+    // US02b: the main series, for the sections that show it.
     {
-      provide: CHART_LEGEND,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, LEGEND_KEYS),
+      provide: ChartSessionStore,
+      useFactory: (page: ChartAnalysisPageComponent) => page.session,
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
-      provide: CHART_STUDIES_STRIP,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, STUDIES_STRIP_KEYS),
+      provide: ChartOverlaySettings,
+      useFactory: (page: ChartAnalysisPageComponent) => page.overlaySettings,
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
-      provide: CHART_CONTEXT_MENUS,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, CONTEXT_MENUS_KEYS),
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_PANEL_STRIP,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, PANEL_STRIP_KEYS),
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_OVERLAYS_MENU,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, OVERLAYS_MENU_KEYS),
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_DRAWING_RAIL,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, DRAWING_RAIL_KEYS),
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_SIDE_PANE,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, SIDE_PANE_KEYS),
+      provide: ChartDrawingTools,
+      useFactory: (page: ChartAnalysisPageComponent) => page.drawingTools,
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
   ],
@@ -943,47 +876,32 @@ export class ChartAnalysisPageComponent {
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
-  readonly symbol = signal<string>('EURUSD');
-  readonly resolution = signal<TvResolution>('60');
+  /**
+   * US02b: the main series — symbol, timeframe, bars and whose they are, the forming bar, live prices, scroll-back —
+   * lives in {@link ChartSessionStore}; the page reads it under the names it always had.
+   */
+  readonly session: ChartSessionStore = new ChartSessionStore({
+    feed: this.feed,
+    host: () => this.host(),
+    replay: () => this.replay,
+    loadEvents: (extend) => this.loadEvents(extend),
+    extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
+  });
+  /** US02b: the overlay settings saved with a layout ({@link ChartOverlaySettings}); aliased below under their names. */
+  readonly overlaySettings = new ChartOverlaySettings();
+  readonly symbol = this.session.symbol;
+  readonly resolution = this.session.resolution;
   readonly style = signal<ChartStyle>('candles');
   readonly showVolume = signal(true);
-  readonly bars = signal<Bar[]>([]);
-  /**
-   * The symbol and resolution `bars` hold. A switch changes the chart's at once, but the previous
-   * series stays on screen until the new one loads — so whatever takes the bars to be this
-   * symbol's (a run's forming bar, a run's drawings, a tick) checks this first.
-   */
-  private readonly barsFor = signal<SeriesId | null>(null, {
-    equal: (a, b) => a === b || sameSeries(a, b),
-  });
-  /**
-   * The series on screen, for the chart: it rebuilds every series when this changes, rather than
-   * diffing one instrument's bars against another's (CC-I1).
-   */
-  readonly dataKey = computed(() => {
-    const b = this.barsFor();
-    return b ? `${b.symbol}|${b.resolution}` : '';
-  });
-  /**
-   * The series whose oldest loaded bar is the start of the engine's history (a scroll-back page came
-   * back empty): the chart stops asking for more (CC-14). Cleared by every load of a series.
-   */
-  private readonly historyStart = signal<string | null>(null);
-  readonly historyComplete = computed(
-    () => !!this.dataKey() && this.historyStart() === this.dataKey(),
-  );
-  /**
-   * The symbol's session as the engine reports it with its chart bars: the trading days the chart's
-   * day-based studies and the Details pane count in, and the calendar a live price opens the next
-   * session-grid period by. Null until it is known — and for a symbol without one: UTC days.
-   */
-  readonly sessionSpec = computed(() => this.feed.sessionOf(this.symbol()));
-  private readonly tradingCalendar = computed(() => {
-    const spec = this.sessionSpec();
-    return spec ? new TradingCalendar(spec) : null;
-  });
-  readonly loading = signal(false);
-  readonly error = signal<string | null>(null);
+  readonly bars = this.session.bars;
+  /** The symbol and resolution `bars` hold ({@link ChartSessionStore.barsFor}). */
+  private readonly barsFor = this.session.barsFor;
+  readonly dataKey = this.session.dataKey;
+  readonly historyComplete = this.session.historyComplete;
+  readonly sessionSpec = this.session.sessionSpec;
+  private readonly tradingCalendar = this.session.tradingCalendar;
+  readonly loading = this.session.loading;
+  readonly error = this.session.error;
   readonly active = signal<ActiveIndicator[]>([]);
   readonly legend = signal<LegendSnapshot | null>(null);
   readonly indicatorMenuOpen = signal(false);
@@ -1543,7 +1461,7 @@ export class ChartAnalysisPageComponent {
   /** The symbol's watches' fires, touches, call-offs and script steps (`app-chart-analysis` fills it). */
   readonly analysisMarkers = signal<ChartMarker[]>([]);
   /** Watches and monitors on the chart — fire / step / call-off marks and their price lines (overlays menu; saved with the layout). */
-  readonly showWatchMarks = signal(true);
+  readonly showWatchMarks = this.overlaySettings.showWatchMarks;
   /** A trade an analysis proposed, opened in the order ticket (paper, at market — nothing is sent until Submit). */
   onAnalysisTicket(prefill: TicketPrefill): void {
     this.ticketPrefill.set({ ...prefill });
@@ -1594,55 +1512,27 @@ export class ChartAnalysisPageComponent {
       });
     onCleanup(() => sub.unsubscribe());
   });
-  /**
-   * Engine state on the chart, each toggled on its own (all off until the operator asks):
-   * open positions (entry/SL/TP), pending orders (working limit/stop orders and their O·SL/O·TP),
-   * and signals (trade-signal markers + martingale rungs). `showOverlays` is the signals toggle —
-   * the name predates the split and is what saved layouts and the assistant already use.
-   */
-  readonly showPositions = signal(false);
-  readonly showOrders = signal(false);
-  readonly showOverlays = signal(false);
-  /** Fill markers of the symbol's closed trades (entry and exit; paper apart). Off by default. */
-  readonly showClosedTrades = signal(false);
-  /**
-   * Whether the trade lines widen the price scale's fit (CC-10). On by default: a stop below the
-   * visible low stays in view. Off: a distant take-profit no longer squashes the candles.
-   */
-  readonly fitTradeLines = signal(true);
-  /** Any of the three on — the assistant's single "trades" switch reads and drives all three. */
-  readonly anyTradeOverlay = computed(
-    () => this.showPositions() || this.showOrders() || this.showOverlays(),
-  );
+  /** Trade layers, each its own toggle ({@link ChartOverlaySettings}). */
+  readonly showPositions = this.overlaySettings.showPositions;
+  readonly showOrders = this.overlaySettings.showOrders;
+  readonly showOverlays = this.overlaySettings.showOverlays;
+  readonly showClosedTrades = this.overlaySettings.showClosedTrades;
+  readonly fitTradeLines = this.overlaySettings.fitTradeLines;
+  readonly anyTradeOverlay = this.overlaySettings.anyTradeOverlay;
 
   // ── Analytical overlays ──────────────────────────────────────────────────
   //
   // Derived from the loaded bars, not fetched. The chart host computes them; these are the
   // toggles the toolbar drives.
-  readonly showVolumeProfile = signal(false);
-  readonly volumeProfileMode = signal<VolumeProfileMode>('visible');
+  readonly showVolumeProfile = this.overlaySettings.showVolumeProfile;
+  readonly volumeProfileMode = this.overlaySettings.volumeProfileMode;
   readonly vpMenuOpen = signal(false);
-  readonly volumeProfileModes = VOLUME_PROFILE_MODES;
-  readonly showSupportResistance = signal(false);
-  readonly showStructure = signal(false);
-  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3); saved with the layout. */
-  readonly profileExtras = signal<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
-  toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
-    this.profileExtras.update((s) => ({ ...s, [key]: !s[key] }));
-  }
+  readonly showSupportResistance = this.overlaySettings.showSupportResistance;
+  readonly showStructure = this.overlaySettings.showStructure;
+  readonly profileExtras = this.overlaySettings.profileExtras;
 
-  /**
-   * Layer groups (PR-5): Structure, Profiles, Order flow, Events, Trades — each shown/hidden and faded
-   * together from the layer menu; saved with the layout.
-   */
-  readonly layerGroups = signal<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
-  /**
-   * What a group's layers draw at: its opacity, 0 when hidden. Reactive (reads the signal), so a template
-   * can bind `[opacity]="layerGroupOpacity('flow')"` — the order-flow layers take theirs from here.
-   */
-  layerGroupOpacity(id: LayerGroupId): number {
-    return effectiveOpacity(this.layerGroups(), id);
-  }
+  /** Layer groups (PR-5), saved with the layout. */
+  readonly layerGroups = this.overlaySettings.layerGroups;
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
   readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
@@ -1654,39 +1544,20 @@ export class ChartAnalysisPageComponent {
   }
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
-  readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
-  toggleOrderFlow(
-    layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades' | 'cmeFlow',
-  ): void {
-    this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
-  }
-  /** The market-data source for the heatmap / depth / trades ('' = automatic). */
-  setOrderFlowSource(sourceId: string): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, sourceId: sourceId || null }));
-  }
+  readonly orderFlow = this.overlaySettings.orderFlow;
   /** Multibook: the sources the consolidated heatmap may combine (every entitled source with a book). */
   readonly consolidatableSources = computed(() =>
     (this.orderFlowFeed.mdSources() ?? []).filter((s) => !!s.feeds?.book || !!s.feeds?.ticks),
   );
-  /** Whether a source is in the consolidated pick (all are when the pick is plain `consolidated`). */
-  consolidatedHas(sourceId: string): boolean {
-    const id = this.orderFlow().sourceId;
-    const subset = id ? consolidatedSubset(id) : null;
-    return !subset || subset.includes(sourceId);
-  }
   /** Multibook: turn one source in or out of the consolidated heatmap (at least one stays in). */
   toggleConsolidatedSource(sourceId: string): void {
     const all = this.consolidatableSources().map((s) => s.sourceId);
-    const current = all.filter((s) => this.consolidatedHas(s));
+    const current = all.filter((s) => this.overlaySettings.consolidatedHas(s));
     const next = current.includes(sourceId)
       ? current.filter((s) => s !== sourceId)
       : [...current, sourceId];
     if (!next.length) return;
-    this.setOrderFlowSource(consolidatedId(all, next));
-  }
-  readonly isConsolidatedPick = computed(() => isConsolidatedId(this.orderFlow().sourceId));
-  setTradeMinSize(value: number): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, tradeMinSize: value }));
+    this.overlaySettings.setOrderFlowSource(consolidatedId(all, next));
   }
   /** Tick replay's book at the head for the depth panel (undefined outside tick replay). */
   readonly tickReplayBook = computed<OrderBookSnapshot | null | undefined>(() => {
@@ -1698,18 +1569,12 @@ export class ChartAnalysisPageComponent {
     if (!tape) return null;
     return bookToSnapshot(this.symbol(), tape.sourceId ?? 'recording', tape.bookAt(head));
   });
-  setHeatmapOpacity(value: number): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
-  }
   /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height — MT5 points, else instrument ticks (UF02). */
   readonly footprintRowUnit = computed<'points' | 'ticks'>(() => {
     const f = this.facts();
     return !f.resolving && f.origin !== 'pair' && f.tickSize > 0 ? 'ticks' : 'points';
   });
   readonly footprintRowChoices = computed(() => footprintRowChoices(this.footprintRowUnit()));
-  setFootprintRows(points: number | null): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, footprintRowPoints: points }));
-  }
   /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
   readonly orderFlowReplayClip = computed(() => {
     if (!this.replay.active()) return null;
@@ -1747,13 +1612,10 @@ export class ChartAnalysisPageComponent {
   /** Economic events on the time axis. */
   private readonly eventsFeed = inject(ChartEventsService);
   readonly events = signal<EventMark[]>([]);
-  readonly showEvents = signal(true);
-  readonly minEventImpact = signal<'High' | 'Medium' | 'Low'>('Medium');
-  /**
-   * Shade the news blackout around Tier-1 events (CC-I2): the minutes live refuses new entries in,
-   * around each High event of the pair's currencies. Saved with the layout.
-   */
-  readonly showBlackout = signal(true);
+  readonly showEvents = this.overlaySettings.showEvents;
+  readonly minEventImpact = this.overlaySettings.minEventImpact;
+  /** Shade the news blackout around Tier-1 events (CC-I2); saved with the layout. */
+  readonly showBlackout = this.overlaySettings.showBlackout;
   /** The blackout window live applies (`economic-event/news-blackout`), and when it was read. */
   readonly blackout = signal<BlackoutWindow | null>(null);
   private blackoutAt = 0;
@@ -1799,6 +1661,8 @@ export class ChartAnalysisPageComponent {
   /**
    * The line under a study in the studies strip: why a pane is empty (UA03) — the engine's reason or "FX pairs only".
    */
+  /** {@link studyNote} bound to the page, for the studies strip's input. */
+  readonly studyNoteOf = (item: ActiveIndicator): string | null => this.studyNote(item);
   studyNote(item: ActiveIndicator): string | null {
     if (item.defId === 'exchange-sessions') return exchangeSessionsNote(this.exchangeSessions(), this.symbol());
     const pane = this.externalPanes().find((p) => p.uid === item.uid)?.note;
@@ -1938,10 +1802,6 @@ export class ChartAnalysisPageComponent {
   /** The news item long-pressed for its AI analysis modal. */
   readonly newsAnalysis = signal<NewsArticleView | null>(null);
 
-  /** Long-press on a news item: the article itself, in a new tab. */
-  openArticle(a: NewsArticleView): void {
-    if (a.url) window.open(a.url, '_blank', 'noopener,noreferrer');
-  }
   readonly newsLoading = signal(false);
   readonly newsFocus = signal<NewsFocusResult | null>(null);
 
@@ -2045,16 +1905,22 @@ export class ChartAnalysisPageComponent {
   readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
   /** The indicators' engine replay sessions: a head moving forward executes only the new bars (CC-I4). */
   private readonly replayScripts = new ReplayScriptSessions(inject(ScriptingRunService));
-  readonly tools = TOOLS;
-  readonly tool = signal<DrawingKind | null>(null);
-  readonly magnet = signal(false);
-  /** Strength used when the magnet is on — TradingView's Weak / Strong. */
-  readonly magnetStrength = signal<'weak' | 'strong'>(readPref('magnetStrength', 'weak'));
-  readonly magnetMenuOpen = signal(false);
+  /** US02b: the drawing-tool state (armed tool, magnet, stay-in-drawing, the rail's families and flyouts). */
+  readonly drawingTools = new ChartDrawingTools({
+    readPref,
+    writePref,
+    favorites: inject(DrawingFavorites),
+  });
+  readonly tools = this.drawingTools.tools;
+  readonly tool = this.drawingTools.tool;
+  readonly magnet = this.drawingTools.magnet;
+  readonly magnetMenuOpen = this.drawingTools.magnetMenuOpen;
   /** What the chart applies: off, or the chosen strength. */
-  readonly magnetMode = computed(() => (this.magnet() ? this.magnetStrength() : 'off'));
+  readonly magnetMode = this.drawingTools.magnetMode;
   /** TV "Stay in drawing mode". */
-  readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
+  readonly stayInDrawing = this.drawingTools.stayInDrawing;
+  /** Group whose rail flyout is open, or null. */
+  readonly railFlyout = this.drawingTools.railFlyout;
   /** Drawing whose Settings dialog is open. */
   readonly settingsFor = signal<string | null>(null);
   /** Built-in study whose Settings dialog is open (DR-I4). */
@@ -2399,50 +2265,6 @@ export class ChartAnalysisPageComponent {
    * The left rail, grouped as TradingView groups it: one button per family, the rest of the
    * family in a flyout. Fifty-odd single buttons in a column was a scroll hunt.
    */
-  readonly toolGroups = computed(() =>
-    RAIL_LAYOUT.map((g) => {
-      const sections = g.sections.map((sec) => ({
-        title: sec.title,
-        tools: sec.kinds.map((k) => toolFor(k)).filter((t): t is ToolSpec => !!t),
-      }));
-      return { name: g.id, title: g.title, sections, tools: sections.flatMap((sec) => sec.tools) };
-    }),
-  );
-  readonly railStandalone = RAIL_STANDALONE.map((k) => toolFor(k)).filter(
-    (t): t is ToolSpec => !!t,
-  );
-
-  /** Which tool each rail button currently shows — the family's last-used, as on TradingView. */
-  readonly railPick = signal<Record<string, DrawingKind>>({});
-  /** Group whose flyout is open, or null. */
-  readonly railFlyout = signal<string | null>(null);
-  /** Vertical offset of the open flyout, aligned to its rail button. */
-  readonly railFlyoutTop = signal(0);
-
-  railTool(group: { name: string; tools: readonly ToolSpec[] }): ToolSpec {
-    const kind = this.railPick()[group.name];
-    return group.tools.find((t) => t.kind === kind) ?? group.tools[0];
-  }
-
-  railGroupActive(group: { tools: readonly ToolSpec[] }): boolean {
-    const t = this.tool();
-    return t !== null && group.tools.some((x) => x.kind === t);
-  }
-
-  toggleRailFlyout(name: string, ev: MouseEvent): void {
-    ev.stopPropagation();
-    if (this.railFlyout() === name) {
-      this.railFlyout.set(null);
-      return;
-    }
-    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
-    const rail = btn?.closest('.chart-body') as HTMLElement | null;
-    if (btn && rail) {
-      this.railFlyoutTop.set(btn.getBoundingClientRect().top - rail.getBoundingClientRect().top);
-    }
-    this.railFlyout.set(name);
-  }
-
   // ── Auto analysis (DR-I11) ────────────────────────────────────────────────────
   /** Which auto-analysis layers are on (a synced chart preference). */
   readonly autoAnalysis = signal<AutoAnalysisSettings>({
@@ -2527,18 +2349,6 @@ export class ChartAnalysisPageComponent {
   /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
   readonly favoriteTools = inject(DrawingFavorites);
 
-  /** Star / unstar a tool in a rail flyout (the click does not arm it). */
-  toggleFavoriteTool(kind: DrawingKind, ev: Event): void {
-    ev.stopPropagation();
-    this.favoriteTools.toggle(kind);
-  }
-
-  pickRailTool(group: string, kind: DrawingKind): void {
-    this.railPick.update((m) => ({ ...m, [group]: kind }));
-    this.railFlyout.set(null);
-    this.tool.set(kind);
-  }
-
   closeRailFlyout(): void {
     this.railFlyout.set(null);
     this.magnetMenuOpen.set(false);
@@ -2549,11 +2359,6 @@ export class ChartAnalysisPageComponent {
     this.symbolMenuOpen.set(false);
   }
 
-  /** Flyout contents for the open group. */
-  readonly openRailGroup = computed(() => {
-    const name = this.railFlyout();
-    return name ? (this.toolGroups().find((g) => g.name === name) ?? null) : null;
-  });
 
   setVolumeProfileMode(mode: VolumeProfileMode): void {
     this.volumeProfileMode.set(mode);
@@ -2693,8 +2498,7 @@ export class ChartAnalysisPageComponent {
     this.layoutStore.reload();
     this.classDefaults.reload();
     this.favoriteTools.reload();
-    this.magnetStrength.set(readPref('magnetStrength', 'weak'));
-    this.stayInDrawing.set(readPref('stayInDrawing', false));
+    this.drawingTools.reloadPrefs();
     const deepLink = !!this.route.snapshot.paramMap.get('symbol');
     // "My scripts" first, so a restored script runs its newest saved version.
     this.chartScripts
@@ -3256,7 +3060,7 @@ export class ChartAnalysisPageComponent {
     // from those throttled ticks. One small request a minute keeps the newest candle honest without
     // waiting for a reload.
     // US06: on the page's scheduler — not while the tab is hidden; re-read at once when it shows again.
-    this.scheduler.every('forming-resync', 60_000, () => void this.syncFormingBars());
+    this.scheduler.every('forming-resync', 60_000, () => void this.session.syncFormingBars());
   }
 
   /** US02: the trade layers' loads ({@link TradeLayersLoader}). */
@@ -3567,24 +3371,6 @@ export class ChartAnalysisPageComponent {
    * "no weight to divide" versus "measured, and none of it is live" — so it
    * renders as an em dash rather than 0%.
    */
-  legSummary(leg: NewsPressureLeg | null): string {
-    if (!leg) return '—';
-    const live = leg.liveShare === null ? '—' : `${Math.round(leg.liveShare * 100)}% live`;
-    const stories = `${leg.storyCount} ${leg.storyCount === 1 ? 'story' : 'stories'}`;
-    return `${leg.score >= 0 ? '+' : ''}${leg.score.toFixed(2)} · ${stories} · ${live}`;
-  }
-
-  toggleOverlays(): void {
-    this.showOverlays.set(!this.showOverlays());
-  }
-
-  togglePositions(): void {
-    this.showPositions.set(!this.showPositions());
-  }
-
-  toggleOrders(): void {
-    this.showOrders.set(!this.showOrders());
-  }
 
   /**
    * Keep the watchlist's last price and a reference for the change column.
@@ -3641,9 +3427,6 @@ export class ChartAnalysisPageComponent {
       });
   }
 
-  /** The series the newest {@link reload} loads (or loaded). */
-  private requested: SeriesId | null = null;
-
   /**
    * The URL's symbol and timeframe onto the chart: a deep link, or a link to another symbol
    * followed while the chart is open. The chart's own switches navigate as well
@@ -3655,7 +3438,7 @@ export class ChartAnalysisPageComponent {
     const symbol = params.get('symbol')?.toUpperCase() || this.symbol();
     const tf = this.route.snapshot.queryParamMap.get('tf');
     const resolution = tf && isSupportedResolution(tf) ? (tf as TvResolution) : this.resolution();
-    if (sameSeries(this.requested, { symbol, resolution })) return;
+    if (sameSeries(this.session.requested, { symbol, resolution })) return;
     this.symbol.set(symbol);
     this.resolution.set(resolution);
     void this.reload();
@@ -3664,19 +3447,15 @@ export class ChartAnalysisPageComponent {
   async reload(): Promise<void> {
     const symbol = this.symbol();
     const resolution = this.resolution();
-    this.requested = { symbol, resolution };
     // Bar Replay stays at its instant across a symbol or timeframe switch (CC-I4).
     const replayAnchor = this.replayHead();
     /** Still the chart's series? A switch made while this loads has a reload of its own. */
-    const current = () => symbol === this.symbol() && resolution === this.resolution();
-    this.loading.set(true);
-    this.error.set(null);
+    const current = () => this.session.isCurrent(symbol, resolution);
+    this.session.beginLoad(symbol, resolution);
     // Drawings belong to a symbol AND timeframe, so the scope has to move with
     // the chart before any drawing is read or written.
     this.drawings.setScope(symbol, resolution);
     this.loadTradingOverlays();
-    this.feed.invalidate(symbol, resolution);
-    this.rollover.reset();
     // The symbol's session, which the day-based studies count trading days by, comes with every
     // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
     if (!isSessionResolution(resolution) && !parseSynthetic(symbol)) void this.feed.learnSession(symbol);
@@ -3685,20 +3464,14 @@ export class ChartAnalysisPageComponent {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
       // Landing after a switch, these would go on screen under the next symbol's name.
       if (!current()) return;
-      this.historyStart.set(null);
-      this.bars.set(bars);
-      this.barsFor.set({ symbol, resolution });
+      this.session.acceptBars(symbol, resolution, bars);
       // US04: a synthetic's legs seed its live price; its chip says how it was built.
       const syn = parseSynthetic(symbol);
       const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
       this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
       this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
       if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
-      this.tailMergedAt = this.ticksApplied;
-      this.lastStored = lastCompleteBarTime(bars, resolution);
-      // The stored history ends at the last CLOSED bar; build the one still forming from real data
-      // rather than from whatever tick happens to arrive first. (The session grid's came with it.)
-      if (!isSessionResolution(resolution)) void this.syncFormingBars();
+      this.session.resetFormingState(bars, resolution);
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
@@ -3723,117 +3496,9 @@ export class ChartAnalysisPageComponent {
     }
   }
 
-  /** Scroll-back paging (CC-11, CC-14) — {@link ChartHistoryPager}. */
+  /** Scroll-back paging (CC-11, CC-14) — {@link ChartSessionStore.loadOlder}. */
   loadOlder(): Promise<void> {
-    return this.historyPager.loadOlder();
-  }
-
-  /** Built on first use: its accessors read the page's fields, so field order does not matter. */
-  private _historyPager?: ChartHistoryPager;
-  private get historyPager(): ChartHistoryPager {
-    return (this._historyPager ??= new ChartHistoryPager({
-      symbol: () => this.symbol(),
-      resolution: () => this.resolution(),
-      bars: this.bars,
-      barsFor: () => this.barsFor(),
-      loading: this.loading,
-      historyStart: this.historyStart,
-      feed: this.feed,
-      replay: () => this.replay,
-      host: () => this.host(),
-      loadEvents: (extend) => this.loadEvents(extend),
-      extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
-    }));
-  }
-
-  /**
-   * Time of the newest bar that is known to be COMPLETE in stored history. Every bar after it is
-   * still forming, and is rebuilt from M1 rather than trusted.
-   */
-  private lastStored: number | null = null;
-
-  /**
-   * Rebuild the forming bar (and any closed bar the engine has not yet stored) from M1.
-   *
-   * <p>The engine writes a bar only once it has closed, so the newest bar is never in the history
-   * and the chart had to invent it from live ticks — opening it at whatever price arrived first
-   * after the page loaded. Load the chart mid-bar and the candle jumped away from the previous close,
-   * with an open, high and low that covered seconds instead of the whole period. M1 trails the
-   * market by at most a minute, so it gives the real ones.</p>
-   *
-   * <p>Ticks still move the close between syncs; this corrects everything else.</p>
-   *
-   * <p>On the session grid (2h … 1M) the engine builds the forming bar itself, on its own calendar:
-   * this re-reads the newest bars from it instead ({@link syncSessionTail}).</p>
-   */
-  private async syncFormingBars(): Promise<void> {
-    const resolution = this.resolution();
-    const symbol = this.symbol();
-    if (isSessionResolution(resolution)) return this.syncSessionTail();
-    const stored = this.lastStored;
-    // While a switch loads, the bars (and `lastStored`) are still the previous series'.
-    const onScreen = () => sameSeries(this.barsFor(), { symbol, resolution });
-    if (resolution === '1' || stored === null || this.bars().length === 0 || !onScreen()) return;
-
-    const minutes = await this.feed.minuteBarsSince(symbol, stored + 1);
-    if (!minutes || minutes.length === 0) return;
-    // The operator may have switched symbol or timeframe while the request was in flight.
-    if (
-      symbol !== this.symbol() ||
-      resolution !== this.resolution() ||
-      stored !== this.lastStored ||
-      !onScreen()
-    )
-      return;
-
-    this.bars.set(
-      mergeForming(this.bars(), foldBars(minutes, resolution, this.feed.gridOf(symbol)), stored),
-    );
-  }
-
-  /** Ticks applied to the chart's newest bar, ever; against {@link tailMergedAt}: any since the last merge. */
-  private ticksApplied = 0;
-  /** {@link ticksApplied} when the engine's newest bars were last laid over the chart's. */
-  private tailMergedAt = 0;
-  /** The request for the newest session bars in flight, by series — shared by the minute resync and a rollover. */
-  private tailInFlight: { series: string; done: Promise<void> } | null = null;
-  /** One request per bar change when ticks pass the newest session bar's close (`SessionRollover`). */
-  private readonly rollover = new SessionRollover(() => Date.now());
-
-  /**
-   * Re-read the newest session-grid bars from the engine — the bar still forming, the one or two
-   * before it (a period that just closed may have been built before its last minute was stored), and
-   * any period that opened since the chart last asked — and lay them over the chart's
-   * ({@link mergeSessionTail}). Shared by the minute resync and a tick past the newest bar's close:
-   * one request at a time per series.
-   */
-  private syncSessionTail(): Promise<void> {
-    const series = `${this.symbol()}|${this.resolution()}`;
-    if (this.tailInFlight?.series === series) return this.tailInFlight.done;
-    const done: Promise<void> = this.fetchSessionTail().finally(() => {
-      if (this.tailInFlight?.done === done) this.tailInFlight = null;
-    });
-    this.tailInFlight = { series, done };
-    return done;
-  }
-
-  private async fetchSessionTail(): Promise<void> {
-    const symbol = this.symbol();
-    const resolution = this.resolution();
-    const onScreen = () =>
-      symbol === this.symbol() &&
-      resolution === this.resolution() &&
-      sameSeries(this.barsFor(), { symbol, resolution });
-    const held = this.bars();
-    if (held.length === 0 || !onScreen()) return;
-
-    const tail = await this.feed.sessionTail(symbol, resolution, held[held.length - 1].time);
-    // A failed request leaves the chart as it is; a switch made meanwhile has bars of its own.
-    if (!tail || !onScreen()) return;
-    // Ticks since the last merge are newer than the engine's forming bar: they keep its close.
-    const ticked = this.ticksApplied !== this.tailMergedAt;
-    this.tailMergedAt = this.ticksApplied;
-    this.bars.set(mergeSessionTail(this.bars(), tail, ticked));
+    return this.session.loadOlder();
   }
 
   private applyTick(tick: PriceTick): void {
@@ -3855,58 +3520,7 @@ export class ChartAnalysisPageComponent {
     const bid = typeof tick.bid === 'number' && Number.isFinite(tick.bid) ? tick.bid : price;
     this.liveQuote.set({ bid, ask });
 
-    // Right after a switch the bars on screen are still the previous series': not this tick's.
-    if (!sameSeries(this.barsFor(), { symbol: this.symbol(), resolution: this.resolution() }))
-      return;
-    const current = this.bars();
-    if (current.length === 0) return;
-
-    if (isSessionResolution(this.resolution())) {
-      this.applyTickOnSessionGrid(current, price, at);
-      return;
-    }
-
-    // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h — on the
-    // engine's clock, as the countdown and a run's live bar read it. A price past the newest bar's
-    // bucket opens its own bucket's bar, so the chart never stalls a timeframe behind the market.
-    const next = applyStoredTick(
-      current,
-      price,
-      at,
-      this.resolution(),
-      this.feed.gridOf(this.symbol()),
-    );
-    if (next) this.bars.set(next);
-  }
-
-  /**
-   * A live price on the session grid (2h … 1M), on the engine's clock: it moves the newest bar while
-   * that bar's period lasts. From the bar's close on, it opens the next period's bar itself — at the
-   * old bar's close, or with the session it is in after the weekend, laid out by the symbol's session
-   * (`nextSessionPeriod`) — as TradingView does on a period's first tick: the engine's forming bar is
-   * folded from closed M1, so for a period's first minute there is none to ask for. The minute
-   * resync then lays the engine's own bar over it. Where the chart cannot tell the period (a gap of
-   * a whole period, no session known), it asks for the newest bars instead, once per bar
-   * ({@link SessionRollover}).
-   */
-  private applyTickOnSessionGrid(current: Bar[], price: number, at: number): void {
-    const calendar = this.tradingCalendar();
-    const resolution = this.resolution();
-    const outcome = applySessionTick(
-      current,
-      price,
-      at,
-      calendar ? (last, now) => nextSessionPeriod(calendar, resolution, last, now) : undefined,
-    );
-    if (outcome.kind === 'update' || outcome.kind === 'open') {
-      this.ticksApplied++;
-      this.bars.set(outcome.bars);
-      return;
-    }
-    if (outcome.kind !== 'rollover') return;
-    const key = `${this.symbol()}|${this.resolution()}|${current[current.length - 1].time}`;
-    if (!this.rollover.request(key)) return;
-    void this.syncSessionTail().finally(() => this.rollover.done(key));
+    this.session.applyPrice(price, at);
   }
 
   // ── Toolbar actions ──────────────────────────────────────────────────────
@@ -4709,22 +4323,6 @@ export class ChartAnalysisPageComponent {
     if (point !== null) this.setParam(uid, key, String(point.time));
   }
 
-  /** A time input's value on the studies bar: the picked bar (UTC), or what to do. */
-  studyTimeLabel(v: number | string | undefined): string {
-    const ms = Number(v);
-    return Number.isFinite(ms) && ms > 0
-      ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
-      : 'Pick on chart';
-  }
-
-  /** The Source dropdown's choices for a study (DR-16 / DR-I5). */
-  sourceGroupsFor(item: ActiveIndicator): SourceGroup[] {
-    return sourceGroups(item, this.active(), (s) => {
-      const def = indicatorById(s.defId);
-      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
-    });
-  }
-
   toggleIndicator(uid: string): void {
     this.active.update((list) =>
       list.map((i) => (i.uid === uid ? { ...i, visible: !i.visible } : i)),
@@ -4753,16 +4351,6 @@ export class ChartAnalysisPageComponent {
     return studyLabel(item.defId, item.params);
   }
 
-  /** A candlestick- or chart-pattern study (its row offers the scorecard, DR-I8). */
-  isPatternStudy(item: ActiveIndicator): boolean {
-    const k = studyKind(item.defId);
-    return k === 'candle-pattern' || k === 'chart-pattern';
-  }
-
-  inputsFor(item: ActiveIndicator) {
-    return studyMeta(item.defId)?.inputs ?? [];
-  }
-
   onLegend(snapshot: LegendSnapshot): void {
     this.legend.set(snapshot);
   }
@@ -4773,6 +4361,11 @@ export class ChartAnalysisPageComponent {
     return l
       ? changeText(l.change ?? null, l.changePct, this.pipSize(), this.precision(), this.facts())
       : null;
+  });
+  /** The legend's bar time: its date label, else its open on the chart's display clock ({@link formatTime}). */
+  readonly legendTime = computed(() => {
+    const l = this.legend();
+    return l ? (l.dateLabel ?? this.formatTime(l.time)) : '';
   });
   readonly legendVolume = computed(() => {
     const v = this.legend()?.volume;
@@ -5196,25 +4789,8 @@ export class ChartAnalysisPageComponent {
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.savedScriptsState(),
       view: this.viewSnapshot() ?? this.pendingView ?? null,
-      overlays: {
-        showPositions: this.showPositions(),
-        showOrders: this.showOrders(),
-        showOverlays: this.showOverlays(),
-        showVolumeProfile: this.showVolumeProfile(),
-        volumeProfileMode: this.volumeProfileMode(),
-        showSupportResistance: this.showSupportResistance(),
-        showStructure: this.showStructure(),
-        showEvents: this.showEvents(),
-        minEventImpact: this.minEventImpact(),
-        showBlackout: this.showBlackout(),
-        showClosedTrades: this.showClosedTrades(),
-        fitTradeLines: this.fitTradeLines(),
-        showWatches: this.showWatchMarks(),
-        vpNakedPocs: this.profileExtras().nakedPocs,
-        vpDeveloping: this.profileExtras().developing,
-        orderFlow: { ...this.orderFlow() },
-      },
-      layerGroups: persistLayerGroups(this.layerGroups()),
+      overlays: this.overlaySettings.snapshot(),
+      layerGroups: this.overlaySettings.persistedLayerGroups(),
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
       ...(this.mainLink() ? { link: this.mainLink() } : {}),
@@ -5666,27 +5242,7 @@ export class ChartAnalysisPageComponent {
     this.renkoWicks.set(pb.renkoWicks);
     this.lineBreakLines.set(pb.lineBreakLines);
     this.pnfReversal.set(pb.pnfReversal);
-    const o = s.overlays ?? {};
-    // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
-    this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
-    this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
-    this.showOverlays.set(o.showOverlays ?? false);
-    this.showVolumeProfile.set(o.showVolumeProfile ?? false);
-    if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
-    this.showSupportResistance.set(o.showSupportResistance ?? false);
-    this.showStructure.set(o.showStructure ?? false);
-    this.showEvents.set(o.showEvents ?? true);
-    this.minEventImpact.set(o.minEventImpact ?? 'Medium');
-    this.showBlackout.set(o.showBlackout ?? true);
-    this.showClosedTrades.set(o.showClosedTrades ?? false);
-    this.fitTradeLines.set(o.fitTradeLines ?? true);
-    this.showWatchMarks.set(o.showWatches ?? true);
-    this.profileExtras.set({
-      nakedPocs: o.vpNakedPocs ?? false,
-      developing: o.vpDeveloping ?? false,
-    });
-    this.layerGroups.set(restoreLayerGroups(s.layerGroups));
-    this.orderFlow.set(restoredOrderFlow(o.orderFlow));
+    this.overlaySettings.restore(s.overlays, s.layerGroups);
   }
 
   private flushPendingView(): void {
@@ -6086,7 +5642,7 @@ export class ChartAnalysisPageComponent {
   // ── Drawing actions ──────────────────────────────────────────────────────
 
   selectTool(kind: DrawingKind | null): void {
-    this.tool.set(this.tool() === kind ? null : kind);
+    this.drawingTools.selectTool(kind);
   }
 
   /** The chart disarms the tool itself once a drawing completes. */
@@ -6131,32 +5687,6 @@ export class ChartAnalysisPageComponent {
     this.drawings.updateStyle(id, { fill: current ? null : withAlpha(base, 0.15) });
   }
 
-  toggleMagnetMenu(ev: MouseEvent): void {
-    ev.stopPropagation();
-    this.railFlyout.set(null);
-    if (this.magnetMenuOpen()) {
-      this.magnetMenuOpen.set(false);
-      return;
-    }
-    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
-    const body = btn?.closest('.chart-body') as HTMLElement | null;
-    if (btn && body)
-      this.railFlyoutTop.set(btn.getBoundingClientRect().top - body.getBoundingClientRect().top);
-    this.magnetMenuOpen.set(true);
-  }
-
-  setMagnetStrength(mode: 'weak' | 'strong'): void {
-    this.magnetStrength.set(mode);
-    this.magnet.set(true);
-    this.magnetMenuOpen.set(false);
-    writePref('magnetStrength', mode);
-  }
-
-  toggleStayInDrawing(): void {
-    this.stayInDrawing.set(!this.stayInDrawing());
-    writePref('stayInDrawing', this.stayInDrawing());
-  }
-
   openDrawingMenu(e: { id: string; clientX: number; clientY: number }, area: HTMLElement): void {
     this.contextMenu.set(null);
     const r = area.getBoundingClientRect();
@@ -6194,10 +5724,6 @@ export class ChartAnalysisPageComponent {
       default:
         this.drawings.reorder(id, action);
     }
-  }
-
-  drawingById(id: string): Drawing | undefined {
-    return this.drawings.allDrawings().find((d) => d.id === id);
   }
 
   /**

@@ -2,36 +2,40 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.watchlistOpen()"
-    (click)="page.watchlistOpen.set(!page.watchlistOpen())"
-    title="Watchlist, details and news" aria-label="Watchlist, details and news"
+    [class.active]="watchlistOpen()"
+    (click)="watchlistOpen.set(!watchlistOpen())"
+    title="Watchlist, details and news"
+    aria-label="Watchlist, details and news"
   >
     <app-chart-icon name="watchlist" [size]="28" />
   </button>
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.sidePane() === 'details'"
-    (click)="page.openSidePane('details')"
-    title="Symbol details" aria-label="Symbol details"
+    [class.active]="sidePane() === 'details'"
+    (click)="sidePaneToggle.emit('details')"
+    title="Symbol details"
+    aria-label="Symbol details"
   >
     <app-chart-icon name="info" [size]="28" />
   </button>
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.sidePane() === 'news'"
-    (click)="page.openSidePane('news')"
-    title="News for this pair" aria-label="News for this pair"
+    [class.active]="sidePane() === 'news'"
+    (click)="sidePaneToggle.emit('news')"
+    title="News for this pair"
+    aria-label="News for this pair"
   >
     <app-chart-icon name="news" [size]="28" />
   </button>
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.sidePane() === 'calendar'"
-    (click)="page.openSidePane('calendar')"
-    title="Economic calendar" aria-label="Economic calendar"
+    [class.active]="sidePane() === 'calendar'"
+    (click)="sidePaneToggle.emit('calendar')"
+    title="Economic calendar"
+    aria-label="Economic calendar"
     data-testid="calendar-button"
   >
     <app-chart-icon name="calendar" [size]="28" />
@@ -39,9 +43,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'notes'"
-    (click)="page.openPanel('notes')"
-    title="Notes and ideas" aria-label="Notes and ideas"
+    [class.active]="chartPanels.open() === 'notes'"
+    (click)="panelToggle.emit('notes')"
+    title="Notes and ideas"
+    aria-label="Notes and ideas"
     data-testid="notes-button"
   >
     <app-chart-icon name="pencil" [size]="28" />
@@ -49,9 +54,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'depth'"
-    (click)="page.openPanel('depth')"
-    title="Broker depth (DOM)" aria-label="Broker depth (DOM)"
+    [class.active]="chartPanels.open() === 'depth'"
+    (click)="panelToggle.emit('depth')"
+    title="Broker depth (DOM)"
+    aria-label="Broker depth (DOM)"
     data-testid="depth-button"
   >
     <app-chart-icon name="layers" [size]="28" />
@@ -59,9 +65,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'ladder'"
-    (click)="page.openPanel('ladder')"
-    title="Price ladder (DOM): trade from the book" aria-label="Price ladder (DOM): trade from the book"
+    [class.active]="chartPanels.open() === 'ladder'"
+    (click)="panelToggle.emit('ladder')"
+    title="Price ladder (DOM): trade from the book"
+    aria-label="Price ladder (DOM): trade from the book"
     data-testid="ladder-button"
   >
     <app-chart-icon name="ladder" [size]="28" />
@@ -69,21 +76,23 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'multibook'"
-    (click)="page.openPanel('multibook')"
-    title="Multibook: the consolidated book of every source you may see, with dispersion and source health" aria-label="Multibook: the consolidated book of every source you may see, with dispersion and source health"
+    [class.active]="chartPanels.open() === 'multibook'"
+    (click)="panelToggle.emit('multibook')"
+    title="Multibook: the consolidated book of every source you may see, with dispersion and source health"
+    aria-label="Multibook: the consolidated book of every source you may see, with dispersion and source health"
     data-testid="multibook-button"
   >
     <app-chart-icon name="multibook" [size]="28" />
   </button>
-  @if (page.venueInstrument()) {
+  @if (showFundamentals()) {
     <!-- Multi-asset WS7 7.9: futures / crypto / equity fundamentals — only for exchange-traded symbols. -->
     <button
       type="button"
       class="strip-btn"
-      [class.active]="page.chartPanels.open() === 'fundamentals'"
-      (click)="page.openPanel('fundamentals')"
-      title="Fundamentals: term structure, funding and open interest, dividends" aria-label="Fundamentals: term structure, funding and open interest, dividends"
+      [class.active]="chartPanels.open() === 'fundamentals'"
+      (click)="panelToggle.emit('fundamentals')"
+      title="Fundamentals: term structure, funding and open interest, dividends"
+      aria-label="Fundamentals: term structure, funding and open interest, dividends"
       data-testid="fundamentals-button"
     >
       <app-chart-icon name="fundamentals" [size]="28" />
@@ -92,9 +101,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'sentiment'"
-    (click)="page.openPanel('sentiment')"
-    title="Sentiment: news pressure and COT positioning" aria-label="Sentiment: news pressure and COT positioning"
+    [class.active]="chartPanels.open() === 'sentiment'"
+    (click)="panelToggle.emit('sentiment')"
+    title="Sentiment: news pressure and COT positioning"
+    aria-label="Sentiment: news pressure and COT positioning"
     data-testid="sentiment-button"
   >
     <app-chart-icon name="delta" [size]="28" />
@@ -102,9 +112,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.chartPanels.open() === 'account'"
-    (click)="page.openPanel('account')"
-    title="Account: positions, orders, signals, paper trades" aria-label="Account: positions, orders, signals, paper trades"
+    [class.active]="chartPanels.open() === 'account'"
+    (click)="panelToggle.emit('account')"
+    title="Account: positions, orders, signals, paper trades"
+    aria-label="Account: positions, orders, signals, paper trades"
     data-testid="account-button"
   >
     <app-chart-icon name="trades" [size]="28" />
@@ -112,9 +123,10 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.sidePane() === 'datawindow'"
-    (click)="page.openSidePane('datawindow')"
-    title="Data window — every value at the crosshair" aria-label="Data window — every value at the crosshair"
+    [class.active]="sidePane() === 'datawindow'"
+    (click)="sidePaneToggle.emit('datawindow')"
+    title="Data window — every value at the crosshair"
+    aria-label="Data window — every value at the crosshair"
     data-testid="datawindow-button"
   >
     <app-chart-icon name="data-window" [size]="28" />
@@ -122,19 +134,21 @@
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.objectTreeOpen()"
-    (click)="page.objectTreeOpen.set(!page.objectTreeOpen())"
-    [disabled]="!page.drawings.symbolDrawings().length"
-    [title]="'Drawings on this chart (' + page.drawings.symbolDrawings().length + ')'" [attr.aria-label]="'Drawings on this chart (' + page.drawings.symbolDrawings().length + ')'"
+    [class.active]="objectTreeOpen()"
+    (click)="objectTreeOpen.set(!objectTreeOpen())"
+    [disabled]="!drawings.symbolDrawings().length"
+    [title]="'Drawings on this chart (' + drawings.symbolDrawings().length + ')'"
+    [attr.aria-label]="'Drawings on this chart (' + drawings.symbolDrawings().length + ')'"
   >
     <app-chart-icon name="object-tree" [size]="28" />
   </button>
   <button
     type="button"
     class="strip-btn"
-    [class.active]="page.alertManagerOpen()"
-    (click)="page.toggleAlertManager()"
-    [title]="'Alerts (' + page.chartAlerts.activeCount() + ' active)'" [attr.aria-label]="'Alerts (' + page.chartAlerts.activeCount() + ' active)'"
+    [class.active]="alertManagerOpen()"
+    (click)="alertManagerToggle.emit()"
+    [title]="'Alerts (' + chartAlerts.activeCount() + ' active)'"
+    [attr.aria-label]="'Alerts (' + chartAlerts.activeCount() + ' active)'"
     data-testid="alert-manager-button"
   >
     <app-chart-icon name="alert" [size]="28" />
