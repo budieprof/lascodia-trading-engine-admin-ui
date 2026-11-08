@@ -299,8 +299,6 @@ import {
   CONTEXT_MENUS_KEYS,
   CHART_OVERLAYS_MENU,
   OVERLAYS_MENU_KEYS,
-  CHART_DRAWING_RAIL,
-  DRAWING_RAIL_KEYS,
   CHART_SIDE_PANE,
   SIDE_PANE_KEYS,
 } from './chart-page.token';
@@ -388,11 +386,8 @@ import {
 import { drawingTemplates } from '../../drawings/drawing-templates';
 import {
   DEFAULT_STYLE,
-  RAIL_LAYOUT,
-  RAIL_STANDALONE,
   TOOLS,
   toolFor,
-  type ToolSpec,
   type DashStyle,
   type Drawing,
   type DrawingKind,
@@ -463,6 +458,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartSessionStore } from './chart-session-store';
+import { ChartDrawingTools } from './chart-drawing-tools';
 import { ChartDockState } from './chart-dock-state';
 import { ChartEditorState } from './chart-editor-state';
 import {
@@ -597,8 +593,8 @@ export { normaliseView };
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
-      provide: CHART_DRAWING_RAIL,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, DRAWING_RAIL_KEYS),
+      provide: ChartDrawingTools,
+      useFactory: (page: ChartAnalysisPageComponent) => page.drawingTools,
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
@@ -2009,16 +2005,22 @@ export class ChartAnalysisPageComponent {
   readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
   /** The indicators' engine replay sessions: a head moving forward executes only the new bars (CC-I4). */
   private readonly replayScripts = new ReplayScriptSessions(inject(ScriptingRunService));
-  readonly tools = TOOLS;
-  readonly tool = signal<DrawingKind | null>(null);
-  readonly magnet = signal(false);
-  /** Strength used when the magnet is on — TradingView's Weak / Strong. */
-  readonly magnetStrength = signal<'weak' | 'strong'>(readPref('magnetStrength', 'weak'));
-  readonly magnetMenuOpen = signal(false);
+  /** US02b: the drawing-tool state (armed tool, magnet, stay-in-drawing, the rail's families and flyouts). */
+  readonly drawingTools = new ChartDrawingTools({
+    readPref,
+    writePref,
+    favorites: inject(DrawingFavorites),
+  });
+  readonly tools = this.drawingTools.tools;
+  readonly tool = this.drawingTools.tool;
+  readonly magnet = this.drawingTools.magnet;
+  readonly magnetMenuOpen = this.drawingTools.magnetMenuOpen;
   /** What the chart applies: off, or the chosen strength. */
-  readonly magnetMode = computed(() => (this.magnet() ? this.magnetStrength() : 'off'));
+  readonly magnetMode = this.drawingTools.magnetMode;
   /** TV "Stay in drawing mode". */
-  readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
+  readonly stayInDrawing = this.drawingTools.stayInDrawing;
+  /** Group whose rail flyout is open, or null. */
+  readonly railFlyout = this.drawingTools.railFlyout;
   /** Drawing whose Settings dialog is open. */
   readonly settingsFor = signal<string | null>(null);
   /** Built-in study whose Settings dialog is open (DR-I4). */
@@ -2363,50 +2365,6 @@ export class ChartAnalysisPageComponent {
    * The left rail, grouped as TradingView groups it: one button per family, the rest of the
    * family in a flyout. Fifty-odd single buttons in a column was a scroll hunt.
    */
-  readonly toolGroups = computed(() =>
-    RAIL_LAYOUT.map((g) => {
-      const sections = g.sections.map((sec) => ({
-        title: sec.title,
-        tools: sec.kinds.map((k) => toolFor(k)).filter((t): t is ToolSpec => !!t),
-      }));
-      return { name: g.id, title: g.title, sections, tools: sections.flatMap((sec) => sec.tools) };
-    }),
-  );
-  readonly railStandalone = RAIL_STANDALONE.map((k) => toolFor(k)).filter(
-    (t): t is ToolSpec => !!t,
-  );
-
-  /** Which tool each rail button currently shows — the family's last-used, as on TradingView. */
-  readonly railPick = signal<Record<string, DrawingKind>>({});
-  /** Group whose flyout is open, or null. */
-  readonly railFlyout = signal<string | null>(null);
-  /** Vertical offset of the open flyout, aligned to its rail button. */
-  readonly railFlyoutTop = signal(0);
-
-  railTool(group: { name: string; tools: readonly ToolSpec[] }): ToolSpec {
-    const kind = this.railPick()[group.name];
-    return group.tools.find((t) => t.kind === kind) ?? group.tools[0];
-  }
-
-  railGroupActive(group: { tools: readonly ToolSpec[] }): boolean {
-    const t = this.tool();
-    return t !== null && group.tools.some((x) => x.kind === t);
-  }
-
-  toggleRailFlyout(name: string, ev: MouseEvent): void {
-    ev.stopPropagation();
-    if (this.railFlyout() === name) {
-      this.railFlyout.set(null);
-      return;
-    }
-    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
-    const rail = btn?.closest('.chart-body') as HTMLElement | null;
-    if (btn && rail) {
-      this.railFlyoutTop.set(btn.getBoundingClientRect().top - rail.getBoundingClientRect().top);
-    }
-    this.railFlyout.set(name);
-  }
-
   // ── Auto analysis (DR-I11) ────────────────────────────────────────────────────
   /** Which auto-analysis layers are on (a synced chart preference). */
   readonly autoAnalysis = signal<AutoAnalysisSettings>({
@@ -2491,18 +2449,6 @@ export class ChartAnalysisPageComponent {
   /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
   readonly favoriteTools = inject(DrawingFavorites);
 
-  /** Star / unstar a tool in a rail flyout (the click does not arm it). */
-  toggleFavoriteTool(kind: DrawingKind, ev: Event): void {
-    ev.stopPropagation();
-    this.favoriteTools.toggle(kind);
-  }
-
-  pickRailTool(group: string, kind: DrawingKind): void {
-    this.railPick.update((m) => ({ ...m, [group]: kind }));
-    this.railFlyout.set(null);
-    this.tool.set(kind);
-  }
-
   closeRailFlyout(): void {
     this.railFlyout.set(null);
     this.magnetMenuOpen.set(false);
@@ -2513,11 +2459,6 @@ export class ChartAnalysisPageComponent {
     this.symbolMenuOpen.set(false);
   }
 
-  /** Flyout contents for the open group. */
-  readonly openRailGroup = computed(() => {
-    const name = this.railFlyout();
-    return name ? (this.toolGroups().find((g) => g.name === name) ?? null) : null;
-  });
 
   setVolumeProfileMode(mode: VolumeProfileMode): void {
     this.volumeProfileMode.set(mode);
@@ -2657,8 +2598,7 @@ export class ChartAnalysisPageComponent {
     this.layoutStore.reload();
     this.classDefaults.reload();
     this.favoriteTools.reload();
-    this.magnetStrength.set(readPref('magnetStrength', 'weak'));
-    this.stayInDrawing.set(readPref('stayInDrawing', false));
+    this.drawingTools.reloadPrefs();
     const deepLink = !!this.route.snapshot.paramMap.get('symbol');
     // "My scripts" first, so a restored script runs its newest saved version.
     this.chartScripts
@@ -5883,7 +5823,7 @@ export class ChartAnalysisPageComponent {
   // ── Drawing actions ──────────────────────────────────────────────────────
 
   selectTool(kind: DrawingKind | null): void {
-    this.tool.set(this.tool() === kind ? null : kind);
+    this.drawingTools.selectTool(kind);
   }
 
   /** The chart disarms the tool itself once a drawing completes. */
@@ -5926,32 +5866,6 @@ export class ChartAnalysisPageComponent {
     const selected = this.drawings.selected();
     const base = selected?.style.color ?? '#2962FF';
     this.drawings.updateStyle(id, { fill: current ? null : withAlpha(base, 0.15) });
-  }
-
-  toggleMagnetMenu(ev: MouseEvent): void {
-    ev.stopPropagation();
-    this.railFlyout.set(null);
-    if (this.magnetMenuOpen()) {
-      this.magnetMenuOpen.set(false);
-      return;
-    }
-    const btn = (ev.currentTarget as HTMLElement).closest('.rail-slot') as HTMLElement | null;
-    const body = btn?.closest('.chart-body') as HTMLElement | null;
-    if (btn && body)
-      this.railFlyoutTop.set(btn.getBoundingClientRect().top - body.getBoundingClientRect().top);
-    this.magnetMenuOpen.set(true);
-  }
-
-  setMagnetStrength(mode: 'weak' | 'strong'): void {
-    this.magnetStrength.set(mode);
-    this.magnet.set(true);
-    this.magnetMenuOpen.set(false);
-    writePref('magnetStrength', mode);
-  }
-
-  toggleStayInDrawing(): void {
-    this.stayInDrawing.set(!this.stayInDrawing());
-    writePref('stayInDrawing', this.stayInDrawing());
   }
 
   openDrawingMenu(e: { id: string; clientX: number; clientY: number }, area: HTMLElement): void {

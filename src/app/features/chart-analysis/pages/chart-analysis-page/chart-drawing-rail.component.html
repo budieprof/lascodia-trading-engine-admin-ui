@@ -3,20 +3,20 @@
   <button
     type="button"
     class="rail-tool"
-    [class.active]="page.tool() === null"
-    (click)="page.selectTool(null)"
+    [class.active]="tools.tool() === null"
+    (click)="tools.selectTool(null)"
     title="Cursor (Esc)" aria-label="Cursor (Esc)"
   >
     <app-chart-icon name="arrow" [size]="24" />
   </button>
-  @for (group of page.toolGroups(); track group.name) {
-    @let current = page.railTool(group);
-    <div class="rail-slot" [class.open]="page.railFlyout() === group.name">
+  @for (group of tools.toolGroups(); track group.name) {
+    @let current = tools.railTool(group);
+    <div class="rail-slot" [class.open]="tools.railFlyout() === group.name">
       <button
         type="button"
         class="rail-tool"
-        [class.active]="page.tool() === current.kind"
-        (click)="page.selectTool(current.kind)"
+        [class.active]="tools.tool() === current.kind"
+        (click)="tools.selectTool(current.kind)"
         [title]="current.label" [attr.aria-label]="current.label"
       >
         <app-chart-icon [name]="current.kind" [size]="28" />
@@ -25,10 +25,10 @@
         <button
           type="button"
           class="rail-caret"
-          [class.active]="page.railGroupActive(group)"
-          (click)="page.toggleRailFlyout(group.name, $event)"
+          [class.active]="tools.railGroupActive(group)"
+          (click)="tools.toggleRailFlyout(group.name, $event)"
           [title]="group.title" [attr.aria-label]="group.title"
-          [attr.aria-expanded]="page.railFlyout() === group.name"
+          [attr.aria-expanded]="tools.railFlyout() === group.name"
           aria-haspopup="menu"
         >
           <app-chart-icon name="chevron-right" [size]="12" />
@@ -37,29 +37,29 @@
     </div>
   }
   <div class="rail-sep"></div>
-  @for (t of page.railStandalone; track t.kind) {
+  @for (t of tools.railStandalone; track t.kind) {
     <button
       type="button"
       class="rail-tool"
-      [class.active]="page.tool() === t.kind"
-      (click)="page.selectTool(t.kind)"
+      [class.active]="tools.tool() === t.kind"
+      (click)="tools.selectTool(t.kind)"
       [title]="t.label" [attr.aria-label]="t.label"
     >
       <app-chart-icon [name]="t.kind" [size]="28" />
     </button>
   }
   <div class="rail-sep"></div>
-  <div class="rail-slot" [class.open]="page.magnetMenuOpen()">
+  <div class="rail-slot" [class.open]="tools.magnetMenuOpen()">
     <button
       type="button"
       class="rail-tool"
-      [class.active]="page.magnet()"
-      (click)="page.magnet.set(!page.magnet())"
+      [class.active]="tools.magnet()"
+      (click)="tools.magnet.set(!tools.magnet())"
       [title]="
-        (page.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
+        (tools.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
         ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
       " [attr.aria-label]="
-        (page.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
+        (tools.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
         ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
       "
     >
@@ -68,10 +68,10 @@
     <button
       type="button"
       class="rail-caret"
-      [class.active]="page.magnet()"
-      (click)="page.toggleMagnetMenu($event)"
+      [class.active]="tools.magnet()"
+      (click)="tools.toggleMagnetMenu($event)"
       title="Magnet mode" aria-label="Magnet mode"
-      [attr.aria-expanded]="page.magnetMenuOpen()"
+      [attr.aria-expanded]="tools.magnetMenuOpen()"
       aria-haspopup="menu"
     >
       <app-chart-icon name="chevron-right" [size]="12" />
@@ -80,48 +80,48 @@
   <button
     type="button"
     class="rail-tool"
-    [class.active]="page.stayInDrawing()"
-    (click)="page.toggleStayInDrawing()"
+    [class.active]="tools.stayInDrawing()"
+    (click)="tools.toggleStayInDrawing()"
     title="Stay in drawing mode" aria-label="Stay in drawing mode"
-    [attr.aria-pressed]="page.stayInDrawing()"
+    [attr.aria-pressed]="tools.stayInDrawing()"
   >
     <app-chart-icon name="draw-stay" [size]="28" />
   </button>
   <button
     type="button"
     class="rail-tool"
-    [class.active]="page.drawings.allLocked()"
-    [disabled]="!page.drawings.visible().length"
-    (click)="page.drawings.setLockAll(!page.drawings.allLocked())"
-    [title]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'" [attr.aria-label]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
+    [class.active]="drawings.allLocked()"
+    [disabled]="!drawings.visible().length"
+    (click)="drawings.setLockAll(!drawings.allLocked())"
+    [title]="drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'" [attr.aria-label]="drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
   >
-    <app-chart-icon [name]="page.drawings.allLocked() ? 'lock' : 'unlock'" [size]="28" />
+    <app-chart-icon [name]="drawings.allLocked() ? 'lock' : 'unlock'" [size]="28" />
   </button>
   <button
     type="button"
     class="rail-tool"
-    [class.active]="page.drawings.hidden()"
-    (click)="page.drawings.hidden.set(!page.drawings.hidden())"
-    [title]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'" [attr.aria-label]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
+    [class.active]="drawings.hidden()"
+    (click)="drawings.hidden.set(!drawings.hidden())"
+    [title]="drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'" [attr.aria-label]="drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
   >
-    <app-chart-icon [name]="page.drawings.hidden() ? 'eye-off' : 'eye'" [size]="28" />
+    <app-chart-icon [name]="drawings.hidden() ? 'eye-off' : 'eye'" [size]="28" />
   </button>
   <div class="rail-sep"></div>
   <button
     type="button"
     class="rail-tool"
-    [disabled]="!page.drawings.visible().length"
-    (click)="page.drawings.clearVisible()"
+    [disabled]="!drawings.visible().length"
+    (click)="drawings.clearVisible()"
     title="Remove all drawings on this chart" aria-label="Remove all drawings on this chart"
   >
     <app-chart-icon name="trash" [size]="28" />
   </button>
 </nav>
 
-@if (page.magnetMenuOpen()) {
+@if (tools.magnetMenuOpen()) {
   <div
     class="rail-flyout magnet-menu"
-    [style.top.px]="page.railFlyoutTop()"
+    [style.top.px]="tools.railFlyoutTop()"
     role="menu"
     (click)="$event.stopPropagation()"
   >
@@ -129,8 +129,8 @@
       type="button"
       class="rail-flyout-item"
       role="menuitemradio"
-      [class.active]="page.magnet() && page.magnetStrength() === 'weak'"
-      (click)="page.setMagnetStrength('weak')"
+      [class.active]="tools.magnet() && tools.magnetStrength() === 'weak'"
+      (click)="tools.setMagnetStrength('weak')"
     >
       <app-chart-icon name="magnet" [size]="28" /><span>Weak Magnet</span>
     </button>
@@ -138,19 +138,19 @@
       type="button"
       class="rail-flyout-item"
       role="menuitemradio"
-      [class.active]="page.magnet() && page.magnetStrength() === 'strong'"
-      (click)="page.setMagnetStrength('strong')"
+      [class.active]="tools.magnet() && tools.magnetStrength() === 'strong'"
+      (click)="tools.setMagnetStrength('strong')"
     >
       <app-chart-icon name="magnet" [size]="28" /><span>Strong Magnet</span>
     </button>
   </div>
 }
 
-@if (page.openRailGroup(); as g) {
+@if (tools.openRailGroup(); as g) {
   <div
     class="rail-flyout"
     role="menu"
-    [style.top.px]="page.railFlyoutTop()"
+    [style.top.px]="tools.railFlyoutTop()"
     (click)="$event.stopPropagation()"
   >
     @for (sec of g.sections; track sec.title) {
@@ -163,8 +163,8 @@
           type="button"
           role="menuitem"
           class="rail-flyout-item"
-          [class.active]="page.tool() === t.kind"
-          (click)="page.pickRailTool(g.name, t.kind)"
+          [class.active]="tools.tool() === t.kind"
+          (click)="tools.pickRailTool(g.name, t.kind)"
         >
           <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
           <span>{{ t.label }}</span>
@@ -173,15 +173,15 @@
             class="fav-star"
             role="button"
             tabindex="-1"
-            [class.on]="page.favoriteTools.has(t.kind)"
+            [class.on]="favorites.has(t.kind)"
             [attr.aria-label]="
-              (page.favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'
+              (favorites.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'
             "
             [title]="
-              page.favoriteTools.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'
+              favorites.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'
             "
-            (click)="page.toggleFavoriteTool(t.kind, $event)"
-            >{{ page.favoriteTools.has(t.kind) ? '★' : '☆' }}</span
+            (click)="tools.toggleFavoriteTool(t.kind, $event)"
+            >{{ favorites.has(t.kind) ? '★' : '☆' }}</span
           >
         </button>
       }

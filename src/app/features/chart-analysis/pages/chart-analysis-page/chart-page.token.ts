@@ -2,12 +2,15 @@ import { InjectionToken, isSignal } from '@angular/core';
 import type { ChartAnalysisPageComponent } from './chart-analysis-page.component';
 
 /**
- * US02: what each section of the chart page's template (drawing rail, context menus, side pane,
+ * US02: what each section of the chart page's template (context menus, side pane,
  * studies strip, overlays menu) may read of the page — a SLICE, not the page. Each child injects its own token, typed
  * as exactly the members it uses ({@link pageSlice}: getters for those members and nothing else at run time), so a
  * section's dependencies are listed here, checked by the compiler against the page, and a spec provides a small fake.
- * (They used to inject the whole page through one `CHART_PAGE` token.) US02b: the main series (symbol, timeframe,
- * bars) is not in any slice, and the legend and the panel strip take inputs: a section reads it from the page's ChartSessionStore (chart-session-store.ts), which the page provides.
+ * (They used to inject the whole page through one `CHART_PAGE` token.)
+ *
+ * US02b: the main series (symbol, timeframe, bars) is in no slice — a section reads it from the page's
+ * ChartSessionStore (chart-session-store.ts), which the page provides; the legend and the panel strip take inputs;
+ * the drawing rail reads the page's ChartDrawingTools.
  */
 type Page = ChartAnalysisPageComponent;
 
@@ -152,33 +155,6 @@ export type ChartOverlaysMenuSlice = Pick<Page, (typeof OVERLAYS_MENU_KEYS)[numb
 export const CHART_OVERLAYS_MENU = new InjectionToken<ChartOverlaysMenuSlice>(
   'CHART_OVERLAYS_MENU',
 );
-
-/** The drawing rail's slice of the page. */
-export const DRAWING_RAIL_KEYS = [
-  'drawings',
-  'favoriteTools',
-  'magnet',
-  'magnetMenuOpen',
-  'magnetStrength',
-  'openRailGroup',
-  'pickRailTool',
-  'railFlyout',
-  'railFlyoutTop',
-  'railGroupActive',
-  'railStandalone',
-  'railTool',
-  'selectTool',
-  'setMagnetStrength',
-  'stayInDrawing',
-  'toggleFavoriteTool',
-  'toggleMagnetMenu',
-  'toggleRailFlyout',
-  'toggleStayInDrawing',
-  'tool',
-  'toolGroups',
-] as const;
-export type ChartDrawingRailSlice = Pick<Page, (typeof DRAWING_RAIL_KEYS)[number]>;
-export const CHART_DRAWING_RAIL = new InjectionToken<ChartDrawingRailSlice>('CHART_DRAWING_RAIL');
 
 /** The side pane's slice of the page. */
 export const SIDE_PANE_KEYS = [
