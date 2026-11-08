@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { DatePipe } from '@angular/common';
 
 import type { EAStatePayload } from '@core/api/api.types';
+import { inputCells } from './input-cells';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.component';
 
@@ -60,8 +61,8 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         @if (stale()) {
           <!-- A silent EA's envelope is history, not the present: never show RUNNING as current. -->
           <p class="stale-banner" role="status">
-            <strong>{{ staleLabel() || 'Last known state' }}</strong> — the EA has not reported since,
-            so these values may no longer be true.
+            <strong>{{ staleLabel() || 'Last known state' }}</strong> — the EA has not reported
+            since, so these values may no longer be true.
           </p>
         }
         <div class="grid" [class.is-stale]="stale()">
@@ -294,6 +295,9 @@ export class EAStatePanelComponent {
       value: s.deadManSwitchArmed == null ? '—' : s.deadManSwitchArmed ? 'Armed' : 'Safe',
       tone: s.deadManSwitchArmed ? 'bad' : 'ok',
     });
+
+    // ── Batch 8: the per-symbol daily-loss gate (0 = OFF on the EA) + the tick-gap filler, from `inputs` ──
+    for (const c of inputCells(s.inputs)) cells.push(c);
 
     // ── Counters ──
     cells.push({
