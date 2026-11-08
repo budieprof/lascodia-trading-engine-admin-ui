@@ -6,6 +6,7 @@ import {
   DEFAULT_SPREAD_REACTIVE_CONFIG,
   SpreadBaselineFloor,
   SpreadReactiveConfig,
+  SpreadReactiveSaveGovernance,
   SpreadStateEntry,
   UpsertSpreadBaselineFloorRequest,
 } from '@features/spread-reactive/spread-reactive.types';
@@ -27,9 +28,14 @@ export class SpreadReactiveService {
       .pipe(map((c) => ({ ...DEFAULT_SPREAD_REACTIVE_CONFIG, ...c })));
   }
 
-  saveConfig(config: SpreadReactiveConfig): Observable<SpreadReactiveConfig> {
+  saveConfig(
+    config: SpreadReactiveConfig,
+    governance: SpreadReactiveSaveGovernance = {},
+  ): Observable<SpreadReactiveConfig> {
+    // Read-only answer fields never go back to the engine.
+    const { effectiveRevertRatio: _e, governedChanges: _g, ...body } = config;
     return this.api
-      .putEnvelope<SpreadReactiveConfig>('/spread-reactive/config', config)
+      .putEnvelope<SpreadReactiveConfig>('/spread-reactive/config', { ...body, ...governance })
       .pipe(map((c) => ({ ...DEFAULT_SPREAD_REACTIVE_CONFIG, ...c })));
   }
 

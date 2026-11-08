@@ -70,6 +70,28 @@ export interface SpreadReactiveConfig {
    * no gap below `spreadMultiplier` (then the midpoint), so a spread on the trigger cannot flap. Absent on older engines.
    */
   effectiveRevertRatio?: number | null;
+  /** READ-ONLY, save answers only: what happened to each governed setting in that save. */
+  governedChanges?: SpreadReactiveSettingChange[] | null;
+}
+
+/** One governed setting in a save (engine `SpreadReactiveSettingChangeDto`). */
+export interface SpreadReactiveSettingChange {
+  key: string;
+  from?: string | null;
+  to: string;
+  direction: 'Loosening' | 'Tightening' | string;
+  /** Applied | QueuedForCoolingOff | Unchanged | Refused | NotWritten (the save stopped first). */
+  outcome: string;
+  effectiveAt?: string | null;
+  pendingChangeId?: number | null;
+  message?: string | null;
+}
+
+/** Governance fields sent with a save: required when the save loosens risk (raises the bump size). */
+export interface SpreadReactiveSaveGovernance {
+  reason?: string;
+  /** Break-glass: apply loosening changes now instead of after the cooling-off period. Needs a reason. */
+  immediate?: boolean;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */

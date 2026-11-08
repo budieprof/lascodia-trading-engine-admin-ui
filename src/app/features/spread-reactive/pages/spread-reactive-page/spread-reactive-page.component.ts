@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
@@ -27,6 +27,10 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import {
+  governedSummary,
+  looseningChanges,
+} from '@features/spread-reactive/spread-reactive-governance';
 
 /**
  * Spread-reactive subsystem: config + live state dashboard.
@@ -44,6 +48,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
   selector: 'app-spread-reactive-page',
   standalone: true,
   imports: [
+    RouterLink,
     DecimalPipe,
     SlAuditPageComponent,
     BaselineFloorsTabComponent,
@@ -876,6 +881,51 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 
         <!-- Sticky footer: Save/Reset stay in view while the operator scrolls
              the four settings panels. -->
+        @if (loosening().length > 0) {
+          <section class="card governance" aria-live="polite">
+            <h2>This change loosens risk</h2>
+            <p class="muted small">
+              A bump widens a live stop beyond what the position was sized for, so raising the bump
+              size goes through the risk-change rules: give a reason, and the new value is held for
+              the cooling-off period before it takes effect (the current value stays in force). Held
+              changes are listed on
+              <a routerLink="/iam/approvals">Approvals</a>, where they can be cancelled.
+            </p>
+            <ul class="gov-list">
+              @for (c of loosening(); track c.field) {
+                <li>
+                  <strong>{{ c.label }}</strong
+                  >: {{ c.from | number: '1.0-4' }} →
+                  {{ c.to | number: '1.0-4' }}
+                </li>
+              }
+            </ul>
+            <label class="field">
+              <span>Reason (required)</span>
+              <input
+                type="text"
+                maxlength="500"
+                placeholder="Why the bump size is changing"
+                [value]="saveReason()"
+                (input)="saveReason.set($any($event.target).value)"
+              />
+            </label>
+            <label class="check">
+              <input
+                type="checkbox"
+                [checked]="breakGlass()"
+                (change)="breakGlass.set($any($event.target).checked)"
+              />
+              <span
+                >Apply now (break-glass) — skips the cooling-off period; recorded as break-glass in
+                the audit trail.</span
+              >
+            </label>
+          </section>
+        }
+        @if (governanceNotice(); as note) {
+          <p class="banner warn small" role="status">{{ note }}</p>
+        }
         <div class="actions-row" [class.dirty]="dirty()">
           <span class="muted small">
             {{ dirty() ? 'Unsaved changes' : 'All settings saved' }}
@@ -891,7 +941,12 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
           <button
             type="button"
             class="btn primary"
-            [disabled]="saving() || !dirty()"
+            [disabled]="saving() || !dirty() || (loosening().length > 0 && !saveReason().trim())"
+            [title]="
+              loosening().length > 0 && !saveReason().trim()
+                ? 'Give a reason — this change loosens risk'
+                : ''
+            "
             (click)="save()"
           >
             {{ saving() ? 'Saving…' : 'Save' }}
@@ -1159,13 +1214,25 @@ export class SpreadReactivePageComponent {
     this.config.set({ ...c, ...p });
   }
 
+  /** Draft changes that raise the stop-loss bump size (governed; need a reason, held for cooling-off). */
+  protected readonly loosening = computed(() =>
+    looseningChanges(this.serverConfig(), this.config()),
+  );
+  protected readonly saveReason = signal('');
+  protected readonly breakGlass = signal(false);
+  /** What the last save did with governed settings (held until…, applied by break-glass, refused). */
+  protected readonly governanceNotice = signal<string | null>(null);
+
   protected save(): void {
     const c = this.config();
     if (!c || this.saving()) return;
+    const reason = this.saveReason().trim();
+    if (this.loosening().length > 0 && !reason) return;
     this.saving.set(true);
     this.error.set(null);
+    this.governanceNotice.set(null);
     this.service
-      .saveConfig(c)
+      .saveConfig(c, reason ? { reason, immediate: this.breakGlass() } : {})
       .pipe(
         catchError((e) => {
           this.error.set(this.toMessage(e));
@@ -1175,8 +1242,13 @@ export class SpreadReactivePageComponent {
       )
       .subscribe((res) => {
         if (res) {
-          this.config.set({ ...res });
-          this.serverConfig.set({ ...res });
+          // The answer is what is stored now: a held change still shows its current value.
+          const { governedChanges, ...stored } = res;
+          this.config.set({ ...stored });
+          this.serverConfig.set({ ...stored });
+          this.governanceNotice.set(governedSummary(governedChanges));
+          this.saveReason.set('');
+          this.breakGlass.set(false);
           this.saved.set(true);
         }
         this.saving.set(false);
@@ -1186,6 +1258,8 @@ export class SpreadReactivePageComponent {
   protected reset(): void {
     const s = this.serverConfig();
     if (s) this.config.set({ ...s });
+    this.saveReason.set('');
+    this.breakGlass.set(false);
   }
 
   protected firePreEmptiveNow(): void {
