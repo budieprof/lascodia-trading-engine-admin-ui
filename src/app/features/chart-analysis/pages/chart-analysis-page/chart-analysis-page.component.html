@@ -35,25 +35,25 @@
             aria-label="Search symbol"
             [ngModel]="symbolQuery()"
             (ngModelChange)="symbolQuery.set($event)"
-            (keydown.enter)="pickFirstSymbol()"
+            (keydown.enter)="symbolSearch.pickFirstSymbol()"
             autocomplete="off"
           />
-          @if (symbolClasses().length > 1) {
+          @if (symbolSearch.symbolClasses().length > 1) {
             <div class="symbol-classes" role="group" aria-label="Asset class">
-              <button type="button" [class.on]="!symbolClass()" (click)="symbolClass.set(null)">
+              <button type="button" [class.on]="!symbolSearch.symbolClass()" (click)="symbolSearch.symbolClass.set(null)">
                 All
               </button>
-              @for (c of symbolClasses(); track c) {
-                <button type="button" [class.on]="symbolClass() === c" (click)="symbolClass.set(c)">
-                  {{ assetClassLabel[c] }}
+              @for (c of symbolSearch.symbolClasses(); track c) {
+                <button type="button" [class.on]="symbolSearch.symbolClass() === c" (click)="symbolSearch.symbolClass.set(c)">
+                  {{ symbolSearch.assetClassLabel[c] }}
                 </button>
               }
             </div>
           }
           <ul class="menu-list">
-            @for (g of symbolGroups(); track g.assetClass) {
-              @if (symbolGroups().length > 1) {
-                <li class="menu-group" role="presentation">{{ assetClassLabel[g.assetClass] }}</li>
+            @for (g of symbolSearch.symbolGroups(); track g.assetClass) {
+              @if (symbolSearch.symbolGroups().length > 1) {
+                <li class="menu-group" role="presentation">{{ symbolSearch.assetClassLabel[g.assetClass] }}</li>
               }
               @for (p of g.rows; track p.key) {
                 <li>
@@ -65,7 +65,7 @@
                     [title]="
                       p.symbol +
                       ' — ' +
-                      symbolDescription(p.symbol, p.description) +
+                      symbolSearch.symbolDescription(p.symbol, p.description) +
                       (p.noDataReason ? ' (' + p.noDataReason + ')' : '')
                     "
                     (click)="selectSymbol(p.symbol)"
@@ -75,7 +75,7 @@
                     </span>
                     <span class="sym-name">{{ p.symbol }}</span>
                     <span class="sym-desc"
-                      >{{ symbolDescription(p.symbol, p.description) }}
+                      >{{ symbolSearch.symbolDescription(p.symbol, p.description) }}
                       @if (p.venue) {
                         <span class="sym-venue">· {{ p.venue }}</span>
                       }
@@ -88,23 +88,23 @@
               }
             } @empty {
               <li class="menu-empty">
-                {{ remoteSearch.loading() ? 'Searching the catalogue…' : 'No symbols match.' }}
+                {{ symbolSearch.remoteSearch.loading() ? 'Searching the catalogue…' : 'No symbols match.' }}
               </li>
             }
-            @if (remoteSearch.error(); as err) {
+            @if (symbolSearch.remoteSearch.error(); as err) {
               <li class="menu-empty">Catalogue search failed: {{ err }}</li>
-            } @else if (remoteSearch.hasMore()) {
+            } @else if (symbolSearch.remoteSearch.hasMore()) {
               <li>
                 <button
                   type="button"
                   class="sym-more"
-                  [disabled]="remoteSearch.loading()"
-                  (click)="remoteSearch.more()"
+                  [disabled]="symbolSearch.remoteSearch.loading()"
+                  (click)="symbolSearch.remoteSearch.more()"
                 >
-                  Show more ({{ remoteSearch.rows().length }} of {{ remoteSearch.total() }})
+                  Show more ({{ symbolSearch.remoteSearch.rows().length }} of {{ symbolSearch.remoteSearch.total() }})
                 </button>
               </li>
-            } @else if (remoteSearch.loading() && filteredSymbols().length) {
+            } @else if (symbolSearch.remoteSearch.loading() && symbolSearch.filteredSymbols().length) {
               <li class="menu-empty">Searching the catalogue…</li>
             }
           </ul>
@@ -370,7 +370,7 @@
           <button
             type="button"
             class="tb-menu-item"
-            (click)="saveTemplate(); openMenu.set(null)"
+            (click)="layoutActions.saveTemplate(); openMenu.set(null)"
             [disabled]="!active().length"
           >
             <app-chart-icon name="save" [size]="28" /> Save indicator template…
@@ -382,7 +382,7 @@
                 <button
                   type="button"
                   class="tb-menu-item"
-                  (click)="applyTemplate(t); openMenu.set(null)"
+                  (click)="layoutActions.applyTemplate(t); openMenu.set(null)"
                 >
                   {{ t.name }} <span class="tb-hint">{{ t.indicators.length }}</span>
                 </button>
@@ -406,7 +406,7 @@
                 <button
                   type="button"
                   class="tb-menu-x"
-                  (click)="removeTemplate(t.id, $event)"
+                  (click)="layoutActions.removeTemplate(t.id, $event)"
                   title="Delete template"
                   aria-label="Delete template"
                 >
@@ -468,7 +468,7 @@
       <button
         type="button"
         class="tb-btn tb-text"
-        (click)="openAlertDraft($event)"
+        (click)="alerts.openAlertDraft($event)"
         [class.open]="openMenu() === 'alert'"
         title="Create price alert"
       >
@@ -486,9 +486,9 @@
             [timeframe]="resolution()"
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
-            [presetPrice]="alertPreset()"
-            [draft]="alertDraft()"
-            (saved)="onAlertSaved()"
+            [presetPrice]="alerts.alertPreset()"
+            [draft]="alerts.alertDraft()"
+            (saved)="alerts.onAlertSaved()"
             (cancelled)="openMenu.set(null)"
           />
         </div>
@@ -522,7 +522,7 @@
       type="button"
       class="tb-btn tb-text"
       [class.active]="replayActive()"
-      (click)="replayActive() ? exitReplay() : startReplay()"
+      (click)="replayActive() ? timeNav.exitReplay() : timeNav.startReplay()"
       title="Bar replay"
     >
       <app-chart-icon name="replay" [size]="28" /><span class="tb-label">Replay</span>
@@ -678,19 +678,19 @@
       }
       @if (layoutMenuOpen()) {
         <div class="menu layout-menu">
-          <button type="button" class="menu-action" (click)="newLayout()">
+          <button type="button" class="menu-action" (click)="layoutActions.newLayout()">
             <app-chart-icon name="plus" [size]="18" /> New layout…
           </button>
-          <button type="button" class="menu-action" (click)="renameLayout()">
+          <button type="button" class="menu-action" (click)="layoutActions.renameLayout()">
             <app-chart-icon name="text" [size]="18" /> Rename…
           </button>
-          <button type="button" class="menu-action" (click)="duplicateLayout()">
+          <button type="button" class="menu-action" (click)="layoutActions.duplicateLayout()">
             <app-chart-icon name="save" [size]="18" /> Make a copy…
           </button>
           <button
             type="button"
             class="menu-action"
-            (click)="saveTemplate()"
+            (click)="layoutActions.saveTemplate()"
             [disabled]="!active().length"
           >
             <app-chart-icon name="star" [size]="18" /> Save studies as template…
@@ -703,7 +703,7 @@
                   <button
                     type="button"
                     [class.active]="l.id === workspace.active().id"
-                    (click)="switchLayout(l.id)"
+                    (click)="layoutActions.switchLayout(l.id)"
                   >
                     <span>{{ l.name }}</span>
                     @if (l.id === workspace.active().id) {
@@ -714,7 +714,7 @@
                     type="button"
                     class="tree-remove"
                     [attr.aria-label]="'Delete layout ' + l.name"
-                    (click)="removeLayout(l.id, $event)"
+                    (click)="layoutActions.removeLayout(l.id, $event)"
                   >
                     <app-chart-icon name="close" [size]="14" />
                   </button>
@@ -727,14 +727,14 @@
             <ul class="menu-list">
               @for (t of layoutStore.templates(); track t.id) {
                 <li>
-                  <button type="button" (click)="applyTemplate(t)">
+                  <button type="button" (click)="layoutActions.applyTemplate(t)">
                     <span>{{ t.name }}</span>
                     <span class="muted">{{ t.indicators.length }} studies</span>
                   </button>
                   <button
                     type="button"
                     class="tree-remove"
-                    (click)="removeTemplate(t.id, $event)"
+                    (click)="layoutActions.removeTemplate(t.id, $event)"
                     title="Delete template"
                     aria-label="Delete template"
                   >
@@ -753,7 +753,7 @@
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="toggleFullscreen()"
+      (click)="layoutActions.toggleFullscreen()"
       [class.active]="isFullscreen()"
       title="Fullscreen" aria-label="Fullscreen"
     >
@@ -762,7 +762,7 @@
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="takeSnapshot()"
+      (click)="layoutActions.takeSnapshot()"
       title="Take a snapshot (PNG)" aria-label="Take a snapshot (PNG)"
     >
       <app-chart-icon name="camera" [size]="28" />
@@ -830,7 +830,7 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="toggleFullscreen(); openMenu.set(null)"
+            (click)="layoutActions.toggleFullscreen(); openMenu.set(null)"
           >
             <app-chart-icon name="fullscreen" [size]="28" /> Fullscreen
           </button>
@@ -838,7 +838,7 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="takeSnapshot(); openMenu.set(null)"
+            (click)="layoutActions.takeSnapshot(); openMenu.set(null)"
           >
             <app-chart-icon name="camera" [size]="28" /> Take a snapshot
           </button>
@@ -870,11 +870,11 @@
       [(watchlistOpen)]="watchlistOpen"
       [(objectTreeOpen)]="objectTreeOpen"
       [sidePane]="sidePane()"
-      [alertManagerOpen]="alertManagerOpen()"
+      [alertManagerOpen]="alerts.alertManagerOpen()"
       [showFundamentals]="!!venueInstrument()"
       (sidePaneToggle)="openSidePane($event)"
       (panelToggle)="openPanel($event)"
-      (alertManagerToggle)="toggleAlertManager()"
+      (alertManagerToggle)="alerts.toggleAlertManager()"
     />
     @if (watchlistOpen()) {
       <aside class="watch-dock">
@@ -921,8 +921,8 @@
           [compareSeries]="compareSeries()"
           [scriptRows]="legendScriptRows()"
           (bottomChange)="legendBottom.set($event)"
-          (switchSeries)="switchContinuousSeries()"
-          (adjustmentChange)="setSeriesAdjustment($event)"
+          (switchSeries)="seriesAdjustments.switchContinuousSeries()"
+          (adjustmentChange)="seriesAdjustments.setSeriesAdjustment($event)"
           (scriptAction)="onScriptAction($event)"
         />
         <!-- US05: the symbol, its market state and (at most every 30 s) its price, for screen readers. -->
@@ -1048,7 +1048,7 @@
           <app-drawing-toolbar
             [drawing]="sel"
             (settings)="settingsFor.set($event)"
-            (addAlert)="addDrawingAlert($event)"
+            (addAlert)="alerts.addDrawingAlert($event)"
             (stageOrder)="stageOrder($event)"
           />
         }
@@ -1067,14 +1067,14 @@
           (resetScales)="resetScales()"
           (chartSettings)="chartSettingsOpen.set(true); closeContextMenu()"
           (commands)="paletteOpen.set(true); closeContextMenu()"
-          (saveImage)="takeSnapshot()"
-          (copyImage)="copySnapshot()"
-          (exportData)="exportChartData()"
+          (saveImage)="layoutActions.takeSnapshot()"
+          (copyImage)="layoutActions.copySnapshot()"
+          (exportData)="layoutActions.exportChartData()"
           (showObjects)="objectTreeOpen.set(true); closeContextMenu()"
           (addIndicator)="openStudiesDialog(); closeContextMenu()"
-          (alertAtLevel)="createAlertAtLevel($event)"
-          (alertHere)="createAlertHere($event)"
-          (saveLayoutAs)="duplicateLayout(); closeContextMenu()"
+          (alertAtLevel)="alerts.createAlertAtLevel($event)"
+          (alertHere)="alerts.createAlertHere($event)"
+          (saveLayoutAs)="layoutActions.duplicateLayout(); closeContextMenu()"
           (removeAllDrawings)="clearDrawingsFromMenu()"
         />
 
@@ -1111,15 +1111,15 @@
         }
 
         <!-- Alert manager (alerts v2, SP-I2). -->
-        @if (alertManagerOpen()) {
+        @if (alerts.alertManagerOpen()) {
           <app-chart-alert-manager
             [symbol]="symbol()"
             [timeframe]="resolution()"
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
-            [focusId]="alertFocusId()"
-            [scriptAlertFocusId]="scriptAlertFocusId()"
-            (closed)="closeAlertManager()"
+            [focusId]="alerts.alertFocusId()"
+            [scriptAlertFocusId]="alerts.scriptAlertFocusId()"
+            (closed)="alerts.closeAlertManager()"
           />
         }
         <!-- "Create alert on <script>" (PC-I14, SS-I1): a native dialog, so it sits above the chart and traps focus. -->
@@ -1394,7 +1394,7 @@
   </div>
 
   <app-chart-bottom-bar
-    [presets]="rangePresets"
+    [presets]="timeNav.rangePresets"
     [barCount]="bars().length"
     [clock]="clock()"
     [zone]="timezoneShort()"
@@ -1405,8 +1405,8 @@
     [dockTab]="dockTab()"
     [hasStrategy]="!!strategyRun()"
     [menu]="openMenu()"
-    (range)="applyRangePreset($event); openMenu.set(null)"
-    (goToDate)="goToDate($event)"
+    (range)="timeNav.applyRangePreset($event); openMenu.set(null)"
+    (goToDate)="timeNav.goToDate($event)"
     (editor)="toggleEditor()"
     (tester)="toggleTester()"
     (menuToggle)="toggleMenu($event.menu, $event.event)"
@@ -1419,12 +1419,12 @@
     <app-replay-panel
       [replay]="replay"
       [total]="bars().length"
-      [headLabel]="replayTime()"
+      [headLabel]="timeNav.replayTime()"
       [digits]="precision()"
       [facts]="facts()"
-      (pickStart)="pickReplayStart()"
-      (startAt)="startReplayAt($event)"
-      (exit)="exitReplay()"
+      (pickStart)="timeNav.pickReplayStart()"
+      (startAt)="timeNav.startReplayAt($event)"
+      (exit)="timeNav.exitReplay()"
     />
   }
 
@@ -1601,7 +1601,7 @@
           <button
             type="button"
             [class.on]="isFullscreen()"
-            (click)="toggleFullscreen()"
+            (click)="layoutActions.toggleFullscreen()"
             [title]="
               isFullscreen()
                 ? 'Exit full screen (Esc)'
@@ -1700,10 +1700,10 @@
 <dialog
   #alertMoveDialog
   class="alert-move-dialog"
-  (close)="pendingAlertMove.set(null)"
+  (close)="alerts.pendingAlertMove.set(null)"
   data-testid="alert-move-dialog"
 >
-  @if (pendingAlertMove(); as mv) {
+  @if (alerts.pendingAlertMove(); as mv) {
     <form method="dialog">
       <p>
         Move the alert “{{ mv.label }}” from
@@ -1716,7 +1716,7 @@
         <button
           value="move"
           class="tb-primary"
-          (click)="$event.preventDefault(); confirmAlertMove()"
+          (click)="$event.preventDefault(); alerts.confirmAlertMove()"
         >
           Move
         </button>
