@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { signal } from '@angular/core';
 
 import { ChartAnalysisPageComponent } from './chart-analysis-page.component';
+import { ChartOverlaySettings } from './chart-overlay-settings';
 import { DEFAULT_ORDER_FLOW, restoredOrderFlow } from '../../orderflow/orderflow.types';
-import { DEFAULT_LAYER_GROUPS, restoreLayerGroups } from '../../overlays/layer-groups';
+import { restoreLayerGroups } from '../../overlays/layer-groups';
 import { migrateWorkspaceState, type ChartWorkspaceState } from '../../workspace/workspace-state';
 
 // US02b pin: every overlay setting the overlays menu edits survives a layout save → restore unchanged, and an older
@@ -55,29 +56,31 @@ function setup(): Page {
 }
 
 /**
- * The overlay settings, at the page's defaults (the same initial values as the page's fields). After the move this is
- * the one place that says where they live.
+ * The overlay settings, at the page's defaults. After the move this is the one place that says where they live:
+ * volume and session breaks on the page, the rest in its ChartOverlaySettings (aliased on the page as it does).
  */
 function overlayState(p: Page): void {
+  const overlaySettings = new ChartOverlaySettings();
   Object.assign(p, {
     showVolume: signal(true),
     sessionBreaks: signal(false),
-    showPositions: signal(false),
-    showOrders: signal(false),
-    showOverlays: signal(false),
-    showVolumeProfile: signal(false),
-    volumeProfileMode: signal('visible'),
-    showSupportResistance: signal(false),
-    showStructure: signal(false),
-    showEvents: signal(true),
-    minEventImpact: signal('Medium'),
-    showBlackout: signal(true),
-    showClosedTrades: signal(false),
-    fitTradeLines: signal(true),
-    showWatchMarks: signal(true),
-    profileExtras: signal({ nakedPocs: false, developing: false }),
-    layerGroups: signal(DEFAULT_LAYER_GROUPS),
-    orderFlow: signal(DEFAULT_ORDER_FLOW),
+    overlaySettings,
+    showPositions: overlaySettings.showPositions,
+    showOrders: overlaySettings.showOrders,
+    showOverlays: overlaySettings.showOverlays,
+    showVolumeProfile: overlaySettings.showVolumeProfile,
+    volumeProfileMode: overlaySettings.volumeProfileMode,
+    showSupportResistance: overlaySettings.showSupportResistance,
+    showStructure: overlaySettings.showStructure,
+    showEvents: overlaySettings.showEvents,
+    minEventImpact: overlaySettings.minEventImpact,
+    showBlackout: overlaySettings.showBlackout,
+    showClosedTrades: overlaySettings.showClosedTrades,
+    fitTradeLines: overlaySettings.fitTradeLines,
+    showWatchMarks: overlaySettings.showWatchMarks,
+    profileExtras: overlaySettings.profileExtras,
+    layerGroups: overlaySettings.layerGroups,
+    orderFlow: overlaySettings.orderFlow,
   });
 }
 

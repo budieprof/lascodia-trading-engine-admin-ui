@@ -1,6 +1,5 @@
 import {
   consolidatedId,
-  consolidatedSubset,
   isConsolidatedId,
   type MdSource,
 } from '@core/realtime/marketdata.types';
@@ -253,16 +252,9 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
-import { DEFAULT_PROFILE_EXTRAS, type ProfileExtrasSettings } from '../../overlays/profile-levels';
+import type { ProfileExtrasSettings } from '../../overlays/profile-levels';
 import type { AlertableLevel } from '../../overlays/overlay-hits';
-import {
-  DEFAULT_LAYER_GROUPS,
-  effectiveOpacity,
-  persistLayerGroups,
-  restoreLayerGroups,
-  type LayerGroupId,
-  type LayerGroupsState,
-} from '../../overlays/layer-groups';
+import type { LayerGroupId } from '../../overlays/layer-groups';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -392,12 +384,7 @@ import { bookToSnapshot } from '../../orderflow/stream-depth';
 import { footprintRowsFromTape } from '../../replay/tick-replay';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { replayClipUtc } from '../../orderflow/orderflow-replay';
-import {
-  DEFAULT_ORDER_FLOW,
-  orderFlowCount,
-  restoredOrderFlow,
-  type OrderFlowSettings,
-} from '../../orderflow/orderflow.types';
+import { orderFlowCount } from '../../orderflow/orderflow.types';
 
 /** A Pine script's latest run on the chart. */
 export interface ChartScriptRun {
@@ -449,6 +436,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartSessionStore } from './chart-session-store';
+import { ChartOverlaySettings, type OrderFlowLayer } from './chart-overlay-settings';
 import { ChartDrawingTools } from './chart-drawing-tools';
 import { ChartDockState } from './chart-dock-state';
 import { ChartEditorState } from './chart-editor-state';
@@ -907,6 +895,8 @@ export class ChartAnalysisPageComponent {
     loadEvents: (extend) => this.loadEvents(extend),
     extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
   });
+  /** US02b: the overlay settings saved with a layout ({@link ChartOverlaySettings}); aliased below under their names. */
+  readonly overlaySettings = new ChartOverlaySettings();
   readonly symbol = this.session.symbol;
   readonly resolution = this.session.resolution;
   readonly style = signal<ChartStyle>('candles');
@@ -1479,7 +1469,7 @@ export class ChartAnalysisPageComponent {
   /** The symbol's watches' fires, touches, call-offs and script steps (`app-chart-analysis` fills it). */
   readonly analysisMarkers = signal<ChartMarker[]>([]);
   /** Watches and monitors on the chart — fire / step / call-off marks and their price lines (overlays menu; saved with the layout). */
-  readonly showWatchMarks = signal(true);
+  readonly showWatchMarks = this.overlaySettings.showWatchMarks;
   /** A trade an analysis proposed, opened in the order ticket (paper, at market — nothing is sent until Submit). */
   onAnalysisTicket(prefill: TicketPrefill): void {
     this.ticketPrefill.set({ ...prefill });
@@ -1530,54 +1520,33 @@ export class ChartAnalysisPageComponent {
       });
     onCleanup(() => sub.unsubscribe());
   });
-  /**
-   * Engine state on the chart, each toggled on its own (all off until the operator asks):
-   * open positions (entry/SL/TP), pending orders (working limit/stop orders and their O·SL/O·TP),
-   * and signals (trade-signal markers + martingale rungs). `showOverlays` is the signals toggle —
-   * the name predates the split and is what saved layouts and the assistant already use.
-   */
-  readonly showPositions = signal(false);
-  readonly showOrders = signal(false);
-  readonly showOverlays = signal(false);
-  /** Fill markers of the symbol's closed trades (entry and exit; paper apart). Off by default. */
-  readonly showClosedTrades = signal(false);
-  /**
-   * Whether the trade lines widen the price scale's fit (CC-10). On by default: a stop below the
-   * visible low stays in view. Off: a distant take-profit no longer squashes the candles.
-   */
-  readonly fitTradeLines = signal(true);
-  /** Any of the three on — the assistant's single "trades" switch reads and drives all three. */
-  readonly anyTradeOverlay = computed(
-    () => this.showPositions() || this.showOrders() || this.showOverlays(),
-  );
+  /** Trade layers, each its own toggle ({@link ChartOverlaySettings}). */
+  readonly showPositions = this.overlaySettings.showPositions;
+  readonly showOrders = this.overlaySettings.showOrders;
+  readonly showOverlays = this.overlaySettings.showOverlays;
+  readonly showClosedTrades = this.overlaySettings.showClosedTrades;
+  readonly fitTradeLines = this.overlaySettings.fitTradeLines;
+  readonly anyTradeOverlay = this.overlaySettings.anyTradeOverlay;
 
   // ── Analytical overlays ──────────────────────────────────────────────────
   //
   // Derived from the loaded bars, not fetched. The chart host computes them; these are the
   // toggles the toolbar drives.
-  readonly showVolumeProfile = signal(false);
-  readonly volumeProfileMode = signal<VolumeProfileMode>('visible');
+  readonly showVolumeProfile = this.overlaySettings.showVolumeProfile;
+  readonly volumeProfileMode = this.overlaySettings.volumeProfileMode;
   readonly vpMenuOpen = signal(false);
   readonly volumeProfileModes = VOLUME_PROFILE_MODES;
-  readonly showSupportResistance = signal(false);
-  readonly showStructure = signal(false);
-  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3); saved with the layout. */
-  readonly profileExtras = signal<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
+  readonly showSupportResistance = this.overlaySettings.showSupportResistance;
+  readonly showStructure = this.overlaySettings.showStructure;
+  readonly profileExtras = this.overlaySettings.profileExtras;
   toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
-    this.profileExtras.update((s) => ({ ...s, [key]: !s[key] }));
+    this.overlaySettings.toggleProfileExtra(key);
   }
 
-  /**
-   * Layer groups (PR-5): Structure, Profiles, Order flow, Events, Trades — each shown/hidden and faded
-   * together from the layer menu; saved with the layout.
-   */
-  readonly layerGroups = signal<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
-  /**
-   * What a group's layers draw at: its opacity, 0 when hidden. Reactive (reads the signal), so a template
-   * can bind `[opacity]="layerGroupOpacity('flow')"` — the order-flow layers take theirs from here.
-   */
+  /** Layer groups (PR-5), saved with the layout. */
+  readonly layerGroups = this.overlaySettings.layerGroups;
   layerGroupOpacity(id: LayerGroupId): number {
-    return effectiveOpacity(this.layerGroups(), id);
+    return this.overlaySettings.layerGroupOpacity(id);
   }
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
@@ -1590,15 +1559,13 @@ export class ChartAnalysisPageComponent {
   }
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
-  readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
-  toggleOrderFlow(
-    layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades' | 'cmeFlow',
-  ): void {
-    this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
+  readonly orderFlow = this.overlaySettings.orderFlow;
+  toggleOrderFlow(layer: OrderFlowLayer): void {
+    this.overlaySettings.toggleOrderFlow(layer);
   }
   /** The market-data source for the heatmap / depth / trades ('' = automatic). */
   setOrderFlowSource(sourceId: string): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, sourceId: sourceId || null }));
+    this.overlaySettings.setOrderFlowSource(sourceId);
   }
   /** Multibook: the sources the consolidated heatmap may combine (every entitled source with a book). */
   readonly consolidatableSources = computed(() =>
@@ -1606,9 +1573,7 @@ export class ChartAnalysisPageComponent {
   );
   /** Whether a source is in the consolidated pick (all are when the pick is plain `consolidated`). */
   consolidatedHas(sourceId: string): boolean {
-    const id = this.orderFlow().sourceId;
-    const subset = id ? consolidatedSubset(id) : null;
-    return !subset || subset.includes(sourceId);
+    return this.overlaySettings.consolidatedHas(sourceId);
   }
   /** Multibook: turn one source in or out of the consolidated heatmap (at least one stays in). */
   toggleConsolidatedSource(sourceId: string): void {
@@ -1620,9 +1585,9 @@ export class ChartAnalysisPageComponent {
     if (!next.length) return;
     this.setOrderFlowSource(consolidatedId(all, next));
   }
-  readonly isConsolidatedPick = computed(() => isConsolidatedId(this.orderFlow().sourceId));
+  readonly isConsolidatedPick = this.overlaySettings.isConsolidatedPick;
   setTradeMinSize(value: number): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, tradeMinSize: value }));
+    this.overlaySettings.setTradeMinSize(value);
   }
   /** Tick replay's book at the head for the depth panel (undefined outside tick replay). */
   readonly tickReplayBook = computed<OrderBookSnapshot | null | undefined>(() => {
@@ -1635,7 +1600,7 @@ export class ChartAnalysisPageComponent {
     return bookToSnapshot(this.symbol(), tape.sourceId ?? 'recording', tape.bookAt(head));
   });
   setHeatmapOpacity(value: number): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
+    this.overlaySettings.setHeatmapOpacity(value);
   }
   /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height — MT5 points, else instrument ticks (UF02). */
   readonly footprintRowUnit = computed<'points' | 'ticks'>(() => {
@@ -1644,7 +1609,7 @@ export class ChartAnalysisPageComponent {
   });
   readonly footprintRowChoices = computed(() => footprintRowChoices(this.footprintRowUnit()));
   setFootprintRows(points: number | null): void {
-    this.orderFlow.update((s) => restoredOrderFlow({ ...s, footprintRowPoints: points }));
+    this.overlaySettings.setFootprintRows(points);
   }
   /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
   readonly orderFlowReplayClip = computed(() => {
@@ -1683,13 +1648,10 @@ export class ChartAnalysisPageComponent {
   /** Economic events on the time axis. */
   private readonly eventsFeed = inject(ChartEventsService);
   readonly events = signal<EventMark[]>([]);
-  readonly showEvents = signal(true);
-  readonly minEventImpact = signal<'High' | 'Medium' | 'Low'>('Medium');
-  /**
-   * Shade the news blackout around Tier-1 events (CC-I2): the minutes live refuses new entries in,
-   * around each High event of the pair's currencies. Saved with the layout.
-   */
-  readonly showBlackout = signal(true);
+  readonly showEvents = this.overlaySettings.showEvents;
+  readonly minEventImpact = this.overlaySettings.minEventImpact;
+  /** Shade the news blackout around Tier-1 events (CC-I2); saved with the layout. */
+  readonly showBlackout = this.overlaySettings.showBlackout;
   /** The blackout window live applies (`economic-event/news-blackout`), and when it was read. */
   readonly blackout = signal<BlackoutWindow | null>(null);
   private blackoutAt = 0;
@@ -4875,25 +4837,8 @@ export class ChartAnalysisPageComponent {
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.savedScriptsState(),
       view: this.viewSnapshot() ?? this.pendingView ?? null,
-      overlays: {
-        showPositions: this.showPositions(),
-        showOrders: this.showOrders(),
-        showOverlays: this.showOverlays(),
-        showVolumeProfile: this.showVolumeProfile(),
-        volumeProfileMode: this.volumeProfileMode(),
-        showSupportResistance: this.showSupportResistance(),
-        showStructure: this.showStructure(),
-        showEvents: this.showEvents(),
-        minEventImpact: this.minEventImpact(),
-        showBlackout: this.showBlackout(),
-        showClosedTrades: this.showClosedTrades(),
-        fitTradeLines: this.fitTradeLines(),
-        showWatches: this.showWatchMarks(),
-        vpNakedPocs: this.profileExtras().nakedPocs,
-        vpDeveloping: this.profileExtras().developing,
-        orderFlow: { ...this.orderFlow() },
-      },
-      layerGroups: persistLayerGroups(this.layerGroups()),
+      overlays: this.overlaySettings.snapshot(),
+      layerGroups: this.overlaySettings.persistedLayerGroups(),
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
       ...(this.mainLink() ? { link: this.mainLink() } : {}),
@@ -5345,27 +5290,7 @@ export class ChartAnalysisPageComponent {
     this.renkoWicks.set(pb.renkoWicks);
     this.lineBreakLines.set(pb.lineBreakLines);
     this.pnfReversal.set(pb.pnfReversal);
-    const o = s.overlays ?? {};
-    // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
-    this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
-    this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
-    this.showOverlays.set(o.showOverlays ?? false);
-    this.showVolumeProfile.set(o.showVolumeProfile ?? false);
-    if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
-    this.showSupportResistance.set(o.showSupportResistance ?? false);
-    this.showStructure.set(o.showStructure ?? false);
-    this.showEvents.set(o.showEvents ?? true);
-    this.minEventImpact.set(o.minEventImpact ?? 'Medium');
-    this.showBlackout.set(o.showBlackout ?? true);
-    this.showClosedTrades.set(o.showClosedTrades ?? false);
-    this.fitTradeLines.set(o.fitTradeLines ?? true);
-    this.showWatchMarks.set(o.showWatches ?? true);
-    this.profileExtras.set({
-      nakedPocs: o.vpNakedPocs ?? false,
-      developing: o.vpDeveloping ?? false,
-    });
-    this.layerGroups.set(restoreLayerGroups(s.layerGroups));
-    this.orderFlow.set(restoredOrderFlow(o.orderFlow));
+    this.overlaySettings.restore(s.overlays, s.layerGroups);
   }
 
   private flushPendingView(): void {
