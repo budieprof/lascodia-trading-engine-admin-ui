@@ -717,91 +717,6 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
               />
             </div>
 
-            <div class="monitor-curve-bar" role="group" aria-label="Closed-trade charts">
-              <span class="selector-label">Accounts</span>
-              <div class="seg">
-                @for (k of monitorAccountKinds; track k) {
-                  <button
-                    type="button"
-                    class="seg-btn"
-                    [class.on]="monitorAccountKind() === k"
-                    [attr.aria-pressed]="monitorAccountKind() === k"
-                    (click)="setMonitorAccountKind(k)"
-                  >
-                    {{ k }}
-                  </button>
-                }
-              </div>
-              <span class="selector-label">Unit</span>
-              <div class="seg">
-                @for (u of monitorUnits; track u) {
-                  <button
-                    type="button"
-                    class="seg-btn"
-                    [class.on]="monitorUnit() === u"
-                    [attr.aria-pressed]="monitorUnit() === u"
-                    [title]="
-                      u === 'R'
-                        ? 'One point per trade decision at its mean R (decisions without a stop are left out)'
-                        : 'Realised P&L per closed position, account currency'
-                    "
-                    (click)="setMonitorUnit(u)"
-                  >
-                    {{ u }}
-                  </button>
-                }
-              </div>
-              <span class="curve-scope">{{ monitorCurveScope() }}</span>
-              @if (monitorCurveMismatch(); as m) {
-                <span class="curve-mismatch" role="status">{{ m }}</span>
-              }
-            </div>
-            <div class="chart-grid">
-              <app-chart-card
-                title="Equity Curve"
-                [subtitle]="
-                  (monitorCurveUnit() === 'R'
-                    ? 'Cumulative R of closed trades · '
-                    : 'Cumulative realised P&L of closed trades · ') + monitorCurveScope()
-                "
-                [options]="equityCurveOptions() ?? {}"
-                [loading]="monitorTradesLoading()"
-                [emptyMessage]="monitorChartEmpty(equityCurveOptions(), 'needs 2')"
-                height="320px"
-              />
-              <app-chart-card
-                title="Win Rate Over Time"
-                [subtitle]="'Rolling ' + monitorWindow + '-trade win rate (P&L > 0)'"
-                [options]="winRateOptions() ?? {}"
-                [loading]="monitorTradesLoading()"
-                [emptyMessage]="monitorChartEmpty(winRateOptions(), 'needs ' + (monitorWindow + 1))"
-                height="320px"
-              />
-              <app-chart-card
-                title="Profit Factor Trend"
-                [subtitle]="
-                  'Rolling ' + monitorWindow + '-trade profit factor · gaps = no losing trade'
-                "
-                [options]="profitFactorOptions() ?? {}"
-                [loading]="monitorTradesLoading()"
-                [emptyMessage]="
-                  monitorChartEmpty(profitFactorOptions(), 'needs ' + (monitorWindow + 1))
-                "
-                height="320px"
-              />
-              <app-chart-card
-                title="Monthly P&L"
-                [subtitle]="
-                  monitorCurveUnit() === 'R'
-                    ? 'Sum of R per UTC month'
-                    : 'Realised P&L per UTC month (account currency)'
-                "
-                [options]="monthlyReturnsOptions() ?? {}"
-                [loading]="monitorTradesLoading()"
-                [emptyMessage]="monitorChartEmpty(monthlyReturnsOptions(), 'needs 1')"
-                height="320px"
-              />
-            </div>
           } @else if (loadingPerformance()) {
             <div class="empty-monitor">
               <div class="spinner"></div>
@@ -810,13 +725,103 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
           } @else if (selectedStrategyId()) {
             <app-empty-state
               title="No performance snapshot yet"
-              description="This strategy has no performance-window evaluation. Snapshots are produced once it has accumulated trade history."
+              description="This strategy has no performance-window evaluation. Snapshots are produced once it has accumulated trade history; the closed-trade charts below do not need one (paper trades included)."
             />
           } @else {
             <app-empty-state
               title="Pick a strategy to monitor"
               description="Choose a strategy from the selector above to see its live performance window, trade outcomes and equity curve."
             />
+          }
+
+          <!-- Closed-trade charts: independent of the performance snapshot, so paper-stage strategies (no
+               live snapshot yet) still get their paper/R equity curve. -->
+          @if (selectedStrategyId() && !loadingPerformance()) {
+              <div class="monitor-curve-bar" role="group" aria-label="Closed-trade charts">
+                <span class="selector-label">Accounts</span>
+                <div class="seg">
+                  @for (k of monitorAccountKinds; track k) {
+                    <button
+                      type="button"
+                      class="seg-btn"
+                      [class.on]="monitorAccountKind() === k"
+                      [attr.aria-pressed]="monitorAccountKind() === k"
+                      (click)="setMonitorAccountKind(k)"
+                    >
+                      {{ k }}
+                    </button>
+                  }
+                </div>
+                <span class="selector-label">Unit</span>
+                <div class="seg">
+                  @for (u of monitorUnits; track u) {
+                    <button
+                      type="button"
+                      class="seg-btn"
+                      [class.on]="monitorUnit() === u"
+                      [attr.aria-pressed]="monitorUnit() === u"
+                      [title]="
+                        u === 'R'
+                          ? 'One point per trade decision at its mean R (decisions without a stop are left out)'
+                          : 'Realised P&L per closed position, account currency'
+                      "
+                      (click)="setMonitorUnit(u)"
+                    >
+                      {{ u }}
+                    </button>
+                  }
+                </div>
+                <span class="curve-scope">{{ monitorCurveScope() }}</span>
+                @if (monitorCurveMismatch(); as m) {
+                  <span class="curve-mismatch" role="status">{{ m }}</span>
+                }
+              </div>
+              <div class="chart-grid">
+                <app-chart-card
+                  title="Equity Curve"
+                  [subtitle]="
+                    (monitorCurveUnit() === 'R'
+                      ? 'Cumulative R of closed trades · '
+                      : 'Cumulative realised P&L of closed trades · ') + monitorCurveScope()
+                  "
+                  [options]="equityCurveOptions() ?? {}"
+                  [loading]="monitorTradesLoading()"
+                  [emptyMessage]="monitorChartEmpty(equityCurveOptions(), 'needs 2')"
+                  height="320px"
+                />
+                <app-chart-card
+                  title="Win Rate Over Time"
+                  [subtitle]="'Rolling ' + monitorWindow + '-trade win rate (P&L > 0)'"
+                  [options]="winRateOptions() ?? {}"
+                  [loading]="monitorTradesLoading()"
+                  [emptyMessage]="monitorChartEmpty(winRateOptions(), 'needs ' + (monitorWindow + 1))"
+                  height="320px"
+                />
+                <app-chart-card
+                  title="Profit Factor Trend"
+                  [subtitle]="
+                    'Rolling ' + monitorWindow + '-trade profit factor · gaps = no losing trade'
+                  "
+                  [options]="profitFactorOptions() ?? {}"
+                  [loading]="monitorTradesLoading()"
+                  [emptyMessage]="
+                    monitorChartEmpty(profitFactorOptions(), 'needs ' + (monitorWindow + 1))
+                  "
+                  height="320px"
+                />
+                <app-chart-card
+                  title="Monthly P&L"
+                  [subtitle]="
+                    monitorCurveUnit() === 'R'
+                      ? 'Sum of R per UTC month'
+                      : 'Realised P&L per UTC month (account currency)'
+                  "
+                  [options]="monthlyReturnsOptions() ?? {}"
+                  [loading]="monitorTradesLoading()"
+                  [emptyMessage]="monitorChartEmpty(monthlyReturnsOptions(), 'needs 1')"
+                  height="320px"
+                />
+              </div>
           }
         }
       </ui-tabs>
