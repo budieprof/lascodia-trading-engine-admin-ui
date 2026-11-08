@@ -240,7 +240,6 @@ import { NewsIntelService } from '@core/services/news-intel.service';
 import type {
   NewsArticleView,
   NewsFocusResult,
-  NewsPressureLeg,
 } from '@features/news-intel/news-intel.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageContextService } from '@core/assistant/page-context.service';
@@ -293,8 +292,6 @@ import {
   pageSlice,
   CHART_OVERLAYS_MENU,
   OVERLAYS_MENU_KEYS,
-  CHART_SIDE_PANE,
-  SIDE_PANE_KEYS,
 } from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
@@ -579,11 +576,6 @@ export { normaliseView };
     {
       provide: ChartDrawingTools,
       useFactory: (page: ChartAnalysisPageComponent) => page.drawingTools,
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_SIDE_PANE,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, SIDE_PANE_KEYS),
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
   ],
@@ -1884,10 +1876,6 @@ export class ChartAnalysisPageComponent {
   /** The news item long-pressed for its AI analysis modal. */
   readonly newsAnalysis = signal<NewsArticleView | null>(null);
 
-  /** Long-press on a news item: the article itself, in a new tab. */
-  openArticle(a: NewsArticleView): void {
-    if (a.url) window.open(a.url, '_blank', 'noopener,noreferrer');
-  }
   readonly newsLoading = signal(false);
   readonly newsFocus = signal<NewsFocusResult | null>(null);
 
@@ -3457,12 +3445,6 @@ export class ChartAnalysisPageComponent {
    * "no weight to divide" versus "measured, and none of it is live" — so it
    * renders as an em dash rather than 0%.
    */
-  legSummary(leg: NewsPressureLeg | null): string {
-    if (!leg) return '—';
-    const live = leg.liveShare === null ? '—' : `${Math.round(leg.liveShare * 100)}% live`;
-    const stories = `${leg.storyCount} ${leg.storyCount === 1 ? 'story' : 'stories'}`;
-    return `${leg.score >= 0 ? '+' : ''}${leg.score.toFixed(2)} · ${stories} · ${live}`;
-  }
 
   toggleOverlays(): void {
     this.showOverlays.set(!this.showOverlays());

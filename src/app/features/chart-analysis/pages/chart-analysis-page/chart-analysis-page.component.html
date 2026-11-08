@@ -1053,7 +1053,28 @@
           (removeAllDrawings)="clearDrawingsFromMenu()"
         />
 
-        <app-chart-side-pane />
+        <app-chart-side-pane
+          [sidePane]="sidePane()"
+          [details]="details()"
+          [marketView]="marketView()"
+          [newsFocus]="newsFocus()"
+          [newsLoading]="newsLoading()"
+          [articles]="articles()"
+          [timezone]="timezone()"
+          [calendarCurrencies]="calendarCurrencies()"
+          [eventRelevance]="eventRelevance()"
+          [(calendarAll)]="calendarAll"
+          [(calendarMinImpact)]="calendarMinImpact"
+          [precision]="precision()"
+          [facts]="facts()"
+          [orderFlowReplayClip]="orderFlowReplayClip()"
+          [orderFlowSourceId]="orderFlow().sourceId"
+          [tickReplayBook]="tickReplayBook()"
+          [dataWindowSections]="dataWindowSections()"
+          (articleAnalysis)="newsAnalysis.set($event)"
+          (calendarEventOpened)="calendarEvent.set($event)"
+          (symbolSelected)="selectSymbol($event)"
+        />
 
         <!-- Object tree (DR-03 / DR-I10): every drawing of the symbol, hidden ones included. -->
         @if (objectTreeOpen() && drawings.symbolDrawings().length) {

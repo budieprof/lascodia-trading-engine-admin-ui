@@ -1,47 +1,46 @@
 <!-- Details / News side pane. -->
-@if (page.sidePane() === 'details') {
+@if (sidePane() === 'details') {
   <aside class="side-pane">
-    <div class="tree-title">{{ page.details().symbol }} details</div>
+    <div class="tree-title">{{ details().symbol }} details</div>
     <dl class="detail-list">
-      @if (page.details().isFx) {
+      @if (details().isFx) {
         <dt>Pair</dt>
-        <dd>{{ page.details().base }} / {{ page.details().quote }}</dd>
+        <dd>{{ details().base }} / {{ details().quote }}</dd>
       } @else {
         <dt>Instrument</dt>
         <dd data-testid="details-instrument">
-          {{ page.details().description }} <span class="muted">· {{ page.details().kind }}</span>
+          {{ details().description }} <span class="muted">· {{ details().kind }}</span>
         </dd>
       }
       <dt>Market</dt>
-      <dd data-testid="details-market" [title]="page.marketView().title">
-        {{ page.marketView().label }}
+      <dd data-testid="details-market" [title]="marketView().title">
+        {{ marketView().label }}
       </dd>
       <dt>Digits</dt>
-      <dd>{{ page.details().digits }}</dd>
+      <dd>{{ details().digits }}</dd>
       <dt>Contract</dt>
-      <dd>{{ page.details().contractSize ?? '—' }}</dd>
-      <dt>{{ page.details().isFx ? 'Lots' : page.details().quantityUnit }}</dt>
+      <dd>{{ details().contractSize ?? '—' }}</dd>
+      <dt>{{ details().isFx ? 'Lots' : details().quantityUnit }}</dt>
       <dd>
-        {{ page.details().minLot ?? '—' }} – {{ page.details().maxLot ?? '—' }} step
-        {{ page.details().lotStep ?? '—' }}
+        {{ details().minLot ?? '—' }} – {{ details().maxLot ?? '—' }} step
+        {{ details().lotStep ?? '—' }}
       </dd>
       <dt>Last</dt>
       <dd>
         {{
-          page.details().last === null
+          details().last === null
             ? '—'
-            : (page.details().last
-              | number: '1.' + page.details().digits + '-' + page.details().digits)
+            : (details().last | number: '1.' + details().digits + '-' + details().digits)
         }}
       </dd>
       <dt>Session</dt>
       <dd>
-        @if (page.details().dayChangePct !== null) {
+        @if (details().dayChangePct !== null) {
           <span
-            [class.up]="(page.details().dayChangePct ?? 0) >= 0"
-            [class.down]="(page.details().dayChangePct ?? 0) < 0"
+            [class.up]="(details().dayChangePct ?? 0) >= 0"
+            [class.down]="(details().dayChangePct ?? 0) < 0"
           >
-            {{ page.details().dayChangePct | number: '1.2-2' }}%
+            {{ details().dayChangePct | number: '1.2-2' }}%
           </span>
         } @else {
           —
@@ -50,38 +49,36 @@
       <dt>Day H/L</dt>
       <dd>
         {{
-          page.details().dayHigh === null
+          details().dayHigh === null
             ? '—'
-            : (page.details().dayHigh
-              | number: '1.' + page.details().digits + '-' + page.details().digits)
+            : (details().dayHigh | number: '1.' + details().digits + '-' + details().digits)
         }}
         /
         {{
-          page.details().dayLow === null
+          details().dayLow === null
             ? '—'
-            : (page.details().dayLow
-              | number: '1.' + page.details().digits + '-' + page.details().digits)
+            : (details().dayLow | number: '1.' + details().digits + '-' + details().digits)
         }}
       </dd>
       <dt>Loaded</dt>
-      <dd>{{ page.details().bars }} bars</dd>
+      <dd>{{ details().bars }} bars</dd>
       <dt>From</dt>
-      <dd class="muted">{{ page.details().from }}</dd>
+      <dd class="muted">{{ details().from }}</dd>
       <dt>To</dt>
-      <dd class="muted">{{ page.details().to }}</dd>
+      <dd class="muted">{{ details().to }}</dd>
     </dl>
     <app-performance-tiles [symbol]="session.symbol()" />
     <app-technicals-gauge
       [bars]="session.bars()"
-      [timeframe]="page.resolutionLabel(session.resolution())"
+      [timeframe]="resolutionLabel(session.resolution())"
     />
     <app-seasonals [symbol]="session.symbol()" />
   </aside>
 }
 
-@if (page.sidePane() === 'news') {
+@if (sidePane() === 'news') {
   <aside class="side-pane">
-    <div class="tree-title">News · {{ page.details().base }} / {{ page.details().quote }}</div>
+    <div class="tree-title">News · {{ details().base }} / {{ details().quote }}</div>
 
     <!--
       The module's read on the PAIR, above the raw headlines.
@@ -90,7 +87,7 @@
       headlines shown without it invite trading news that is in the
       price already.
     -->
-    @if (page.newsFocus()?.context; as ctx) {
+    @if (newsFocus()?.context; as ctx) {
       <dl class="detail-list news-focus">
         <dt>Pair bias</dt>
         <dd>
@@ -107,14 +104,14 @@
             </span>
           }
         </dd>
-        <dt>{{ page.newsFocus()?.baseCurrency }}</dt>
-        <dd>{{ page.legSummary(ctx.baseLeg) }}</dd>
+        <dt>{{ newsFocus()?.baseCurrency }}</dt>
+        <dd>{{ legSummary(ctx.baseLeg) }}</dd>
         <!-- Rendered unconditionally rather than behind an @if: a <dl>
              may only contain dt/dd pairs, and a control-flow block
              inside one inserts anchor nodes that break that contract.
              A single-currency request simply has no quote leg. -->
-        <dt>{{ page.newsFocus()?.quoteCurrency ?? 'Quote' }}</dt>
-        <dd>{{ page.legSummary(ctx.quoteLeg) }}</dd>
+        <dt>{{ newsFocus()?.quoteCurrency ?? 'Quote' }}</dt>
+        <dd>{{ legSummary(ctx.quoteLeg) }}</dd>
         <!-- `asOfNote` is a full paragraph explaining how the score is
              built, not the short timestamp the name suggests. Rendered
              inline it swamped the pane and pushed the headlines below
@@ -124,30 +121,30 @@
           hover for scoring <app-chart-icon name="info" [size]="14" />
         </dd>
       </dl>
-      @if (page.newsFocus()?.omissionReason; as why) {
+      @if (newsFocus()?.omissionReason; as why) {
         <div class="muted news-meta" title="Why this context did not reach the model's prompt">
           Not in prompt: {{ why }}
         </div>
       }
     }
 
-    @if (page.newsLoading()) {
+    @if (newsLoading()) {
       <div class="pane-empty">Loading…</div>
-    } @else if (!page.articles().length) {
+    } @else if (!articles().length) {
       <div class="pane-empty">No headlines in the last 48h.</div>
     } @else {
       <ul class="news-list">
-        @for (a of page.articles(); track a.id) {
+        @for (a of articles(); track a.id) {
           <li
-            (appLongPress)="page.openArticle(a)"
-            (click)="$event.preventDefault(); page.newsAnalysis.set(a)"
+            (appLongPress)="openArticle(a)"
+            (click)="$event.preventDefault(); articleAnalysis.emit(a)"
             title="Click for the AI analysis · long-press to open the article"
           >
             <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
             <div class="muted news-meta">
               {{ a.sourceName }} ·
-              {{ a.publishedAtUtc | zonedDate: page.timezone() : 'dateTime' }}
-              @for (f of a | articleFlags: page.calendarCurrencies(); track f.currency) {
+              {{ a.publishedAtUtc | zonedDate: timezone() : 'dateTime' }}
+              @for (f of a | articleFlags: calendarCurrencies(); track f.currency) {
                 <span
                   style="margin-left: 4px; white-space: nowrap"
                   [style.color]="
@@ -169,40 +166,40 @@
   </aside>
 }
 
-@if (page.sidePane() === 'calendar') {
+@if (sidePane() === 'calendar') {
   <aside class="side-pane">
     <app-economic-calendar-pane
-      [currencies]="page.calendarCurrencies()"
-      [scope]="page.eventRelevance().summary"
-      [marketKeys]="page.eventRelevance().marketKeys"
-      [timeZone]="page.timezone()"
-      [(allCurrencies)]="page.calendarAll"
-      [(minImpact)]="page.calendarMinImpact"
-      (opened)="page.calendarEvent.set($event)"
+      [currencies]="calendarCurrencies()"
+      [scope]="eventRelevance().summary"
+      [marketKeys]="eventRelevance().marketKeys"
+      [timeZone]="timezone()"
+      [(allCurrencies)]="calendarAll"
+      [(minImpact)]="calendarMinImpact"
+      (opened)="calendarEventOpened.emit($event)"
     />
   </aside>
 }
-@if (page.chartPanels.open(); as panel) {
-  @if (page.sidePane() === 'none') {
+@if (chartPanels.open(); as panel) {
+  @if (sidePane() === 'none') {
     <aside class="side-pane">
       <app-chart-panels-dock
         [panel]="panel"
         [symbol]="session.symbol()"
-        [timeframe]="page.resolutionLabel(session.resolution())"
-        [digits]="page.precision()"
-        [facts]="page.facts()"
-        [timeZone]="page.timezone()"
-        [replayAt]="page.orderFlowReplayClip()"
-        [sourceId]="page.orderFlow().sourceId"
-        [tickReplayBook]="page.tickReplayBook()"
-        (symbolSelected)="page.selectSymbol($event)"
+        [timeframe]="resolutionLabel(session.resolution())"
+        [digits]="precision()"
+        [facts]="facts()"
+        [timeZone]="timezone()"
+        [replayAt]="orderFlowReplayClip()"
+        [sourceId]="orderFlowSourceId()"
+        [tickReplayBook]="tickReplayBook()"
+        (symbolSelected)="symbolSelected.emit($event)"
       />
     </aside>
   }
 }
 
-@if (page.sidePane() === 'datawindow') {
+@if (sidePane() === 'datawindow') {
   <aside class="side-pane">
-    <app-data-window [sections]="page.dataWindowSections()" />
+    <app-data-window [sections]="dataWindowSections()" />
   </aside>
 }
