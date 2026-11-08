@@ -297,8 +297,6 @@ import {
   STUDIES_STRIP_KEYS,
   CHART_CONTEXT_MENUS,
   CONTEXT_MENUS_KEYS,
-  CHART_PANEL_STRIP,
-  PANEL_STRIP_KEYS,
   CHART_OVERLAYS_MENU,
   OVERLAYS_MENU_KEYS,
   CHART_DRAWING_RAIL,
@@ -591,11 +589,6 @@ export { normaliseView };
     {
       provide: CHART_CONTEXT_MENUS,
       useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, CONTEXT_MENUS_KEYS),
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_PANEL_STRIP,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, PANEL_STRIP_KEYS),
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {

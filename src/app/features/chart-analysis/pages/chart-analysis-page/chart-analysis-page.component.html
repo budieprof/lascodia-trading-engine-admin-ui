@@ -841,7 +841,16 @@
   <div class="chart-body" [style.--dock-width.px]="dockWidth()">
     <app-chart-drawing-rail />
 
-    <app-chart-panel-strip />
+    <app-chart-panel-strip
+      [(watchlistOpen)]="watchlistOpen"
+      [(objectTreeOpen)]="objectTreeOpen"
+      [sidePane]="sidePane()"
+      [alertManagerOpen]="alertManagerOpen()"
+      [showFundamentals]="!!venueInstrument()"
+      (sidePaneToggle)="openSidePane($event)"
+      (panelToggle)="openPanel($event)"
+      (alertManagerToggle)="toggleAlertManager()"
+    />
     @if (watchlistOpen()) {
       <aside class="watch-dock">
         <div
