@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { signal } from '@angular/core';
 import type { ChartAnalysisPageComponent } from './chart-analysis-page.component';
-import { LEGEND_KEYS, pageSlice } from './chart-page.token';
+import { STUDIES_STRIP_KEYS, pageSlice } from './chart-page.token';
 
 describe('US02 page slices (children no longer get the whole page)', () => {
   it('exposes only the listed members: signals as they are, methods bound to the page', () => {
@@ -20,8 +20,8 @@ describe('US02 page slices (children no longer get the whole page)', () => {
     expect(Object.keys(slice)).toEqual(['symbol', 'label']);
   });
 
-  it('the legend reads a short, listed set of the page', () => {
-    expect(LEGEND_KEYS.length).toBeLessThan(25);
-    expect(LEGEND_KEYS).toContain('symbolChips');
+  it('a section reads a short, listed set of the page', () => {
+    expect(STUDIES_STRIP_KEYS.length).toBeLessThan(25);
+    expect(STUDIES_STRIP_KEYS).toContain('scriptChips');
   });
 });

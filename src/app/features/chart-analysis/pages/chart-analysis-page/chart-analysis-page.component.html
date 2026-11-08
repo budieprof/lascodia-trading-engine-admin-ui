@@ -873,7 +873,24 @@
         (contextmenu)="openContextMenu($event)"
         (pointerdown)="drawingMenu.set(null)"
       >
-        <app-chart-legend />
+        <app-chart-legend
+          [marketView]="marketView()"
+          [symbolChips]="symbolChips()"
+          [seriesOptions]="seriesOptions()"
+          [legend]="legend()"
+          [legendUp]="legendUp()"
+          [legendChange]="legendChange()"
+          [legendVolume]="legendVolume()"
+          [legendVolumeUnit]="legendVolumeUnit()"
+          [legendTime]="legendTime()"
+          [precision]="precision()"
+          [compareSeries]="compareSeries()"
+          [scriptRows]="legendScriptRows()"
+          (bottomChange)="legendBottom.set($event)"
+          (switchSeries)="switchContinuousSeries()"
+          (adjustmentChange)="setSeriesAdjustment($event)"
+          (scriptAction)="onScriptAction($event)"
+        />
         <!-- US05: the symbol, its market state and (at most every 30 s) its price, for screen readers. -->
         <div class="sr-only" role="status" aria-live="polite" data-testid="chart-live">{{ liveMessage() }}</div>
 

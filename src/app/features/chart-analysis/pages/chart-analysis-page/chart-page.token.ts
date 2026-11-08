@@ -2,12 +2,12 @@ import { InjectionToken, isSignal } from '@angular/core';
 import type { ChartAnalysisPageComponent } from './chart-analysis-page.component';
 
 /**
- * US02: what each section of the chart page's template (drawing rail, panel strip, legend, context menus, side pane,
+ * US02: what each section of the chart page's template (drawing rail, panel strip, context menus, side pane,
  * studies strip, overlays menu) may read of the page — a SLICE, not the page. Each child injects its own token, typed
  * as exactly the members it uses ({@link pageSlice}: getters for those members and nothing else at run time), so a
  * section's dependencies are listed here, checked by the compiler against the page, and a spec provides a small fake.
  * (They used to inject the whole page through one `CHART_PAGE` token.) US02b: the main series (symbol, timeframe,
- * bars) is not in any slice: a section reads it from the page's ChartSessionStore (chart-session-store.ts), which the page provides.
+ * bars) is not in any slice, and the legend takes inputs: a section reads it from the page's ChartSessionStore (chart-session-store.ts), which the page provides.
  */
 type Page = ChartAnalysisPageComponent;
 
@@ -27,30 +27,6 @@ export function pageSlice<K extends keyof Page>(page: Page, keys: readonly K[]):
   }
   return out;
 }
-
-/** The legend's slice of the page. */
-export const LEGEND_KEYS = [
-  'compareSeries',
-  'compareTitleOf',
-  'formatTime',
-  'legend',
-  'legendBottom',
-  'legendChange',
-  'legendScriptRows',
-  'legendUp',
-  'legendVolume',
-  'legendVolumeUnit',
-  'marketView',
-  'onScriptAction',
-  'precision',
-  'resolutionLabel',
-  'seriesOptions',
-  'setSeriesAdjustment',
-  'switchContinuousSeries',
-  'symbolChips',
-] as const;
-export type ChartLegendSlice = Pick<Page, (typeof LEGEND_KEYS)[number]>;
-export const CHART_LEGEND = new InjectionToken<ChartLegendSlice>('CHART_LEGEND');
 
 /** The studies strip's slice of the page. */
 export const STUDIES_STRIP_KEYS = [

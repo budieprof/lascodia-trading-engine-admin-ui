@@ -293,8 +293,6 @@ import {
 import { ReplayController } from '../../replay/replay-controller';
 import {
   pageSlice,
-  CHART_LEGEND,
-  LEGEND_KEYS,
   CHART_STUDIES_STRIP,
   STUDIES_STRIP_KEYS,
   CHART_CONTEXT_MENUS,
@@ -583,11 +581,6 @@ export { normaliseView };
     {
       provide: ChartSessionStore,
       useFactory: (page: ChartAnalysisPageComponent) => page.session,
-      deps: [forwardRef(() => ChartAnalysisPageComponent)],
-    },
-    {
-      provide: CHART_LEGEND,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, LEGEND_KEYS),
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
@@ -4579,6 +4572,11 @@ export class ChartAnalysisPageComponent {
     return l
       ? changeText(l.change ?? null, l.changePct, this.pipSize(), this.precision(), this.facts())
       : null;
+  });
+  /** The legend's bar time: its date label, else its open on the chart's display clock ({@link formatTime}). */
+  readonly legendTime = computed(() => {
+    const l = this.legend();
+    return l ? (l.dateLabel ?? this.formatTime(l.time)) : '';
   });
   readonly legendVolume = computed(() => {
     const v = this.legend()?.volume;
