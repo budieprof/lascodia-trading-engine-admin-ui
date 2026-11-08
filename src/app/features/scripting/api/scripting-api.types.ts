@@ -139,6 +139,32 @@ export interface ScriptStrategyFields {
 export type ScriptStrategyDto = StrategyDto & ScriptStrategyFields;
 
 /**
+ * `GET strategy/{id}/script/live/outputs[?member=SYMBOL]` (§8a, SS-I7): the plots, markers, drawings and tables the
+ * running live session computed on its chart — not a re-run. `source`: `session` (the running session), `snapshot`
+ * (its last bar-close snapshot) or `none` (`note` says why). `bars` are run-shaped bars (`t` in Unix ms); `outputs` is
+ * shaped like a run's `outputs`, null when no bar is covered.
+ *
+ * CONTRACT K2 (strategy program batch 7): `portfolioMembers` is non-null for a portfolio strategy — its member symbols;
+ * ask with `member` for one member's outputs. Without `member` the engine may answer the member list with no outputs.
+ * Older engines send no `portfolioMembers` and ignore `member`.
+ */
+export interface ScriptLiveOutputs {
+  source: 'session' | 'snapshot' | 'none' | string;
+  note?: string | null;
+  symbol: string;
+  timeframe: string;
+  barIndex: number;
+  fromBar: number;
+  firstAvailableBar: number;
+  lastBarForming: boolean;
+  snapshotAtUtc?: string | null;
+  bars: unknown[];
+  outputs?: unknown;
+  retryAfterMs?: number | null;
+  portfolioMembers?: string[] | null;
+}
+
+/**
  * `GET strategy/{id}/script/live`. Sub-objects are emulator state and loosely typed on purpose.
  * The emulator's quantities (`position.size`, `openTrades[].qty`, `pendingOrders[].qty`) are Pine
  * units of the underlying; `position.lots` and `openTrades[].lots` are the broker lots they come

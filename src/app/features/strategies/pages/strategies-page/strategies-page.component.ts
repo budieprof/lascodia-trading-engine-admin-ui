@@ -27,6 +27,8 @@ import {
   ApplyStrategyTemplateRequest,
   StrategyRejectionSummaryDto,
   RiskProfileDto,
+  EquityCurveAccountKind,
+  EquityCurveUnit,
 } from '@core/api/api.types';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { fmtProfitFactor, fractionToPct, isNoLossProfitFactor } from '@shared/utils/metric-format';
@@ -34,6 +36,7 @@ import {
   MONITOR_ROLLING_WINDOW,
   type MonitorTrade,
   equityCurveChart,
+  monitorCurveScope,
   monthlyPnlChart,
   rollingProfitFactorChart,
   rollingWinRateChart,
@@ -714,10 +717,53 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
               />
             </div>
 
+            <div class="monitor-curve-bar" role="group" aria-label="Closed-trade charts">
+              <span class="selector-label">Accounts</span>
+              <div class="seg">
+                @for (k of monitorAccountKinds; track k) {
+                  <button
+                    type="button"
+                    class="seg-btn"
+                    [class.on]="monitorAccountKind() === k"
+                    [attr.aria-pressed]="monitorAccountKind() === k"
+                    (click)="setMonitorAccountKind(k)"
+                  >
+                    {{ k }}
+                  </button>
+                }
+              </div>
+              <span class="selector-label">Unit</span>
+              <div class="seg">
+                @for (u of monitorUnits; track u) {
+                  <button
+                    type="button"
+                    class="seg-btn"
+                    [class.on]="monitorUnit() === u"
+                    [attr.aria-pressed]="monitorUnit() === u"
+                    [title]="
+                      u === 'R'
+                        ? 'One point per trade decision at its mean R (decisions without a stop are left out)'
+                        : 'Realised P&L per closed position, account currency'
+                    "
+                    (click)="setMonitorUnit(u)"
+                  >
+                    {{ u }}
+                  </button>
+                }
+              </div>
+              <span class="curve-scope">{{ monitorCurveScope() }}</span>
+              @if (monitorCurveMismatch(); as m) {
+                <span class="curve-mismatch" role="status">{{ m }}</span>
+              }
+            </div>
             <div class="chart-grid">
               <app-chart-card
                 title="Equity Curve"
-                subtitle="Cumulative realised P&L of closed trades · all accounts, live + paper"
+                [subtitle]="
+                  (monitorCurveUnit() === 'R'
+                    ? 'Cumulative R of closed trades · '
+                    : 'Cumulative realised P&L of closed trades · ') + monitorCurveScope()
+                "
                 [options]="equityCurveOptions() ?? {}"
                 [loading]="monitorTradesLoading()"
                 [emptyMessage]="monitorChartEmpty(equityCurveOptions(), 'needs 2')"
@@ -745,7 +791,11 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
               />
               <app-chart-card
                 title="Monthly P&L"
-                subtitle="Realised P&L per UTC month (account currency)"
+                [subtitle]="
+                  monitorCurveUnit() === 'R'
+                    ? 'Sum of R per UTC month'
+                    : 'Realised P&L per UTC month (account currency)'
+                "
                 [options]="monthlyReturnsOptions() ?? {}"
                 [loading]="monitorTradesLoading()"
                 [emptyMessage]="monitorChartEmpty(monthlyReturnsOptions(), 'needs 1')"
@@ -922,6 +972,18 @@ export class StrategiesPageComponent {
   monitorTrades = signal<MonitorTrade[]>([]);
   monitorTradesLoading = signal(false);
   monitorTradesFailed = signal(false);
+  /** What the monitor ASKS the equity-curve endpoint for (accounts + unit). */
+  monitorAccountKind = signal<EquityCurveAccountKind>('All');
+  monitorUnit = signal<EquityCurveUnit>('Currency');
+  /**
+   * What the engine SAYS it returned. An engine older than the accountKind/unit parameters ignores
+   * them and answers Currency / All — the charts label the answer, never the request.
+   */
+  monitorCurveUnit = signal<EquityCurveUnit>('Currency');
+  monitorCurveAccountKind = signal<EquityCurveAccountKind>('All');
+  monitorCurveTruncated = signal(false);
+  readonly monitorAccountKinds: readonly EquityCurveAccountKind[] = ['All', 'Live', 'Paper'];
+  readonly monitorUnits: readonly EquityCurveUnit[] = ['Currency', 'R'];
 
   // Strategy dropdown options — prefer the broader analytics sample (up to
   // 500 rows) over the per-page list because the user lands on Monitor
@@ -1718,30 +1780,8 @@ export class StrategiesPageComponent {
     this.selectedStrategyId.set(id);
     this.performance.set(null);
     this.healthSeries.set([]);
-    this.monitorTrades.set([]);
-    this.monitorTradesFailed.set(false);
     this.loadingPerformance.set(true);
-    this.monitorTradesLoading.set(true);
-
-    // Closed trades → equity curve, rolling win rate / PF, monthly P&L. Ignore a late answer
-    // for a strategy that is no longer selected.
-    this.strategiesService
-      .getEquityCurve(id)
-      .pipe(
-        finalize(() => {
-          if (this.selectedStrategyId() === id) this.monitorTradesLoading.set(false);
-        }),
-      )
-      .subscribe({
-        next: (res) => {
-          if (this.selectedStrategyId() !== id) return;
-          this.monitorTrades.set(toMonitorTrades(res?.data?.points));
-        },
-        error: () => {
-          if (this.selectedStrategyId() !== id) return;
-          this.monitorTradesFailed.set(true);
-        },
-      });
+    this.loadMonitorTrades(id);
 
     // Fetch perf snapshot. The empty-state branch differentiates "we asked
     // and there's just no snapshot yet" from "still in flight" via the
@@ -2127,6 +2167,85 @@ export class StrategiesPageComponent {
     return map[status] ?? { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' };
   }
 
+  /** Accounts / unit picker on the Monitor charts: re-ask the engine for the selected strategy. */
+  setMonitorAccountKind(kind: EquityCurveAccountKind): void {
+    if (this.monitorAccountKind() === kind) return;
+    this.monitorAccountKind.set(kind);
+    const id = this.selectedStrategyId();
+    if (id) this.loadMonitorTrades(id);
+  }
+
+  setMonitorUnit(unit: EquityCurveUnit): void {
+    if (this.monitorUnit() === unit) return;
+    this.monitorUnit.set(unit);
+    const id = this.selectedStrategyId();
+    if (id) this.loadMonitorTrades(id);
+  }
+
+  /**
+   * Closed trades → equity curve, rolling win rate / PF, monthly P&L. Ignores a late answer for a
+   * strategy (or accounts / unit choice) that is no longer selected.
+   */
+  private loadMonitorTrades(id: number): void {
+    const accountKind = this.monitorAccountKind();
+    const unit = this.monitorUnit();
+    const current = () =>
+      this.selectedStrategyId() === id &&
+      this.monitorAccountKind() === accountKind &&
+      this.monitorUnit() === unit;
+    this.monitorTrades.set([]);
+    this.monitorTradesFailed.set(false);
+    this.monitorTradesLoading.set(true);
+    // Only send what differs from the engine defaults, so the request is byte-identical to the
+    // pre-option one for All / Currency.
+    const body = {
+      ...(accountKind !== 'All' ? { accountKind } : {}),
+      ...(unit !== 'Currency' ? { unit } : {}),
+    };
+    this.strategiesService
+      .getEquityCurve(id, body)
+      .pipe(
+        finalize(() => {
+          if (current()) this.monitorTradesLoading.set(false);
+        }),
+      )
+      .subscribe({
+        next: (res) => {
+          if (!current()) return;
+          this.monitorCurveUnit.set(res?.data?.unit === 'R' ? 'R' : 'Currency');
+          const kind = res?.data?.accountKind;
+          this.monitorCurveAccountKind.set(kind === 'Live' || kind === 'Paper' ? kind : 'All');
+          this.monitorCurveTruncated.set(res?.data?.truncated === true);
+          this.monitorTrades.set(toMonitorTrades(res?.data?.points));
+        },
+        error: () => {
+          if (!current()) return;
+          this.monitorTradesFailed.set(true);
+        },
+      });
+  }
+
+  /**
+   * Shown when the engine answered something other than what was asked (an engine without the
+   * accountKind / unit parameters answers All / Currency).
+   */
+  readonly monitorCurveMismatch = computed(() => {
+    if (this.monitorTradesLoading() || this.monitorTradesFailed()) return null;
+    if (
+      this.monitorCurveUnit() === this.monitorUnit() &&
+      this.monitorCurveAccountKind() === this.monitorAccountKind()
+    )
+      return null;
+    return 'This engine does not support that view yet — showing all accounts in account currency.';
+  });
+  readonly monitorCurveScope = computed(() =>
+    monitorCurveScope(
+      this.monitorCurveUnit(),
+      this.monitorCurveAccountKind(),
+      this.monitorCurveTruncated(),
+    ),
+  );
+
   // ---- Chart Options ----
 
   // Monitor charts — the strategy's REAL closed trades (equity-curve endpoint). Before 2026-11-07
@@ -2136,10 +2255,14 @@ export class StrategiesPageComponent {
   protected readonly fractionToPct = fractionToPct;
   protected readonly fmtProfitFactor = fmtProfitFactor;
   protected readonly isNoLossProfitFactor = isNoLossProfitFactor;
-  readonly equityCurveOptions = computed(() => equityCurveChart(this.monitorTrades()));
+  readonly equityCurveOptions = computed(() =>
+    equityCurveChart(this.monitorTrades(), this.monitorCurveUnit()),
+  );
   readonly winRateOptions = computed(() => rollingWinRateChart(this.monitorTrades()));
   readonly profitFactorOptions = computed(() => rollingProfitFactorChart(this.monitorTrades()));
-  readonly monthlyReturnsOptions = computed(() => monthlyPnlChart(this.monitorTrades()));
+  readonly monthlyReturnsOptions = computed(() =>
+    monthlyPnlChart(this.monitorTrades(), this.monitorCurveUnit()),
+  );
   /** Empty-state text for a monitor chart whose builder returned null. */
   monitorChartEmpty(options: EChartsOption | null, need: string): string | null {
     if (options) return null;

@@ -12,6 +12,11 @@ import { catchError, finalize, map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { StrategiesService } from '@core/services/strategies.service';
+import {
+  fmtProfitFactor,
+  isNoLossProfitFactor,
+  profitFactorTitle,
+} from '@shared/utils/metric-format';
 import { ResponseCode } from '@core/api/api.types';
 import type { StrategyCapacityProfileDto } from '@core/api/api.types';
 
@@ -146,7 +151,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   >
                     {{ t.sharpeAtTier | number: '1.0-2' }}
                   </td>
-                  <td class="num mono">{{ t.profitFactorAtTier | number: '1.0-2' }}</td>
+                  <td class="num mono" [title]="pfTitle(t.profitFactorAtTier)">
+                    {{ pf(t.profitFactorAtTier) }}
+                  </td>
                   <td class="num mono">{{ t.maxDrawdownPctAtTier | number: '1.0-2' }}%</td>
                   <td>
                     @if (t.meetsFloor) {
@@ -276,6 +283,9 @@ export class StrategyCapacityCardComponent {
 
   readonly strategyId = input.required<number>();
 
+  protected readonly pf = (v: number | null | undefined) => fmtProfitFactor(v);
+  protected readonly pfTitle = (v: number | null | undefined) => profitFactorTitle(v);
+
   protected readonly loading = signal(false);
   protected readonly error = signal(false);
   protected readonly profile = signal<StrategyCapacityProfileDto | null>(null);
@@ -390,7 +400,10 @@ export class StrategyCapacityCardComponent {
       value: t.sharpeAtTier,
       itemStyle: { color: t.meetsFloor ? '#34c759' : '#ff3b30' },
     }));
-    const pfs = p.tiers.map((t) => t.profitFactorAtTier);
+    // The no-loss sentinel (9999) is not a ratio — a gap, not a spike that flattens the Sharpe axis.
+    const pfs = p.tiers.map((t) =>
+      isNoLossProfitFactor(t.profitFactorAtTier) ? null : t.profitFactorAtTier,
+    );
     const dds = p.tiers.map((t) => t.maxDrawdownPctAtTier);
     return {
       grid: { left: 56, right: 56, top: 32, bottom: 36 },

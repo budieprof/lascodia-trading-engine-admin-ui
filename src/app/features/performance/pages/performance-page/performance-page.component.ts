@@ -10,6 +10,7 @@ import { createPolledResource } from '@core/polling/polled-resource';
 import { RealtimeService } from '@core/realtime/realtime.service';
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { fmtProfitFactor, isNoLossProfitFactor, profitFactorTitle } from '@shared/utils/metric-format';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
@@ -104,6 +105,7 @@ const DD_CAP = 100;
               label="Avg profit factor"
               [value]="avgProfitFactor()"
               format="number"
+              caption="Strategies with no losing trade (∞) excluded"
             />
             <app-metric-card
               label="Worst drawdown (of peak profit)"
@@ -293,7 +295,7 @@ const DD_CAP = 100;
                       <td class="mono" [title]="s.name ?? ''">#{{ s.strategyId }}</td>
                       <td class="num">{{ int(s.trades) }}</td>
                       <td class="num">{{ pct(s.winRate * 100) }}</td>
-                      <td class="num">{{ num(s.profitFactor) }}</td>
+                      <td class="num" [title]="pfTitle(s.profitFactor)">{{ pf(s.profitFactor) }}</td>
                       <td
                         class="num"
                         [class.profit]="(s.sharpe ?? 0) > 1"
@@ -510,7 +512,7 @@ const DD_CAP = 100;
                         {{ signedPct(row.sharePct) }}
                       </td>
                       <td class="num">{{ num(row.sharpe) }}</td>
-                      <td class="num">{{ num(row.profitFactor) }}</td>
+                      <td class="num" [title]="pfTitle(row.profitFactor)">{{ pf(row.profitFactor) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -831,7 +833,10 @@ export class PerformancePageComponent {
     const v = this.avgOf((x) => x.winRate);
     return v === null ? null : v * 100;
   });
-  readonly avgProfitFactor = computed(() => this.avgOf((x) => x.profitFactor));
+  /** Mean of MEASURED profit factors: a no-loss sentinel (9999) is not a ratio and would swamp the mean. */
+  readonly avgProfitFactor = computed(() =>
+    this.avgOf((x) => (isNoLossProfitFactor(x.profitFactor) ? null : x.profitFactor)),
+  );
   readonly avgSharpe = computed(() => this.avgOf((x) => x.sharpe));
 
   readonly profitableCount = computed(() => this.rows().filter((x) => x.pnl > 0).length);
@@ -1090,7 +1095,7 @@ export class PerformancePageComponent {
       g.count++;
       g.totalPnl += s.pnl;
       totalAbsPnl += Math.abs(s.pnl);
-      if (s.profitFactor !== null) {
+      if (s.profitFactor !== null && !isNoLossProfitFactor(s.profitFactor)) {
         g._pfSum += s.profitFactor;
         g._pfCount++;
       }
@@ -1216,6 +1221,13 @@ export class PerformancePageComponent {
 
   signedPct(v: number): string {
     return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+  }
+
+  pf(v: number | null | undefined): string {
+    return fmtProfitFactor(v);
+  }
+  pfTitle(v: number | null | undefined): string {
+    return profitFactorTitle(v);
   }
 
   num(v: number | null | undefined, digits = 2): string {

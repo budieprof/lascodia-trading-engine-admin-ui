@@ -13,6 +13,7 @@ import {
 import { ScriptLivePanelComponent } from './script-live-panel.component';
 import { ScriptParityPanelComponent } from './script-parity-panel.component';
 import { LiveVsBacktestPanelComponent } from './live-vs-backtest-panel.component';
+import { ScriptLiveOutputsComponent } from './script-live-outputs.component';
 import { StrategyReportComponent } from '../report/strategy-report.component';
 import { normalizeStrategyReport, type ReportTrade } from '../report/strategy-report.model';
 import type { TradeOriginOf } from '../report/report-trades-columns';
@@ -75,6 +76,17 @@ class LiveVsBacktestStubComponent {
   @Input() divergences: unknown[] = [];
   @Input() lifecycleStage: string | null = null;
   @Input() lifecycleStageEnteredAt: string | null = null;
+}
+
+/** §8a live outputs card: opt-in fetch (its spec covers it); here only its wiring is checked. */
+@Component({
+  selector: 'app-script-live-outputs',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class LiveOutputsStubComponent {
+  @Input() strategyId: number | null = null;
 }
 
 /** The report's List-of-trades rows, as the real report would emit them on a click. */
@@ -202,6 +214,7 @@ describe('ScriptLivePanelComponent', () => {
           EATradeChartModalComponent,
           ScriptParityPanelComponent,
           LiveVsBacktestPanelComponent,
+          ScriptLiveOutputsComponent,
         ],
       },
       add: {
@@ -210,6 +223,7 @@ describe('ScriptLivePanelComponent', () => {
           TradeChartModalStubComponent,
           ParityPanelStubComponent,
           LiveVsBacktestStubComponent,
+          LiveOutputsStubComponent,
         ],
       },
     });

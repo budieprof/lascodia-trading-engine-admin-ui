@@ -202,3 +202,75 @@ describe('StrategiesPageComponent (create refusals, clone)', () => {
     expect(cmp.cloneTarget()).toEqual({ id: 5 });
   });
 });
+
+describe('StrategiesPageComponent (Monitor accounts / unit)', () => {
+  let cmp: StrategiesPageComponent;
+  let getEquityCurve: ReturnType<typeof vi.fn>;
+
+  const curve = (data: Record<string, unknown>) =>
+    of({
+      status: true,
+      message: 'OK',
+      responseCode: '00',
+      data: {
+        strategyId: 7,
+        from: null,
+        to: null,
+        pointCount: 2,
+        finalCumulativePnL: 0.5,
+        points: [
+          { closedAt: '2026-11-01T00:00:00Z', realizedPnL: 1.5, cumulativePnL: 1.5 },
+          { closedAt: '2026-11-02T00:00:00Z', realizedPnL: -1, cumulativePnL: 0.5 },
+        ],
+        ...data,
+      },
+    });
+
+  beforeEach(async () => {
+    await resolveJitResources();
+    getEquityCurve = vi.fn().mockReturnValue(curve({}));
+    TestBed.configureTestingModule({
+      imports: [StrategiesPageComponent],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
+        { provide: StrategiesService, useValue: { getEquityCurve } },
+        {
+          provide: RiskProfilesService,
+          useValue: {
+            list: () => of({ status: true, data: { data: [] }, message: '', responseCode: '00' }),
+          },
+        },
+        { provide: NotificationService, useValue: { success: vi.fn(), error: vi.fn() } },
+      ],
+    });
+    cmp = TestBed.createComponent(StrategiesPageComponent).componentInstance;
+    cmp.selectedStrategyId.set(7);
+  });
+
+  it('asks for Paper / R and labels what the engine answered', () => {
+    getEquityCurve.mockReturnValue(curve({ accountKind: 'Paper', unit: 'Currency' }));
+    cmp.setMonitorAccountKind('Paper');
+    expect(getEquityCurve).toHaveBeenLastCalledWith(7, { accountKind: 'Paper' });
+    expect(cmp.monitorCurveAccountKind()).toBe('Paper');
+    expect(cmp.monitorCurveMismatch()).toBeNull();
+    expect(cmp.monitorTrades().length).toBe(2);
+
+    getEquityCurve.mockReturnValue(curve({ accountKind: 'Paper', unit: 'R', truncated: true }));
+    cmp.setMonitorUnit('R');
+    expect(getEquityCurve).toHaveBeenLastCalledWith(7, { accountKind: 'Paper', unit: 'R' });
+    expect(cmp.monitorCurveUnit()).toBe('R');
+    expect(cmp.monitorCurveScope()).toContain('newest 5,000');
+  });
+
+  it('All / Currency sends the pre-option body, and an engine that ignores the options is called out', () => {
+    cmp.setMonitorUnit('R'); // older engine: answer has no unit / accountKind
+    expect(cmp.monitorCurveUnit()).toBe('Currency');
+    expect(cmp.monitorCurveMismatch()).toContain('does not support');
+    cmp.setMonitorUnit('Currency');
+    expect(getEquityCurve).toHaveBeenLastCalledWith(7, {});
+    expect(cmp.monitorCurveMismatch()).toBeNull();
+  });
+});

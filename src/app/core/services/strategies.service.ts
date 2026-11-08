@@ -10,6 +10,7 @@ import {
   StrategyAllocationWeightsDto,
   StrategyCapacityProfileDto,
   StrategyEquityCurveDto,
+  StrategyLifecycleTransitionDto,
   StrategyPerformanceSnapshotDto,
   StrategyRejectionDistributionDto,
   StrategyVariantDto,
@@ -386,6 +387,17 @@ export class StrategiesService {
     body: GetStrategyEquityCurveRequest = {},
   ): Observable<ResponseData<StrategyEquityCurveDto>> {
     return this.api.post(`/strategy/${id}/equity-curve`, body);
+  }
+
+  /**
+   * The strategy's lifecycle stage / status transitions, newest first (CONTRACT K1). 404 on engines without the
+   * endpoint — callers treat that as "no history" and keep their fallback.
+   */
+  getLifecycleHistory(
+    id: number,
+    limit = 100,
+  ): Observable<ResponseData<StrategyLifecycleTransitionDto[]>> {
+    return this.api.get(`/strategy/${id}/lifecycle-history?limit=${limit}`);
   }
 
   /** Captured pre-edit snapshots of a strategy, newest first. */

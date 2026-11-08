@@ -1,6 +1,10 @@
 import type { EChartsOption } from 'echarts';
 
-import type { EquityCurvePointDto } from '@core/api/api.types';
+import type {
+  EquityCurveAccountKind,
+  EquityCurvePointDto,
+  EquityCurveUnit,
+} from '@core/api/api.types';
 
 /**
  * Strategy Monitor charts built from the strategy's REAL closed trades
@@ -9,9 +13,33 @@ import type { EquityCurvePointDto } from '@core/api/api.types';
  * series" sitting under real KPIs. Each builder returns `null` when there is not enough data, and the
  * page shows an empty state instead — never a synthetic line.
  *
- * P&L is realised account-currency P&L summed over every account the strategy traded (live and
- * paper), exactly as the engine's equity-curve query returns it.
+ * By default P&L is realised account-currency P&L summed over every account the strategy traded
+ * (live and paper), exactly as the engine's equity-curve query returns it. The monitor can ask for
+ * `accountKind` Live / Paper and `unit` R (one point per trade decision at its mean R); the
+ * charts label what the engine SAYS it returned (`unit` / `accountKind` on the answer — an older
+ * engine ignores the request fields and answers Currency / All).
  */
+
+/** One line naming what the curve covers: "Live accounts · R per trade decision · newest 5,000". */
+export function monitorCurveScope(
+  unit: EquityCurveUnit,
+  accountKind: EquityCurveAccountKind,
+  truncated = false,
+): string {
+  const accounts =
+    accountKind === 'Live'
+      ? 'live accounts only'
+      : accountKind === 'Paper'
+        ? 'paper only'
+        : 'all accounts, live + paper';
+  const what = unit === 'R' ? 'R per trade decision' : 'account currency';
+  return `${accounts} · ${what}${truncated ? ' · newest 5,000 (older trades not shown)' : ''}`;
+}
+
+/** Y-axis name for a P&L series in `unit`. */
+export function pnlAxisName(unit: EquityCurveUnit): string {
+  return unit === 'R' ? 'R' : 'P&L';
+}
 
 /** Trades in each rolling window for the win-rate and profit-factor charts. */
 export const MONITOR_ROLLING_WINDOW = 20;
@@ -96,16 +124,19 @@ export function monthlyPnl(trades: readonly MonitorTrade[]): { month: string; pn
 
 const GRID = { left: 60, right: 20, top: 20, bottom: 40 };
 
-export function equityCurveChart(trades: readonly MonitorTrade[]): EChartsOption | null {
+export function equityCurveChart(
+  trades: readonly MonitorTrade[],
+  unit: EquityCurveUnit = 'Currency',
+): EChartsOption | null {
   if (trades.length < 2) return null;
   return {
     tooltip: { trigger: 'axis' },
     grid: GRID,
     xAxis: { type: 'time', axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', name: 'P&L', axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: pnlAxisName(unit), axisLabel: { fontSize: 10 } },
     series: [
       {
-        name: 'Cumulative realised P&L',
+        name: unit === 'R' ? 'Cumulative R' : 'Cumulative realised P&L',
         type: 'line',
         data: cumulativePnl(trades),
         showSymbol: trades.length <= 60,
@@ -178,17 +209,20 @@ export function rollingProfitFactorChart(
   } as EChartsOption;
 }
 
-export function monthlyPnlChart(trades: readonly MonitorTrade[]): EChartsOption | null {
+export function monthlyPnlChart(
+  trades: readonly MonitorTrade[],
+  unit: EquityCurveUnit = 'Currency',
+): EChartsOption | null {
   const months = monthlyPnl(trades);
   if (months.length === 0) return null;
   return {
     tooltip: { trigger: 'axis' },
     grid: GRID,
     xAxis: { type: 'category', data: months.map((m) => m.month), axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', name: 'P&L', axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: pnlAxisName(unit), axisLabel: { fontSize: 10 } },
     series: [
       {
-        name: 'Realised P&L',
+        name: unit === 'R' ? 'R' : 'Realised P&L',
         type: 'bar',
         data: months.map((m) => ({
           value: m.pnl,

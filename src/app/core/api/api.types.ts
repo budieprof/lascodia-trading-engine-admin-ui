@@ -1787,12 +1787,46 @@ export interface StrategyEquityCurveDto {
   pointCount: number;
   finalCumulativePnL: number;
   points: EquityCurvePointDto[];
+  /** What the P&L columns are in (engine fu-engine item 5). Absent on older engines = Currency. */
+  unit?: EquityCurveUnit;
+  /** Which accounts the curve covers. Absent on older engines = All. */
+  accountKind?: EquityCurveAccountKind;
+  /** True when older points exist than the first one returned (newest-N window). */
+  truncated?: boolean;
 }
 
-/** Body for `POST /strategy/{id}/equity-curve`. */
+/** `Currency`: realised P&L per closed position; `R`: one point per trade decision at its mean R. */
+export type EquityCurveUnit = 'Currency' | 'R';
+/** `Live` = real positions on real accounts, `Paper` = paper positions / IsPaper accounts. */
+export type EquityCurveAccountKind = 'All' | 'Live' | 'Paper';
+
+/**
+ * One row of `GET strategy/{id}/lifecycle-history?limit=` (CONTRACT K1, strategy program batch 7), newest first: a
+ * change of the strategy's lifecycle stage and/or status, where it came from and the configuration it applied to.
+ * `source` is a worker name, `Operator` or `Backfill` (rows reconstructed from older records). An engine without
+ * the endpoint answers 404 — consumers fall back to milestones.
+ */
+export interface StrategyLifecycleTransitionDto {
+  strategyId: number;
+  fromStage: string | null;
+  toStage: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  reason: string;
+  source: string;
+  actor: string | null;
+  strategyConfigHash: string | null;
+  occurredAtUtc: string;
+}
+
+/** Body for `POST /strategy/{id}/equity-curve`. Every field optional (older engines ignore the new ones). */
 export interface GetStrategyEquityCurveRequest {
   from?: string | null;
   to?: string | null;
+  /** Newest N points, 1..5000 (engine default 5000). */
+  limit?: number | null;
+  unit?: EquityCurveUnit;
+  accountKind?: EquityCurveAccountKind;
 }
 
 /**

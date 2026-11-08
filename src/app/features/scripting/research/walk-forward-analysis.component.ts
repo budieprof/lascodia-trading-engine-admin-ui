@@ -11,6 +11,11 @@ import {
 import { firstValueFrom } from 'rxjs';
 
 import { ThemeService } from '@core/theme/theme.service';
+import {
+  fmtProfitFactor,
+  PF_SENSITIVITY_NO_LOSS,
+  profitFactorTitle,
+} from '@shared/utils/metric-format';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 
 import { SCRIPTING_UI_STYLES } from '../components/scripting-ui.styles';
@@ -98,7 +103,9 @@ const SPACE_MARKER = '__ScriptInputs';
               ><span class="muted small">win rate</span>
             </div>
             <div class="figure">
-              <span class="value">{{ ratio(d.stitched.profitFactor) }}</span
+              <span class="value" [title]="pfTitle(d.stitched.profitFactor)">{{
+                pf(d.stitched.profitFactor)
+              }}</span
               ><span class="muted small">profit factor</span>
             </div>
             <div class="figure">
@@ -512,6 +519,13 @@ export class WalkForwardAnalysisComponent {
   }
   pct0(v: number | null | undefined): string {
     return v === null || v === undefined ? '—' : formatPercent(v * 100, { decimals: 0 });
+  }
+  /** Stitched OOS profit factor: the engine (GetWalkForwardAnalysisQuery) writes 999 for "no losing trades". */
+  pf(v: number | null | undefined): string {
+    return fmtProfitFactor(v, 2, true, PF_SENSITIVITY_NO_LOSS);
+  }
+  pfTitle(v: number | null | undefined): string {
+    return profitFactorTitle(v, PF_SENSITIVITY_NO_LOSS);
   }
   ratio(v: number | null | undefined): string {
     return formatRatio(v ?? null, 2);
