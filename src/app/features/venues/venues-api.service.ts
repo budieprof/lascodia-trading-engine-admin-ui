@@ -22,6 +22,7 @@ import type {
   MarginImportResult,
   MarginRequirement,
   MarginRequirementFields,
+  VenueRoute,
   VenueTicketPreview,
   VenueTicketPreviewRequest,
   VenueTicketResult,
@@ -141,6 +142,23 @@ export class VenuesApiService {
   health(): Observable<ExecutionHealth> {
     return settled(
       this.api.get<ResponseData<ExecutionHealth>>('/execution-console/health', SILENT),
+    );
+  }
+
+  /**
+   * FR01: where an order for `symbol` would actually route for a trading account (or one venue execution account) —
+   * the engine's own answer (`accounts.read`); read-only.
+   */
+  route(
+    symbol: string,
+    tradingAccountId: number | null,
+    executionAccountId: number | null = null,
+  ): Observable<VenueRoute> {
+    return settled(
+      this.api.get<ResponseData<VenueRoute>>(
+        `/execution-console/route${query({ symbol, tradingAccountId, executionAccountId })}`,
+        SILENT,
+      ),
     );
   }
 

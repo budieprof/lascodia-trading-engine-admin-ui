@@ -9,6 +9,11 @@ export interface VenueTicketRequest {
   side: VenueSide;
   orderType: VenueOrderType;
   price: number | null;
+  /**
+   * FR07: the trading account the request is for (the ladder's account): the ticket opens on it, so the ladder's
+   * route badge and the ticket's always describe the same account. Absent / null = the ticket keeps its own choice.
+   */
+  tradingAccountId?: number | null;
   /** Increments on every request so the same click twice still opens the ticket. */
   seq: number;
 }

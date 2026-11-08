@@ -234,6 +234,48 @@ export interface VenueTicketPreview {
   valid: boolean;
   checks: VenueTicketCheck[];
   notes: string[];
+  /** FR01: the route answer for the ticket's account (absent from older engines). */
+  route?: VenueRoute | null;
+}
+
+/** One venue execution account the route answer judged (engine `VenueRouteCandidateDto`). */
+export interface VenueRouteCandidate {
+  executionAccountId: number;
+  name: string;
+  adapterKind: string;
+  venue: string;
+  routable: boolean;
+  reason: string | null;
+}
+
+/**
+ * Where an order would ACTUALLY route (engine `GET execution-console/route`, FR01/FR04): the engine's own answer for a
+ * trading account (or one venue execution account) — never the catalogue's exchange. Also carried by the ticket's dry
+ * run as `route`.
+ */
+export interface VenueRoute {
+  symbol: string;
+  /** `venue` (a venue execution account), `mt5` (the account's MT5 EA) or `none`. */
+  kind: 'venue' | 'mt5' | 'none';
+  routable: boolean;
+  reason: string | null;
+  exchangeTraded: boolean;
+  executionAccountId: number | null;
+  executionAccountName: string | null;
+  adapterKind: string | null;
+  mode: string | null;
+  venue: string | null;
+  venueName: string | null;
+  venueSymbol: string | null;
+  venueTickSize: number | null;
+  venueQuantityStep: number | null;
+  venueMinQuantity: number | null;
+  minNotional: number | null;
+  minNotionalCurrency: string | null;
+  fractionable: boolean | null;
+  /** The routed adapter's time-in-force values (`Gtc`, `Ioc`, `Fok`, `Day`); empty = no adapter. */
+  timeInForce: string[];
+  candidates: VenueRouteCandidate[];
 }
 
 // ── reference/* (console-api) ─────────────────────────────────────────────────────────────────────

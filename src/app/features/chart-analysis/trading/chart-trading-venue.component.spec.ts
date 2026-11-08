@@ -156,15 +156,17 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
     );
   });
 
-  it('UI05: every ticket wears its route — MT5 broker / Venue: CME', () => {
+  it('UI05/FR01: every ticket wears its route — MT5 broker / the engine\'s route, never the catalogue exchange', () => {
     render('EURUSD');
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
     ).toContain('MT5 broker');
     render('ESZ6');
-    expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
-    ).toContain('Venue: CME');
+    const badge =
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent ?? '';
+    // No venue account is chosen in this fixture: the engine has not been asked, so no venue is named.
+    expect(badge).not.toContain('CME');
+    expect(badge).toMatch(/route/i);
   });
 
   it('UI05: while the instrument resolves, neither ticket is offered', () => {
@@ -191,5 +193,16 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
       'input[aria-label="Limit price"]',
     ) as HTMLInputElement;
     expect(Number(price.value)).toBe(6001);
+  });
+
+  it('FR07: the ladder\'s trading account rides the bus into the venue ticket', () => {
+    fixture.componentRef.setInput('symbol', 'ESZ6');
+    fixture.detectChanges();
+    TestBed.inject(VenueTicketBus).open({ symbol: 'ESZ6', side: 'Buy', orderType: 'Limit', price: 6000, tradingAccountId: 42 });
+    fixture.detectChanges();
+    fixture.detectChanges();
+    const ticket = fixture.debugElement.query((d) => d.componentInstance instanceof VenueOrderTicketComponent)
+      ?.componentInstance as VenueOrderTicketComponent;
+    expect(ticket.prefill()?.tradingAccountId).toBe(42);
   });
 });

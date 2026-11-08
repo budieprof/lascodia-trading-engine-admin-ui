@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 
 import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -21,6 +21,11 @@ import { LiveDepthService } from '../orderflow/live-depth.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import { LadderArmingService } from './ladder-arming.service';
 import { LadderPanelComponent } from './ladder-panel.component';
+import { VenueTicketBus } from '../trading/venue-ticket-bus.service';
+import { setInstrumentCatalogue } from '@core/instruments/instrument-math';
+import type { InstrumentDto } from '@core/instruments/instrument.types';
+import { VenuesApiService } from '@features/venues/venues-api.service';
+import type { VenueRoute } from '@features/venues/venues.types';
 
 declareSignalIo(LadderPanelComponent, { inputs: ['symbol', 'digits', 'facts'] });
 
@@ -125,6 +130,10 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     }
   };
 
+  // FR01: the engine's route answer for the ladder's account (exchange-traded symbols only).
+  let routeAnswer: VenueRoute | null = null;
+  const venuesApi = { route: vi.fn(() => (routeAnswer ? of(routeAnswer) : new Subject<VenueRoute>())) };
+
   function setup(permissions: string[] = [Permission.AccessTrader, Permission.OrdersCancel, Permission.OrdersModify]): void {
     TestBed.configureTestingModule({
       imports: [LadderPanelComponent],
@@ -150,6 +159,7 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
           },
         },
         { provide: NotificationService, useValue: notify },
+        { provide: VenuesApiService, useValue: venuesApi },
       ],
     });
     fixture = TestBed.createComponent(LadderPanelComponent);
@@ -440,5 +450,84 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     setup();
     await settle();
     expect(byId('ladder-denied')?.textContent).toContain('broker-dom');
+  });
+
+  // ── FR01: the ladder's badge is the engine's route for its account ──
+
+  describe('FR01 route badge', () => {
+    const BTC: InstrumentDto = {
+      symbol: 'BTC-USD', assetClass: 'Crypto', exchange: 'BINANCE', description: null, quoteCurrency: 'USD',
+      tickSize: 0.01, tickValue: 0.01, multiplier: 1, quantityUnit: 'Coins', quantityStep: 0.00001, minQuantity: 0.00001,
+      maxQuantity: 0, priceDecimals: 2, displayDistance: 'Bps', tradingCalendarCode: 'crypto-24x7', status: 'Active',
+      crypto: { kind: 'Spot', baseAsset: 'BTC', quoteAsset: 'USD', settleAsset: 'USD', isInverse: false, fundingIntervalHours: null },
+    } as InstrumentDto;
+    const routed = (p: Partial<VenueRoute> = {}): VenueRoute => ({
+      symbol: 'BTC-USD', kind: 'venue', routable: true, reason: null, exchangeTraded: true, executionAccountId: 5,
+      executionAccountName: 'Coinbase main', adapterKind: 'coinbase', mode: 'Live', venue: 'coinbase', venueName: 'Coinbase',
+      venueSymbol: 'BTC-USD', venueTickSize: 0.01, venueQuantityStep: 1e-8, venueMinQuantity: 1e-8, minNotional: 1,
+      minNotionalCurrency: 'USD', fractionable: null, timeInForce: ['Gtc', 'Ioc'], candidates: [], ...p,
+    });
+    const perms = [Permission.AccessTrader, Permission.AccountsRead];
+
+    beforeEach(() => {
+      setInstrumentCatalogue([BTC]);
+      venuesApi.route.mockClear();
+    });
+    afterEach(() => setInstrumentCatalogue([]));
+
+    async function open(): Promise<void> {
+      setup(perms);
+      fixture.componentRef.setInput('symbol', 'BTC-USD');
+      fixture.componentRef.setInput('digits', 2);
+      await settle();
+    }
+
+    it('MT5 symbols keep "MT5 broker" and never ask', async () => {
+      routeAnswer = routed();
+      setup(perms);
+      await settle();
+      expect(byId('ladder-route')?.textContent).toContain('MT5 broker');
+      expect(venuesApi.route).not.toHaveBeenCalled();
+    });
+
+    it('resolving while the engine is asked; never the catalogue exchange', async () => {
+      routeAnswer = null;
+      await open();
+      expect(venuesApi.route).toHaveBeenCalledWith('BTC-USD', 17);
+      expect(byId('ladder-route')?.textContent?.trim()).toBe('Route: resolving…');
+      expect(byId('ladder-route')?.textContent).not.toContain('BINANCE');
+      expect(byId('ladder-venue')?.textContent).not.toContain('BINANCE');
+    });
+
+    it('a routed venue: where the order goes for the ladder account (venue + venue symbol)', async () => {
+      routeAnswer = routed();
+      await open();
+      expect(byId('ladder-route')?.textContent?.trim()).toBe('Routes to Coinbase · BTC-USD — venue account Coinbase main');
+    });
+
+    it('no route: says so with the engine\'s reason', async () => {
+      routeAnswer = routed({ kind: 'none', routable: false, reason: 'This trading account has no venue execution account.' });
+      await open();
+      expect(byId('ladder-route')?.textContent?.trim()).toBe(
+        'No route for this account (This trading account has no venue execution account.)',
+      );
+    });
+
+    it('FR07: a venue click hands the ladder\'s account to the ticket, so both badges describe one account', async () => {
+      routeAnswer = routed();
+      await open();
+      await fixture.componentInstance.market('Buy');
+      const req = TestBed.inject(VenueTicketBus).request();
+      expect(req).toMatchObject({ symbol: 'BTC-USD', side: 'Buy', orderType: 'Market', tradingAccountId: 17 });
+    });
+
+    it('without accounts.read the route is unknown, not guessed', async () => {
+      routeAnswer = routed();
+      setup([Permission.AccessTrader]);
+      fixture.componentRef.setInput('symbol', 'BTC-USD');
+      await settle();
+      expect(venuesApi.route).not.toHaveBeenCalled();
+      expect(byId('ladder-route')?.textContent).toContain('Route unknown');
+    });
   });
 });

@@ -230,3 +230,18 @@ describe('margin CSV import', () => {
     expect(marginImportFromError(null)).toBeNull();
   });
 });
+
+describe('FR06: a crypto account is suggested the venue its markets are mapped under', () => {
+  it('derivatives kinds get their own venue, spot kinds the spot venue', async () => {
+    const { venueSuggestions } = await import('./venues.logic');
+    expect(venueSuggestions('binance-usdm')).toEqual(['binance-usdm']);
+    expect(venueSuggestions('bybit-linear')).toEqual(['bybit-linear']);
+    expect(venueSuggestions('okx-swap')).toEqual(['okx-swap']);
+    expect(venueSuggestions('kraken-futures')).toEqual(['kraken-futures']);
+    expect(venueSuggestions('binance')).toEqual(['binance']);
+    expect(venueSuggestions('bybit-spot')).toEqual(['bybit']);
+    expect(venueSuggestions('coinbase')).toEqual(['coinbase']);
+    expect(venueSuggestions('oanda')).toEqual(['oanda']);
+    expect(venueSuggestions('cqg')).toEqual([]);
+  });
+});
