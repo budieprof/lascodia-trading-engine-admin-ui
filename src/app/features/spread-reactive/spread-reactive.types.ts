@@ -19,7 +19,10 @@ export interface SpreadReactiveConfig {
   revertRatio: number;
   /** Number of consecutive calm samples required before the worker reverts an active bump. */
   consecutiveCalmSamplesToRevert: number;
-  /** Hard cap on the bump distance, expressed in pips (converted to price units via CurrencyPair.PipSize). */
+  /**
+   * LEGACY — no longer limits bump size (the spread-multiple and stop-distance caps do). Still stored, and still the
+   * key the risk-governance catalogue watches.
+   */
   maxBumpDistancePips: number;
   /** Telemetry freshness floor.  Older-than-this → pair is "stale", bumps freeze in place. */
   telemetryFreshnessSeconds: number;
@@ -48,6 +51,25 @@ export interface SpreadReactiveConfig {
    * sensible starting point on live broker accounts.
    */
   padFloorMultiplier: number;
+  /** Bump ceiling as a multiple of the symbol's reference spread (its floor). Never below the cushion. Range [1, 100]. */
+  maxBumpSpreadMultiple: number;
+  /** Per-position bump cap as a fraction of |entry − SL| (0.5 = at most 50% wider). 0 disables the cap; max 10. */
+  maxBumpSlDistanceFraction: number;
+  /** Smallest reactive bump worth sending, as a fraction of |entry − SL| (0.05 = 5%). 0 sends every bump; max 0.5. */
+  minBumpSlDistanceFraction: number;
+  /** Size of the scheduled pre-emptive bump, as a multiple of the symbol's quiet spread. Range [1, 200]. */
+  preEmptiveSpreadMultiple: number;
+  /** Percentile of the rolling window the floor recalibrates toward (both directions). Range [1, 99]. */
+  floorTargetPercentile: number;
+  /** Relative gap below which the floor is left alone (0.15 = 15%). Range [0.01, 1]. */
+  floorRecalibrationTolerance: number;
+  /** Cap on one upward floor step, as a fraction of the current floor. Range [0.05, 5]. */
+  floorMaxUpwardStepFraction: number;
+  /**
+   * READ-ONLY, from the engine: the revert ratio the worker actually uses. Lower than `revertRatio` when that leaves
+   * no gap below `spreadMultiplier` (then the midpoint), so a spread on the trigger cannot flap. Absent on older engines.
+   */
+  effectiveRevertRatio?: number | null;
 }
 
 /** Coarse classification of the current spread state for an account+symbol. */
@@ -130,7 +152,7 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   cushionMultiplier: 3.0,
   revertRatio: 1.5,
   consecutiveCalmSamplesToRevert: 10,
-  maxBumpDistancePips: 30,
+  maxBumpDistancePips: 12,
   telemetryFreshnessSeconds: 120,
   loopIntervalSeconds: 10,
   floorAutoCaptureEnabled: true,
@@ -141,4 +163,11 @@ export const DEFAULT_SPREAD_REACTIVE_CONFIG: SpreadReactiveConfig = {
   preEmptiveProtectionHours: 4,
   padEnabled: true,
   padFloorMultiplier: 1.0,
+  maxBumpSpreadMultiple: 10,
+  maxBumpSlDistanceFraction: 0.5,
+  minBumpSlDistanceFraction: 0.05,
+  preEmptiveSpreadMultiple: 20,
+  floorTargetPercentile: 25,
+  floorRecalibrationTolerance: 0.15,
+  floorMaxUpwardStepFraction: 0.5,
 };

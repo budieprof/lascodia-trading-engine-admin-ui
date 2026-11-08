@@ -456,7 +456,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                 />
                 <small class="muted">
                   Condition flips to Elevated when
-                  <em>current ≥ baseline × {{ cfg.spreadMultiplier | number: '1.1-2' }}</em
+                  <em>current ≥ floor × {{ cfg.spreadMultiplier | number: '1.1-2' }}</em
                   >.
                 </small>
               </label>
@@ -465,7 +465,9 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 
           <section class="card">
             <h2>Action</h2>
-            <p class="muted small">How far the SL is widened, and the hard cap.</p>
+            <p class="muted small">
+              How far the SL is widened, the caps, and when a bump is too small to send.
+            </p>
             <div class="grid-2">
               <label class="field">
                 <span>Cushion multiplier</span>
@@ -483,7 +485,56 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                 </small>
               </label>
               <label class="field">
-                <span>Max bump distance (pips)</span>
+                <span>Max bump (× floor spread)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.5"
+                  [value]="cfg.maxBumpSpreadMultiple"
+                  (input)="patch({ maxBumpSpreadMultiple: toFloat($any($event.target).value, 1) })"
+                />
+                <small class="muted">
+                  Ceiling on a bump: the symbol's floor × this. Scale-free, so it works for EURUSD
+                  and XAUUSD alike. Never below the cushion multiplier.
+                </small>
+              </label>
+              <label class="field">
+                <span>Max bump (% of stop distance)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="5"
+                  [value]="pct(cfg.maxBumpSlDistanceFraction)"
+                  (input)="
+                    patch({ maxBumpSlDistanceFraction: fromPct($any($event.target).value, 0) })
+                  "
+                />
+                <small class="muted">
+                  Per position: a bump may widen the stop by at most this share of its distance from
+                  entry, so risk stays near what was sized. 0 = no cap.
+                </small>
+              </label>
+              <label class="field">
+                <span>Min bump (% of stop distance)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  step="1"
+                  [value]="pct(cfg.minBumpSlDistanceFraction)"
+                  (input)="
+                    patch({ minBumpSlDistanceFraction: fromPct($any($event.target).value, 0) })
+                  "
+                />
+                <small class="muted">
+                  A bump smaller than this share of the stop distance is not sent — it would not
+                  change whether the stop survives, only add broker modifies. 0 = send every bump.
+                </small>
+              </label>
+              <label class="field">
+                <span>Max bump distance (pips) — legacy</span>
                 <input
                   type="number"
                   min="0"
@@ -492,7 +543,8 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                   (input)="patch({ maxBumpDistancePips: toFloat($any($event.target).value, 0) })"
                 />
                 <small class="muted">
-                  Hard floor — bump is clamped to this many pips × the symbol's PipSize.
+                  No longer limits bumps — the two caps above do. Kept for the risk-change approval
+                  rules, which still watch this key.
                 </small>
               </label>
             </div>
@@ -513,9 +565,17 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                 />
                 <small class="muted">
                   A sample counts as "calm" when
-                  <em>current ≤ baseline × {{ cfg.revertRatio | number: '1.1-2' }}</em
+                  <em>current ≤ floor × {{ effectiveRevertRatio() | number: '1.1-2' }}</em
                   >.
                 </small>
+                @if (effectiveRevertRatio() !== cfg.revertRatio) {
+                  <small class="banner warn small">
+                    {{ cfg.revertRatio | number: '1.1-2' }} is not below the spread multiplier ({{
+                      cfg.spreadMultiplier | number: '1.1-2'
+                    }}), which would leave no gap between "spike" and "calm" and make stops flap.
+                    The engine uses {{ effectiveRevertRatio() | number: '1.1-2' }} instead.
+                  </small>
+                }
               </label>
               <label class="field">
                 <span>Consecutive calm samples to revert</span>
@@ -573,9 +633,9 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
             <h2>Pre-emptive widening</h2>
             <p class="muted small">
               Schedules a daily SL widening on every open position BEFORE expected spread-widening
-              windows (e.g. nightly NY close, Sunday-night Monday-open gap). Bumps widen by the same
-              MaxBumpDistancePips cap a reactive bump would use, then revert normally once spreads
-              normalise after the protection window closes.
+              windows (e.g. nightly NY close, Sunday-night Monday-open gap). Each stop widens by the
+              symbol's quiet spread × the multiple below (still capped by the % of stop distance),
+              then reverts normally once spreads normalise after the protection window closes.
             </p>
             <div class="grid-2">
               <label class="field">
@@ -623,6 +683,23 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                 <small class="muted">
                   How long bumps are immune from the normal hysteresis revert. Normal revert takes
                   over after this window closes.
+                </small>
+              </label>
+              <label class="field">
+                <span>Bump size (× quiet spread)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  step="1"
+                  [value]="cfg.preEmptiveSpreadMultiple"
+                  (input)="
+                    patch({ preEmptiveSpreadMultiple: toFloat($any($event.target).value, 1) })
+                  "
+                />
+                <small class="muted">
+                  How far a scheduled bump widens the stop, as a multiple of the symbol's floor
+                  spread.
                 </small>
               </label>
               <div class="field">
@@ -743,6 +820,55 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
                   >How long a lower candidate must hold before being promoted to the active
                   floor.</small
                 >
+              </label>
+              <label class="field">
+                <span>Target percentile</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="99"
+                  step="1"
+                  [value]="cfg.floorTargetPercentile"
+                  (input)="patch({ floorTargetPercentile: toInt($any($event.target).value, 25) })"
+                />
+                <small class="muted">
+                  The floor follows this percentile of recent spreads, up or down. Low (25) keeps it
+                  below typical, so real widening still registers.
+                </small>
+              </label>
+              <label class="field">
+                <span>Recalibration tolerance (%)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  [value]="pct(cfg.floorRecalibrationTolerance)"
+                  (input)="
+                    patch({ floorRecalibrationTolerance: fromPct($any($event.target).value, 0.01) })
+                  "
+                />
+                <small class="muted">
+                  Differences smaller than this share of the floor are ignored, so the floor does
+                  not churn on noise.
+                </small>
+              </label>
+              <label class="field">
+                <span>Max upward step (%)</span>
+                <input
+                  type="number"
+                  min="5"
+                  max="500"
+                  step="5"
+                  [value]="pct(cfg.floorMaxUpwardStepFraction)"
+                  (input)="
+                    patch({ floorMaxUpwardStepFraction: fromPct($any($event.target).value, 0.05) })
+                  "
+                />
+                <small class="muted">
+                  One promotion can raise the floor by at most this share, so a long spike cannot
+                  drag the floor up and quietly switch protection off.
+                </small>
               </label>
             </div>
           </section>
@@ -1002,6 +1128,29 @@ export class SpreadReactivePageComponent {
         this.config.set(draft ? { ...draft, enabled: res.enabled } : { ...res });
         this.saved.set(true);
       });
+  }
+
+  /**
+   * The revert ratio the worker will use for the draft settings — the engine's
+   * SpreadReactiveConfigKeys.NormaliseRevertRatio: it must sit below the spread multiplier, otherwise the
+   * midpoint between the floor and the trigger is used.
+   */
+  protected readonly effectiveRevertRatio = computed(() => {
+    const c = this.config();
+    if (!c) return 1;
+    const mult = Math.max(1, c.spreadMultiplier);
+    const revert = Math.max(1, c.revertRatio);
+    return revert < mult ? revert : 1 + (mult - 1) / 2;
+  });
+
+  /** A 0–1 fraction shown as a percent (rounded to 2 dp so 0.15 shows 15, not 15.000000000000002). */
+  protected pct(fraction: number | null | undefined): number {
+    return Math.round((fraction ?? 0) * 10000) / 100;
+  }
+  /** A percent typed in the form, back to the 0–1 fraction the engine stores. */
+  protected fromPct(raw: string, fallback: number): number {
+    const v = Number.parseFloat(raw);
+    return Number.isFinite(v) ? v / 100 : fallback;
   }
 
   protected patch(p: Partial<SpreadReactiveConfig>): void {

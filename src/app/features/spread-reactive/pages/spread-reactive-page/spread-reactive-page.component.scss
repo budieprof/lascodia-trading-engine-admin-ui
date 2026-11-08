@@ -248,6 +248,11 @@
   background: color-mix(in srgb, var(--profit) 14%, transparent);
   color: var(--profit);
 }
+.banner.warn {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--text-primary);
+  line-height: 1.4;
+}
 .status-head {
   display: flex;
   align-items: center;
