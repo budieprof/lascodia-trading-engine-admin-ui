@@ -5,7 +5,6 @@ import {
   inject,
   signal,
   viewChild,
-  ElementRef,
   DestroyRef,
   OnInit,
 } from '@angular/core';
@@ -63,6 +62,14 @@ import {
 } from '@shared/components/form-field/form-field.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { MlTrainingDiagnosticsComponent } from './ml-training-diagnostics.component';
+import {
+  OUTCOME_META,
+  classifyFailure,
+  dailyActivity,
+  failureReasons,
+  symbolOutcomes,
+  type RunOutcome,
+} from './training-lab.logic';
 import { MlAbTestDetailComponent } from './ml-ab-test-detail.component';
 import { MlArchLeaderboardComponent } from './ml-arch-leaderboard.component';
 
@@ -173,7 +180,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
   ],
   // Registry-tab chrome (KPI tiles, boards, pills) lives in the .scss; the
   // inline block below holds everything else, each under the style budget.
-  styleUrl: './ml-models-page.component.scss',
+  styleUrls: ['./ml-models-page.component.scss', './ml-training-lab.component.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -791,10 +798,16 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         <!-- ========== TRAINING LAB TAB ========== -->
         @if (activeTab() === 'training') {
           <div class="tab-content">
-            <div class="section-header">
-              <h3 class="section-title">Training Runs</h3>
+            <div class="section-header tl-header">
+              <div>
+                <h3 class="section-title">Training runs</h3>
+                <p class="tl-sub">
+                  Every model retrain — automatic drift retrains and manual runs. Click any run for
+                  its diagnostics.
+                </p>
+              </div>
               <button class="btn btn-primary" (click)="openTrainingModal()">
-                + Trigger Training
+                + Trigger training
               </button>
             </div>
 
@@ -805,60 +818,40 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
               <div class="ml-kpi">
                 <span class="ml-kpi-label">{{ trainingWindowLabel() }}</span>
                 <span class="ml-kpi-value">{{ trainingStats().total | number }}</span>
+                <span class="kpi-hint">{{ trainingsTotal() | number }} runs on record</span>
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Completed</span>
-                <span class="ml-kpi-value" [class.good]="trainingStats().completed > 0">
-                  {{ trainingStats().completed | number }}
-                </span>
+              <div class="ml-kpi" [class.tone-info]="trainingStats().inFlight > 0">
+                <span class="ml-kpi-label">In flight</span>
+                <span class="ml-kpi-value">{{ trainingStats().inFlight | number }}</span>
+                <span class="kpi-hint">{{
+                  trainingStats().inFlight > 0
+                    ? 'queued or running now'
+                    : 'nothing queued or running'
+                }}</span>
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Failed</span>
-                <span class="ml-kpi-value" [class.bad]="trainingStats().failed > 0">
-                  {{ trainingStats().failed | number }}
-                </span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Cancelled</span>
-                <span class="ml-kpi-value muted-val">{{ trainingStats().cancelled | number }}</span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">In flight (queued + running)</span>
-                <span class="ml-kpi-value" [class.info]="trainingStats().inFlight > 0">
-                  {{ trainingStats().inFlight | number }}
-                </span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Success rate (of finished)</span>
-                <span
-                  class="ml-kpi-value"
-                  [class.good]="
-                    trainingStats().successRate !== null && trainingStats().successRate! >= 50
-                  "
-                  [class.bad]="
-                    trainingStats().successRate !== null && trainingStats().successRate! < 50
-                  "
-                >
+              <div
+                class="ml-kpi"
+                [class.tone-good]="
+                  trainingStats().successRate !== null && trainingStats().successRate! >= 50
+                "
+                [class.tone-bad]="
+                  trainingStats().successRate !== null && trainingStats().successRate! < 50
+                "
+              >
+                <span class="ml-kpi-label">Success rate</span>
+                <span class="ml-kpi-value">
                   {{
                     trainingStats().successRate !== null
                       ? trainingStats().successRate!.toFixed(1) + '%'
                       : '—'
                   }}
                 </span>
-              </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Avg accuracy</span>
-                <span class="ml-kpi-value">
-                  {{
-                    trainingStats().avgAccuracy !== null
-                      ? trainingStats().avgAccuracy!.toFixed(1) + '%'
-                      : '—'
-                  }}
+                <span class="kpi-hint">
+                  {{ trainingStats().completed | number }} of
+                  {{ trainingStats().completed + trainingStats().failed | number }} finished runs
+                  passed
                 </span>
               </div>
-              <!-- Median, not mean: StartedAt is the queue time, so three runs
-                   that sat queued for ~3 months before completing made the mean
-                   "65h 0m" while the typical completed run takes ~2 minutes. -->
               <div
                 class="ml-kpi"
                 title="Median wall time of completed runs, queue time included (started → completed)"
@@ -871,143 +864,373 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                       : '—'
                   }}
                 </span>
+                <span class="kpi-hint">completed runs, queue time included</span>
               </div>
             </div>
 
-            <!-- 3-col chart row -->
-            <div class="ml-charts">
+            <!-- Outcome mix + daily activity -->
+            <div class="tl-row tl-row-a">
+              <section class="mix-panel">
+                <header>
+                  <h3>Outcomes</h3>
+                  <p>What happened to each run in the window</p>
+                </header>
+                @if (trainingOutcomeMix().total > 0) {
+                  <div class="mix-body tl-mix-body">
+                    <div class="mix-headline">
+                      <span class="mix-big">{{ trainingOutcomeMix().total | number }}</span>
+                      <span class="muted">runs</span>
+                    </div>
+                    <div class="mix-stack" role="img" aria-label="Training run outcome mix">
+                      @for (s of trainingOutcomeMix().rows; track s.key) {
+                        @if (s.count > 0) {
+                          <span
+                            [style.flex]="s.count"
+                            [style.background]="s.color"
+                            [title]="s.label + ': ' + s.count"
+                          ></span>
+                        }
+                      }
+                    </div>
+                    <ul class="mix-rows">
+                      @for (s of trainingOutcomeMix().rows; track s.key) {
+                        <li [class.zero]="s.count === 0">
+                          <span class="dot" [style.background]="s.color"></span>
+                          <span>{{ s.label }}</span>
+                          <span class="mix-track"
+                            ><i
+                              [style.width.%]="(s.count / trainingOutcomeMix().total) * 100"
+                              [style.background]="s.color"
+                            ></i
+                          ></span>
+                          <span class="mix-count">{{ s.count | number }}</span>
+                          <span class="mix-pct">{{
+                            share(s.count, trainingOutcomeMix().total)
+                          }}</span>
+                        </li>
+                      }
+                    </ul>
+                    <p class="tl-note">
+                      Cancelled runs were superseded or stopped before producing a result; they are
+                      left out of the success rate.
+                    </p>
+                  </div>
+                } @else {
+                  <p class="muted mix-empty">Loading training analytics…</p>
+                }
+              </section>
               <app-chart-card
-                title="Status distribution"
-                subtitle="Share of runs by status in the window"
-                [options]="trainingStatusDonutOptions()"
-                height="240px"
-              />
-              <app-chart-card
-                title="Runs by symbol"
-                subtitle="Top 12 symbols by training-run count"
-                [options]="trainingBySymbolOptions()"
-                height="240px"
-              />
-              <app-chart-card
-                title="Activity (last 14 days)"
-                subtitle="Daily training-run starts"
+                title="Activity — last 14 days"
+                subtitle="Runs started per day (UTC), coloured by outcome"
                 [options]="trainingActivityOptions()"
-                height="240px"
+                height="268px"
               />
             </div>
 
-            <!-- 2-col: trigger types + recent runs -->
-            <div class="ml-board-row">
+            <!-- Why runs fail · by symbol · by trigger -->
+            <div class="tl-row tl-row-b">
               <section class="ml-board">
                 <header class="ml-board-head">
-                  <h3>By trigger type</h3>
+                  <h3>Why runs fail</h3>
                   <span class="muted"
-                    >Who fires these runs — manual ops vs automated drift / scheduled</span
+                    >{{ trainingStats().failed | number }} failed runs, by cause</span
                   >
                 </header>
-                @if (perTriggerBreakdown().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Trigger</th>
-                        <th class="num">Runs</th>
-                        <th class="num">Completed</th>
-                        <th class="num">Failed</th>
-                        <th class="num">Success %</th>
-                        <th class="num">Avg accuracy</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of perTriggerBreakdown(); track row.trigger) {
-                        <tr>
-                          <td class="mono">{{ row.trigger }}</td>
-                          <td class="num mono">{{ row.runs | number }}</td>
-                          <td class="num mono">{{ row.completed | number }}</td>
-                          <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
-                          <td
-                            class="num mono"
-                            [class.profit]="row.successPct !== null && row.successPct >= 50"
-                            [class.loss]="row.successPct !== null && row.successPct < 50"
-                          >
-                            {{ row.successPct !== null ? row.successPct.toFixed(1) + '%' : '—' }}
-                          </td>
-                          <td class="num mono">
-                            {{ row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '—' }}
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+                @if (trainingFailureReasons().length > 0) {
+                  <ul class="tl-reasons">
+                    @for (f of trainingFailureReasons(); track f.title) {
+                      <li>
+                        <button
+                          type="button"
+                          class="tl-reason"
+                          (click)="openTrainingRunById(f.latestRunId)"
+                          title="Open the most recent run that failed this way"
+                        >
+                          <span class="tl-reason-top">
+                            <span class="tl-reason-title">{{ f.title }}</span>
+                            <span class="tl-reason-count"
+                              >{{ f.count | number }}
+                              <span class="muted">· {{ f.share.toFixed(0) }}%</span></span
+                            >
+                          </span>
+                          <span class="tl-bar"><i [style.width.%]="f.share"></i></span>
+                          @if (f.hint) {
+                            <span class="tl-reason-hint">{{ f.hint }}</span>
+                          }
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                } @else {
+                  <p class="board-empty">No failed runs in the window.</p>
                 }
               </section>
 
               <section class="ml-board">
                 <header class="ml-board-head">
-                  <h3>Recent runs</h3>
-                  <span class="muted">Last 8 starts — newest first</span>
+                  <h3>By symbol</h3>
+                  <span class="muted">Click a symbol to filter the run list</span>
                 </header>
-                @if (recentTrainingRuns().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>TF</th>
-                        <th>Status</th>
-                        <th class="num">Accuracy</th>
-                        <th>Started</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (r of recentTrainingRuns(); track r.id) {
-                        <tr (click)="onTrainingRunSelect(r)">
-                          <td class="mono">{{ r.symbol }}</td>
-                          <td class="mono">{{ r.timeframe }}</td>
-                          <td>
-                            <span class="ml-pill" [attr.data-status]="r.status">{{
-                              r.status
-                            }}</span>
-                          </td>
-                          <td class="num mono">
-                            {{
-                              r.directionAccuracy !== null
-                                ? (r.directionAccuracy * 100).toFixed(1) + '%'
-                                : '—'
-                            }}
-                          </td>
-                          <td class="mono">{{ r.startedAt | date: 'MMM d, HH:mm' }}</td>
+                @if (trainingSymbolRows().length > 0) {
+                  <div class="board-scroll">
+                    <table class="ml-board-table reg-table">
+                      <thead>
+                        <tr>
+                          <th>Symbol</th>
+                          <th class="num">Runs</th>
+                          <th>Outcomes</th>
+                          <th class="num">Success</th>
+                          <th class="num">Last run</th>
                         </tr>
-                      }
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        @for (s of trainingSymbolRows(); track s.symbol) {
+                          <tr
+                            tabindex="0"
+                            (click)="filterTrainingBySymbol(s.symbol)"
+                            (keydown.enter)="filterTrainingBySymbol(s.symbol)"
+                            [class.current-row]="trainingFilterSymbol() === s.symbol"
+                          >
+                            <td>
+                              <span class="sym">{{ s.symbol }}</span>
+                            </td>
+                            <td class="num strong">{{ s.runs | number }}</td>
+                            <td>
+                              <span
+                                class="tl-mini-stack"
+                                [title]="
+                                  s.completed +
+                                  ' completed · ' +
+                                  s.failed +
+                                  ' failed · ' +
+                                  s.cancelled +
+                                  ' cancelled' +
+                                  (s.inFlight ? ' · ' + s.inFlight + ' in flight' : '')
+                                "
+                              >
+                                @if (s.completed) {
+                                  <i class="c" [style.flex]="s.completed"></i>
+                                }
+                                @if (s.failed) {
+                                  <i class="f" [style.flex]="s.failed"></i>
+                                }
+                                @if (s.cancelled) {
+                                  <i class="x" [style.flex]="s.cancelled"></i>
+                                }
+                                @if (s.inFlight) {
+                                  <i class="r" [style.flex]="s.inFlight"></i>
+                                }
+                              </span>
+                            </td>
+                            <td
+                              class="num"
+                              [class.profit]="s.successPct !== null && s.successPct >= 50"
+                              [class.loss]="s.successPct !== null && s.successPct < 50"
+                              [class.zero]="s.successPct === null"
+                            >
+                              {{ s.successPct !== null ? s.successPct.toFixed(0) + '%' : '—' }}
+                            </td>
+                            <td class="num muted-cell">
+                              {{ s.lastStartedAt ? (s.lastStartedAt | date: 'MMM d') : '—' }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                  @if (trainingSymbolRowsAll().length > trainingSymbolRows().length) {
+                    <button
+                      type="button"
+                      class="tl-more"
+                      (click)="showAllTrainingSymbols.set(true)"
+                    >
+                      Show all {{ trainingSymbolRowsAll().length }} symbols
+                    </button>
+                  }
+                } @else {
+                  <p class="board-empty">Loading training analytics…</p>
+                }
+              </section>
+
+              <section class="ml-board">
+                <header class="ml-board-head">
+                  <h3>By trigger</h3>
+                  <span class="muted">What started the runs</span>
+                </header>
+                @if (perTriggerBreakdown().length > 0) {
+                  <div class="board-scroll">
+                    <table class="ml-board-table reg-table">
+                      <thead>
+                        <tr>
+                          <th>Trigger</th>
+                          <th class="num">Runs</th>
+                          <th class="num">Failed</th>
+                          <th class="num">Success</th>
+                          <th class="num" title="Average direction accuracy">Avg acc.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of perTriggerBreakdown(); track row.trigger) {
+                          <tr class="static">
+                            <td [title]="triggerMeta(row.trigger).help">
+                              <span
+                                class="ml-pill"
+                                [style.background]="triggerMeta(row.trigger).bg"
+                                [style.color]="triggerMeta(row.trigger).color"
+                                >{{ triggerMeta(row.trigger).label }}</span
+                              >
+                            </td>
+                            <td class="num strong">{{ row.runs | number }}</td>
+                            <td
+                              class="num"
+                              [class.loss]="row.failed > 0"
+                              [class.zero]="row.failed === 0"
+                            >
+                              {{ row.failed | number }}
+                            </td>
+                            <td
+                              class="num"
+                              [class.profit]="row.successPct !== null && row.successPct >= 50"
+                              [class.loss]="row.successPct !== null && row.successPct < 50"
+                              [class.zero]="row.successPct === null"
+                            >
+                              {{ row.successPct !== null ? row.successPct.toFixed(0) + '%' : '—' }}
+                            </td>
+                            <td class="num" [class.zero]="row.avgAccuracy === null">
+                              {{
+                                row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '—'
+                              }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <p class="board-empty">Loading training analytics…</p>
                 }
               </section>
             </div>
 
-            <!-- All training runs — paged grid in its own card -->
+            <!-- All training runs — server-paged, with the engine's own filters -->
             <section class="ml-board">
               <header class="ml-board-head">
-                <h3>All training runs</h3>
-                <span class="muted">Server-paged — click any row for diagnostics</span>
+                <h3>All runs</h3>
+                <span class="muted">Newest first — click a row for diagnostics</span>
               </header>
+              <div class="filter-bar tl-filters">
+                <div class="tl-chips" role="group" aria-label="Filter by status">
+                  @for (c of trainingStatusChips; track c.value) {
+                    <button
+                      type="button"
+                      class="tl-chip"
+                      [class.on]="trainingFilterStatus() === c.value"
+                      [attr.aria-pressed]="trainingFilterStatus() === c.value"
+                      (click)="setTrainingFilter('status', c.value)"
+                    >
+                      @if (c.color) {
+                        <span class="dot" [style.background]="c.color"></span>
+                      }
+                      {{ c.label }}
+                    </button>
+                  }
+                </div>
+                <label class="fb-field">
+                  <span class="fb-label">Symbol</span>
+                  <select
+                    class="filter-select"
+                    [ngModel]="trainingFilterSymbol()"
+                    (ngModelChange)="setTrainingFilter('symbol', $event)"
+                  >
+                    <option value="">All symbols</option>
+                    @for (s of trainingSymbolRowsAll(); track s.symbol) {
+                      <option [value]="s.symbol">{{ s.symbol }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="fb-field">
+                  <span class="fb-label">Timeframe</span>
+                  <select
+                    class="filter-select"
+                    [ngModel]="trainingFilterTimeframe()"
+                    (ngModelChange)="setTrainingFilter('timeframe', $event)"
+                  >
+                    <option value="">All</option>
+                    @for (tf of trainingTimeframes; track tf) {
+                      <option [value]="tf">{{ tf }}</option>
+                    }
+                  </select>
+                </label>
+                @if (
+                  trainingFilterStatus() || trainingFilterSymbol() || trainingFilterTimeframe()
+                ) {
+                  <button class="btn btn-ghost fb-clear" (click)="clearTrainingFilters()">
+                    Clear filters
+                  </button>
+                }
+              </div>
               <app-data-table
                 #trainingTable
                 [columnDefs]="trainingColumns"
                 [fetchData]="fetchTrainingRuns"
+                [searchable]="false"
+                emptyTitle="No training runs"
+                emptyDescription="Nothing matches these filters."
                 (rowClick)="onTrainingRunSelect($event)"
               />
             </section>
 
+            <!-- Run detail — slide-over drawer, so the list stays where it was -->
             @if (selectedTrainingRun(); as run) {
-              <div #runDetail class="run-detail mt-6">
-                <header class="run-head">
-                  <h3>Run #{{ run.id }} — {{ run.symbol }} / {{ run.timeframe }}</h3>
-                  <div class="run-head-actions">
-                    <span class="pill" [attr.data-status]="run.status">{{ run.status }}</span>
-                    @if (isPolling()) {
-                      <span class="live-pill" title="Auto-refreshing every 5s">
-                        <span class="live-dot"></span> Live
-                      </span>
-                    }
+              <div class="overlay tl-overlay" role="presentation" (click)="onTrainingRunDeselect()">
+                <aside
+                  class="tl-drawer"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="tl-drawer-title"
+                  appModalA11y
+                  (dismiss)="onTrainingRunDeselect()"
+                  (click)="$event.stopPropagation()"
+                  (keydown)="$event.stopPropagation()"
+                >
+                  <header class="tl-drawer-head">
+                    <div class="tl-drawer-title">
+                      <span class="tl-kicker">Training run #{{ run.id }}</span>
+                      <h2 id="tl-drawer-title">
+                        {{ run.symbol ?? '—' }} <span class="tl-tf">{{ run.timeframe }}</span>
+                      </h2>
+                      <div class="tl-pills">
+                        <span class="ml-pill with-dot" [attr.data-status]="run.status">{{
+                          run.status
+                        }}</span>
+                        <span
+                          class="ml-pill"
+                          [style.background]="triggerMeta(run.triggerType).bg"
+                          [style.color]="triggerMeta(run.triggerType).color"
+                          [title]="triggerMeta(run.triggerType).help"
+                          >{{ triggerMeta(run.triggerType).label }}</span
+                        >
+                        @if (run.learnerArchitecture) {
+                          <span class="ml-pill">{{ run.learnerArchitecture }}</span>
+                        }
+                        @if (isPolling()) {
+                          <span class="live-pill" title="Auto-refreshing every 5s">
+                            <span class="live-dot"></span> Live
+                          </span>
+                        }
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="tl-close"
+                      (click)="onTrainingRunDeselect()"
+                      aria-label="Close"
+                    >
+                      ×
+                    </button>
+                  </header>
+
+                  <div class="tl-actions">
                     <button
                       type="button"
                       class="btn btn-secondary btn-xs"
@@ -1027,116 +1250,113 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                         {{ cancellingRun() ? 'Cancelling…' : 'Cancel run' }}
                       </button>
                     }
-                    <button
-                      type="button"
-                      class="btn btn-link btn-xs"
-                      (click)="onTrainingRunDeselect()"
-                      title="Close detail panel"
-                    >
-                      Close
-                    </button>
                   </div>
-                </header>
 
-                @if (isInFlight()) {
-                  <section class="run-progress" aria-live="polite">
-                    <div class="run-progress-stats">
-                      <div class="run-progress-stat">
-                        <span class="run-progress-label">{{ phaseLabel() }}</span>
-                        <span class="run-progress-value">{{ formatDuration(elapsedMs()) }}</span>
-                      </div>
-                      @if (queueWaitMs() !== null) {
+                  @if (isInFlight()) {
+                    <section class="run-progress" aria-live="polite">
+                      <div class="run-progress-stats">
                         <div class="run-progress-stat">
-                          <span class="run-progress-label">Queue wait</span>
+                          <span class="run-progress-label">{{ phaseLabel() }}</span>
+                          <span class="run-progress-value">{{ formatDuration(elapsedMs()) }}</span>
+                        </div>
+                        @if (queueWaitMs() !== null) {
+                          <div class="run-progress-stat">
+                            <span class="run-progress-label">Queue wait</span>
+                            <span class="run-progress-value">{{
+                              formatDuration(queueWaitMs() ?? 0)
+                            }}</span>
+                          </div>
+                        }
+                        <div class="run-progress-stat">
+                          <span class="run-progress-label">Attempt</span>
                           <span class="run-progress-value">{{
-                            formatDuration(queueWaitMs() ?? 0)
+                            diagnostics()?.attemptCount ?? 1
                           }}</span>
                         </div>
-                      }
-                      <div class="run-progress-stat">
-                        <span class="run-progress-label">Attempt</span>
-                        <span class="run-progress-value">{{
-                          diagnostics()?.attemptCount ?? 1
-                        }}</span>
+                        @if (run.totalSamples > 0) {
+                          <div class="run-progress-stat">
+                            <span class="run-progress-label">Samples</span>
+                            <span class="run-progress-value">{{ run.totalSamples | number }}</span>
+                          </div>
+                        }
                       </div>
-                      @if (run.totalSamples > 0) {
-                        <div class="run-progress-stat">
-                          <span class="run-progress-label">Samples</span>
-                          <span class="run-progress-value">{{ run.totalSamples | number }}</span>
-                        </div>
-                      }
-                    </div>
-                    <div
-                      class="progress-indeterminate"
-                      [attr.aria-label]="phaseLabel() + ' — ' + formatDuration(elapsedMs())"
-                    >
-                      <div class="progress-indeterminate-bar"></div>
-                    </div>
-                  </section>
-                }
+                      <div
+                        class="progress-indeterminate"
+                        [attr.aria-label]="phaseLabel() + ' — ' + formatDuration(elapsedMs())"
+                      >
+                        <div class="progress-indeterminate-bar"></div>
+                      </div>
+                    </section>
+                  }
 
-                <dl class="run-info">
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{{ run.status }}</dd>
-                  </div>
-                  <div>
-                    <dt>Trigger</dt>
-                    <dd>{{ run.triggerType }}</dd>
-                  </div>
-                  <div>
-                    <dt>Samples</dt>
-                    <dd>{{ run.totalSamples | number }}</dd>
-                  </div>
-                  <div>
-                    <dt>Direction Acc</dt>
-                    <dd>
-                      {{
-                        run.directionAccuracy !== null
-                          ? (run.directionAccuracy * 100).toFixed(2) + '%'
-                          : '—'
-                      }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Magnitude RMSE</dt>
-                    <dd>{{ run.magnitudeRMSE !== null ? run.magnitudeRMSE.toFixed(4) : '—' }}</dd>
-                  </div>
-                  <div>
-                    <dt>From</dt>
-                    <dd>{{ run.fromDate | date: 'MMM d, yyyy' }}</dd>
-                  </div>
-                  <div>
-                    <dt>To</dt>
-                    <dd>{{ run.toDate | date: 'MMM d, yyyy' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Started</dt>
-                    <dd>{{ run.startedAt | date: 'MMM d, HH:mm' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Completed</dt>
-                    <dd>{{ run.completedAt ? (run.completedAt | date: 'MMM d, HH:mm') : '—' }}</dd>
-                  </div>
-                  @if (run.mlModelId) {
+                  @if (run.errorMessage) {
+                    @let cause = classifyFailure(run.errorMessage);
+                    <section class="tl-error" role="note">
+                      <span class="tl-error-title">{{ cause.title }}</span>
+                      @if (cause.hint) {
+                        <span class="tl-error-hint">{{ cause.hint }}</span>
+                      }
+                      <code class="tl-error-raw">{{ run.errorMessage }}</code>
+                    </section>
+                  }
+
+                  <dl class="tl-facts">
                     <div>
-                      <dt>Produced Model</dt>
-                      <dd>#{{ run.mlModelId }}</dd>
+                      <dt>Direction accuracy</dt>
+                      <dd class="tl-big">
+                        {{
+                          run.directionAccuracy !== null
+                            ? (run.directionAccuracy * 100).toFixed(2) + '%'
+                            : '—'
+                        }}
+                      </dd>
                     </div>
-                  }
-                </dl>
-                @if (run.errorMessage) {
-                  <div class="run-error"><strong>Error:</strong> {{ run.errorMessage }}</div>
-                }
-                @if (loadingDiagnostics()) {
-                  <p class="muted small mt-4">Loading diagnostics…</p>
-                } @else if (diagnostics()) {
-                  @if (diagnostics(); as d) {
+                    <div>
+                      <dt>Magnitude RMSE</dt>
+                      <dd class="tl-big">
+                        {{ run.magnitudeRMSE !== null ? run.magnitudeRMSE.toFixed(4) : '—' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Samples</dt>
+                      <dd>{{ run.totalSamples | number }}</dd>
+                    </div>
+                    <div>
+                      <dt>Produced model</dt>
+                      <dd>{{ run.mlModelId ? '#' + run.mlModelId : 'None' }}</dd>
+                    </div>
+                    <div class="full">
+                      <dt>Training data window</dt>
+                      <dd>
+                        {{ run.fromDate | date: 'MMM d, yyyy' }} →
+                        {{ run.toDate | date: 'MMM d, yyyy' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Started</dt>
+                      <dd>{{ run.startedAt | date: 'MMM d, yyyy HH:mm' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Finished</dt>
+                      <dd>
+                        @if (run.completedAt) {
+                          {{ run.completedAt | date: 'MMM d, HH:mm' }}
+                          <span class="muted">({{ formatDuration(runDurationMs(run)) }})</span>
+                        } @else {
+                          —
+                        }
+                      </dd>
+                    </div>
+                  </dl>
+
+                  @if (loadingDiagnostics() && !diagnostics()) {
+                    <p class="muted small">Loading diagnostics…</p>
+                  } @else if (diagnostics(); as d) {
                     <app-ml-training-diagnostics [diagnostics]="d" />
+                  } @else if (!loadingDiagnostics()) {
+                    <p class="muted small">Diagnostics could not be loaded for this run.</p>
                   }
-                } @else {
-                  <p class="muted small mt-4">Diagnostics could not be loaded for this run.</p>
-                }
+                </aside>
               </div>
             }
 
@@ -2547,19 +2767,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         background: rgba(0, 113, 227, 0.1);
       }
 
-      /* Training run detail */
-      .run-detail,
-      .run-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .run-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
+      /* Training run detail: the drawer lives in ml-training-lab.component.scss */
       .pill {
         padding: 2px 10px;
         border-radius: var(--radius-full);
@@ -2579,11 +2787,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
       .pill[data-status='Failed'] {
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
-      }
-      .run-head-actions {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
       }
       .live-pill {
         display: inline-flex;
@@ -2743,35 +2946,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
       }
       .coverage-stats dd.danger {
         color: #d70015;
-      }
-      .run-info {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
-        gap: var(--space-4);
-        margin: 0;
-      }
-      .run-info dt {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-        margin: 0;
-      }
-      .run-info dd {
-        margin: 2px 0 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .run-error {
-        background: rgba(255, 59, 48, 0.06);
-        border: 1px solid rgba(255, 59, 48, 0.2);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
       }
       .engine-gap {
         background: var(--bg-primary);
@@ -3310,124 +3484,69 @@ export class MlModelsPageComponent implements OnInit {
     };
   });
 
-  trainingStatusDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
-    for (const r of this.trainingsSample()) {
-      const k = String(r.status);
-      counts[k] = (counts[k] ?? 0) + 1;
-    }
-    if (Object.keys(counts).length === 0) return {};
-    const colors: Record<string, string> = {
-      Completed: '#34C759',
-      Failed: '#FF3B30',
-      Queued: '#5AC8FA',
-      Pending: '#5AC8FA',
-      Running: '#0071E3',
-      Cancelled: '#8E8E93',
+  /** Outcome mix for the Outcomes panel, in a fixed order. */
+  readonly trainingOutcomeMix = computed(() => {
+    const st = this.trainingStats();
+    const counts: Record<RunOutcome, number> = {
+      Completed: st.completed,
+      Failed: st.failed,
+      Cancelled: st.cancelled,
+      InFlight: st.inFlight,
     };
+    const order: RunOutcome[] = ['Completed', 'Failed', 'Cancelled', 'InFlight'];
     return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: {
-        bottom: 0,
-        itemWidth: 10,
-        itemGap: 8,
-        textStyle: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: Object.entries(counts).map(([name, value]) => ({
-            name,
-            value,
-            itemStyle: { color: colors[name] ?? '#8E8E93' },
-          })),
-        },
-      ],
+      total: order.reduce((sum, k) => sum + counts[k], 0),
+      rows: order.map((key) => ({ key, ...OUTCOME_META[key], count: counts[key] })),
     };
   });
 
-  trainingBySymbolOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
-    for (const r of this.trainingsSample()) {
-      const k = r.symbol ?? 'unknown';
-      counts[k] = (counts[k] ?? 0) + 1;
-    }
-    const entries = Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12);
-    if (entries.length === 0) return {};
-    return {
-      grid: { top: 10, right: 30, bottom: 30, left: 90 },
-      xAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: entries.map(([k]) => k).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: entries
-            .map(([, v]) => ({
-              value: v,
-              itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
-            }))
-            .reverse(),
-          barWidth: 14,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
+  readonly trainingFailureReasons = computed(() => failureReasons(this.trainingsSample()));
+
+  readonly showAllTrainingSymbols = signal(false);
+  readonly trainingSymbolRowsAll = computed(() => symbolOutcomes(this.trainingsSample()));
+  readonly trainingSymbolRows = computed(() => {
+    const all = this.trainingSymbolRowsAll();
+    return this.showAllTrainingSymbols() ? all : all.slice(0, 8);
   });
 
   trainingActivityOptions = computed<EChartsOption>(() => {
-    const buckets: Record<string, number> = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      buckets[d.toISOString().slice(0, 10)] = 0;
-    }
-    for (const r of this.trainingsSample()) {
-      if (!r.startedAt) continue;
-      const day = r.startedAt.slice(0, 10);
-      if (day in buckets) buckets[day]++;
-    }
-    const dates = Object.keys(buckets);
-    const counts = Object.values(buckets);
-    if (counts.every((c) => c === 0)) return {};
+    const a = dailyActivity(this.trainingsSample(), new Date(), 14);
+    if (a.total === 0) return {};
+    const order: RunOutcome[] = ['Completed', 'Failed', 'Cancelled', 'InFlight'];
     return {
-      tooltip: { trigger: 'axis' },
-      grid: { top: 10, right: 20, bottom: 30, left: 40 },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: {
+        top: 0,
+        right: 0,
+        itemWidth: 10,
+        itemHeight: 10,
+        textStyle: { fontSize: 11, color: '#6E6E73' },
+      },
+      grid: { top: 32, right: 8, bottom: 24, left: 32 },
       xAxis: {
         type: 'category',
-        data: dates.map((d) => d.slice(5)),
-        axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
+        data: a.days.map((d) => {
+          const [, m, day] = d.split('-');
+          return `${+day} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1]}`;
+        }),
+        axisTick: { show: false },
+        axisLabel: { fontSize: 10, color: '#6E6E73', interval: 1 },
       },
       yAxis: {
         type: 'value',
+        minInterval: 1,
         axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        splitLine: { lineStyle: { color: 'rgba(128,128,128,0.12)' } },
       },
-      series: [
-        {
-          type: 'bar',
-          data: counts.map((c) => ({
-            value: c,
-            itemStyle: { color: '#5AC8FA', borderRadius: [4, 4, 0, 0] },
-          })),
-          barWidth: '60%',
-        },
-      ],
+      series: order.map((k) => ({
+        name: OUTCOME_META[k].label,
+        type: 'bar' as const,
+        stack: 'runs',
+        barWidth: '58%',
+        emphasis: { focus: 'series' as const },
+        itemStyle: { color: OUTCOME_META[k].color },
+        data: a.series[k],
+      })),
     };
   });
 
@@ -3477,13 +3596,6 @@ export class MlModelsPageComponent implements OnInit {
       }))
       .sort((a, b) => b.runs - a.runs);
   });
-
-  recentTrainingRuns = computed(() =>
-    [...this.trainingsSample()]
-      .filter((r) => !!r.startedAt)
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
-      .slice(0, 8),
-  );
 
   // ─────────────────────────────────────────────────────────────────────
   // Signal-A/B analytics — same probe-and-fetch pattern.
@@ -4110,6 +4222,9 @@ export class MlModelsPageComponent implements OnInit {
               currentPage: 1,
               itemCountPerPage: Math.min(total, ANALYTICS_SAMPLE_CAP),
               filter: null,
+              // The window is "the latest N" — say so to the server, never rely on its default order.
+              sortBy: 'startedAt',
+              sortDirection: 'desc',
             })
             .subscribe({
               next: (full) => this.trainingsSample.set(full?.data?.data ?? []),
@@ -4335,7 +4450,6 @@ export class MlModelsPageComponent implements OnInit {
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private nowTickTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_INTERVAL_MS = 5_000;
-  private readonly runDetailRef = viewChild<ElementRef<HTMLDivElement>>('runDetail');
   private readonly destroyRef = inject(DestroyRef);
 
   // ── Live progress computeds ─────────────────────────────────────────────
@@ -4623,32 +4737,35 @@ export class MlModelsPageComponent implements OnInit {
       width: 150,
       minWidth: 150,
       cellRenderer: (params: { value: string | null }) => {
-        const value = params.value ?? '—';
-        // Operator-initiated runs get the prominent purple highlight to make them
-        // easy to spot against the wall of automated retrains.
-        const colorMap: Record<string, { bg: string; color: string; label?: string }> = {
-          Manual: { bg: 'rgba(175,82,222,0.14)', color: 'var(--tone-purple)' },
-          Scheduled: { bg: 'rgba(0,113,227,0.10)', color: 'var(--tone-blue)' },
-          AutoDegrading: {
-            bg: 'rgba(255,149,0,0.12)',
-            color: 'var(--tone-amber)',
-            label: 'Auto · Degrading',
-          },
-          AutoDeferred: {
-            bg: 'rgba(52,199,89,0.10)',
-            color: 'var(--tone-green)',
-            label: 'Auto · Deferred',
-          },
-          SymbolicCatalogueShift: {
-            bg: 'rgba(0,113,227,0.10)',
-            color: 'var(--tone-blue)',
-            label: 'Symbolic shift',
-          },
-        };
-        const s = colorMap[value] ?? { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' };
-        const label = s.label ?? value;
-        return `<span title="${value}" style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${label}</span>`;
+        // Operator-initiated runs get the purple highlight to stand out against
+        // the wall of automated retrains.
+        const m = this.triggerMeta(params.value);
+        const esc = (v: string) => v.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+        return `<span title="${esc(m.help)}" style="color:${m.color};background:${m.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${esc(m.label)}</span>`;
       },
+    },
+    {
+      headerName: 'Outcome',
+      colId: 'outcome',
+      flex: 2,
+      minWidth: 200,
+      sortable: false,
+      // Failed → the cause in plain words (full engine message on hover);
+      // Completed → the model it produced.
+      valueGetter: (p: { data?: MLTrainingRunDto }) => {
+        const r = p.data;
+        if (!r) return '';
+        if (r.status === 'Failed') return classifyFailure(r.errorMessage).title;
+        if (r.status === 'Completed') return r.mlModelId ? `Model #${r.mlModelId}` : 'Completed';
+        if (r.status === 'Cancelled')
+          return r.errorMessage ? classifyFailure(r.errorMessage).title : '—';
+        return r.status === 'Running' ? 'Training…' : 'Waiting for a worker';
+      },
+      tooltipValueGetter: (p: { data?: MLTrainingRunDto }) => p.data?.errorMessage ?? null,
+      cellStyle: (p: { data?: MLTrainingRunDto }) =>
+        p.data?.status === 'Failed'
+          ? { color: 'var(--tone-red)', fontSize: '12px' }
+          : { color: 'var(--text-secondary)', fontSize: '12px' },
     },
     {
       headerName: 'Architecture',
@@ -5221,8 +5338,18 @@ export class MlModelsPageComponent implements OnInit {
   };
 
   fetchTrainingRuns = (params: PagerRequest) => {
+    const filter: Record<string, unknown> = {};
+    if (this.trainingFilterStatus()) filter['status'] = this.trainingFilterStatus();
+    if (this.trainingFilterSymbol()) filter['symbol'] = this.trainingFilterSymbol();
+    if (this.trainingFilterTimeframe()) filter['timeframe'] = this.trainingFilterTimeframe();
     return this.mlModelsService
-      .listTrainingRuns(params)
+      .listTrainingRuns({
+        ...params,
+        filter: Object.keys(filter).length > 0 ? filter : null,
+        // Newest first unless the operator sorted a column.
+        sortBy: params.sortBy ?? 'startedAt',
+        sortDirection: params.sortBy ? params.sortDirection : 'desc',
+      })
       .pipe(map((res) => res.data as PagedData<MLTrainingRunDto>));
   };
 
@@ -5386,9 +5513,105 @@ export class MlModelsPageComponent implements OnInit {
     this.selectedTrainingRun.set(run);
     this.loadDiagnostics(run.id);
     this.maybeStartPolling(run.status);
-    // Defer scroll until template renders the detail panel
-    queueMicrotask(() =>
-      this.runDetailRef()?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+  }
+
+  /** Opens a run from the analytics sample (the "Why runs fail" examples). */
+  openTrainingRunById(id: number): void {
+    const run = this.trainingsSample().find((r) => r.id === id);
+    if (run) this.onTrainingRunSelect(run);
+  }
+
+  runDurationMs(run: MLTrainingRunDto): number {
+    if (!run.completedAt || !run.startedAt) return 0;
+    return Math.max(0, Date.parse(run.completedAt) - Date.parse(run.startedAt));
+  }
+
+  protected readonly classifyFailure = classifyFailure;
+
+  // ── Training-run list filters (engine MLTrainingRunQueryFilter: Symbol / Timeframe / Status) ──
+  readonly trainingFilterStatus = signal('');
+  readonly trainingFilterSymbol = signal('');
+  readonly trainingFilterTimeframe = signal('');
+  readonly trainingTimeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
+  readonly trainingStatusChips: Array<{ value: string; label: string; color?: string }> = [
+    { value: '', label: 'All' },
+    { value: 'Failed', label: 'Failed', color: OUTCOME_META.Failed.color },
+    { value: 'Completed', label: 'Completed', color: OUTCOME_META.Completed.color },
+    { value: 'Cancelled', label: 'Cancelled', color: OUTCOME_META.Cancelled.color },
+    { value: 'Running', label: 'Running', color: OUTCOME_META.InFlight.color },
+    { value: 'Queued', label: 'Queued', color: '#5AC8FA' },
+  ];
+
+  setTrainingFilter(kind: 'status' | 'symbol' | 'timeframe', value: string): void {
+    const target =
+      kind === 'status'
+        ? this.trainingFilterStatus
+        : kind === 'symbol'
+          ? this.trainingFilterSymbol
+          : this.trainingFilterTimeframe;
+    target.set(value ?? '');
+    this.trainingTable()?.loadData();
+  }
+
+  /** Clicking a symbol on the board filters the list (clicking it again clears it). */
+  filterTrainingBySymbol(symbol: string): void {
+    this.setTrainingFilter('symbol', this.trainingFilterSymbol() === symbol ? '' : symbol);
+  }
+
+  clearTrainingFilters(): void {
+    this.trainingFilterStatus.set('');
+    this.trainingFilterSymbol.set('');
+    this.trainingFilterTimeframe.set('');
+    this.trainingTable()?.loadData();
+  }
+
+  /** Display name, colours and meaning of a run's trigger type. */
+  triggerMeta(trigger: string | null | undefined): {
+    label: string;
+    bg: string;
+    color: string;
+    help: string;
+  } {
+    const t = String(trigger ?? '');
+    const known: Record<string, { label: string; bg: string; color: string; help: string }> = {
+      Manual: {
+        label: 'Manual',
+        bg: 'rgba(175,82,222,0.14)',
+        color: 'var(--tone-purple)',
+        help: 'Started by an operator',
+      },
+      Scheduled: {
+        label: 'Scheduled',
+        bg: 'rgba(0,113,227,0.10)',
+        color: 'var(--tone-blue)',
+        help: 'Started on the retraining schedule',
+      },
+      AutoDegrading: {
+        label: 'Auto · Degrading',
+        bg: 'rgba(255,149,0,0.12)',
+        color: 'var(--tone-amber)',
+        help: "Started automatically because the live model's accuracy was slipping",
+      },
+      AutoDeferred: {
+        label: 'Auto · Deferred',
+        bg: 'rgba(52,199,89,0.10)',
+        color: 'var(--tone-green)',
+        help: 'An automatic retrain that had been postponed and ran later',
+      },
+      SymbolicCatalogueShift: {
+        label: 'Symbolic shift',
+        bg: 'rgba(0,113,227,0.10)',
+        color: 'var(--tone-blue)',
+        help: 'Started because the symbolic feature catalogue changed',
+      },
+    };
+    return (
+      known[t] ?? {
+        label: t || '—',
+        bg: 'rgba(142,142,147,0.12)',
+        color: 'var(--tone-grey)',
+        help: t,
+      }
     );
   }
 
