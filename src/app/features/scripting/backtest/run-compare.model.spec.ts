@@ -139,6 +139,16 @@ describe('two-run comparison', () => {
     expect(rows.find((r) => r.label === 'Trades')!.better).toBeNull();
   });
 
+  it('prints the 9999 no-loss profit factor as ∞, ranks it best, and gives no numeric delta against it', () => {
+    const noLoss = summarizeRun(run({ id: 3, profitFactor: 9999 }));
+    const pf = compareMetrics(a, noLoss).find((r) => r.label === 'Profit factor')!;
+    expect(pf).toMatchObject({ a: '1.30', b: '∞', delta: '—', better: 'b' });
+    const measured = compareMetrics(a, summarizeRun(run({ id: 4, profitFactor: 1.8 }))).find(
+      (r) => r.label === 'Profit factor',
+    )!;
+    expect(measured).toMatchObject({ a: '1.30', b: '1.80', delta: '+0.50', better: 'b' });
+  });
+
   it('shows how each was made: a different script and the inputs that differ', () => {
     const s = compareSetup(a, b);
     expect(s.sameScript).toBe(false);

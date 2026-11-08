@@ -6,6 +6,7 @@ import { AuthService } from '@core/auth/auth.service';
 import { ThemeService } from '@core/theme/theme.service';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { fmtProfitFactor, profitFactorTitle } from '@shared/utils/metric-format';
 
 import { SCRIPTING_UI_STYLES } from '../../components/scripting-ui.styles';
 import { reportPalette } from '../../report/report-charts';
@@ -152,7 +153,7 @@ export const MEMBER_TRADES_SHOWN = 500;
               <div><span class="label">Max drawdown</span><span class="value">{{ pct(res.account.maxDrawdownPct) }}</span></div>
               <div><span class="label">Trades held</span><span class="value">{{ res.account.totalTrades }}</span></div>
               <div><span class="label">Win rate</span><span class="value">{{ pct(res.account.winRate * 100) }}</span></div>
-              <div><span class="label">Profit factor</span><span class="value">{{ ratio(res.account.profitFactor) }}</span></div>
+              <div><span class="label">Profit factor</span><span class="value" [title]="pfTitle(res.account.profitFactor)">{{ pf(res.account.profitFactor) }}</span></div>
               <div><span class="label">Expectancy</span><span class="value">{{ r1(res.account.expectancyR) }}</span></div>
               <div><span class="label">Sharpe</span><span class="value">{{ ratio(res.account.sharpeRatio) }}</span></div>
               <div><span class="label">Refused entries</span><span class="value">{{ res.refusals.length }}</span></div>
@@ -590,6 +591,13 @@ export class PortfolioBacktestDetailPageComponent implements OnInit {
   }
   pickTradesMember(event: Event): void {
     this.tradesMember.set(Number((event.target as HTMLSelectElement).value));
+  }
+  /** The account result is an engine BacktestResult: 9999 = no losing trades. */
+  pf(v: number | null | undefined): string {
+    return fmtProfitFactor(v);
+  }
+  pfTitle(v: number | null | undefined): string {
+    return profitFactorTitle(v);
   }
   ratio(v: number | null | undefined): string {
     return formatRatio(v ?? null);

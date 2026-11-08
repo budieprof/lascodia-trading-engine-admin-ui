@@ -151,6 +151,7 @@ import {
         <app-metric-card
           label="Profit factor (window)"
           [value]="profitFactor()"
+          [displayValue]="profitFactor() === null ? null : pfLabel(profitFactor())"
           format="number"
           dotColor="#AF52DE"
           caption="Gross win ÷ gross loss"
@@ -1220,8 +1221,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     return Number.isFinite(v) ? v.toFixed(2) : '∞';
   }
 
-  // Sum(wins) / Sum(|losses|). >1 means net profitable. Capped at 99 when
-  // there are no losses so the card stays readable.
+  // Sum(wins) / Sum(|losses|). >1 means net profitable. No losing trade →
+  // unbounded, shown "∞" (a 99 cap read as a real ratio, like the per-symbol table did).
   readonly profitFactor = computed(() => {
     const closed = this.closedPositions().filter(pnlKnown);
     if (closed.length === 0) return null;
@@ -1229,7 +1230,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const grossLoss = Math.abs(
       closed.filter((p) => p.realizedPnL < 0).reduce((s, p) => s + p.realizedPnL, 0),
     );
-    if (grossLoss === 0) return grossWin > 0 ? 99 : null;
+    if (grossLoss === 0) return grossWin > 0 ? Number.POSITIVE_INFINITY : null;
     return +(grossWin / grossLoss).toFixed(2);
   });
 

@@ -102,7 +102,7 @@ describe('no fraction printed as a percent', () => {
 
   // A profit factor printed through the number pipe or toFixed shows the no-loss sentinel (9999 / 999 /
   // decimal.MaxValue) as a ratio. Use fmtProfitFactor.
-  const RAW_PF = /[pP]rofitFactor\s*(\(\))?\s*\|\s*number\b|[pP]rofitFactor\s*(\(\))?\s*\??\.\s*toFixed\s*\(/;
+  const RAW_PF = /[pP]rofitFactor\w*\s*(\(\))?\s*\|\s*number\b|[pP]rofitFactor\w*\s*(\(\))?\s*\??\.\s*toFixed\s*\(/;
 
   it('finds no profit factor printed raw in the app', () => {
     const offenders: string[] = [];

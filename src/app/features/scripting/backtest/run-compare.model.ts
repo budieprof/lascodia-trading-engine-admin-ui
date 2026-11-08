@@ -10,6 +10,7 @@
 import type { EChartsOption } from 'echarts';
 
 import type { BacktestRunDto } from '@core/api/api.types';
+import { fmtProfitFactor, isNoLossProfitFactor } from '@shared/utils/metric-format';
 import type { BacktestRunCompareFields } from '@core/api/scripting.types';
 
 import {
@@ -180,6 +181,8 @@ interface MetricSpec {
   text: (v: number | null) => string;
   /** Higher is better (false: lower is better, e.g. drawdown). */
   higher: boolean;
+  /** A value that is a sentinel, not a measurement: no numeric delta against it (still ranks). */
+  sentinel?: (v: number) => boolean;
 }
 
 const pctText = (v: number | null) => formatPercent(v, { decimals: 2, signed: true });
@@ -195,8 +198,10 @@ const METRICS: readonly MetricSpec[] = [
   {
     label: 'Profit factor',
     get: (r) => r.profitFactor,
-    text: (v) => formatNumber(v, 2),
+    // BacktestRun.ProfitFactor 9999 = no losing trades → "∞", never "9,999.00".
+    text: (v) => fmtProfitFactor(v),
     higher: true,
+    sentinel: (v) => isNoLossProfitFactor(v),
   },
   {
     label: 'Max drawdown',
@@ -221,7 +226,8 @@ export function compareMetrics(a: RunSummary, b: RunSummary): MetricRow[] {
     let delta = NA;
     if (va !== null && vb !== null) {
       const d = vb - va;
-      delta = d === 0 ? '0' : `${d < 0 ? MINUS : '+'}${formatNumber(Math.abs(d), 2)}`;
+      const measured = !m.sentinel || (!m.sentinel(va) && !m.sentinel(vb));
+      if (measured) delta = d === 0 ? '0' : `${d < 0 ? MINUS : '+'}${formatNumber(Math.abs(d), 2)}`;
       if (d !== 0) better = d > 0 === m.higher ? 'b' : 'a';
     }
     return { label: m.label, a: m.text(va), b: m.text(vb), delta, better };

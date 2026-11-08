@@ -12,6 +12,8 @@ import {
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
+import { fmtProfitFactor, profitFactorTitle } from '@shared/utils/metric-format';
+
 import { ScriptStrategyService } from '../api/script-strategy.service';
 import { formatNumber, formatPercent, MINUS, NA } from '../report/report-format';
 import {
@@ -81,7 +83,7 @@ export const BASKET_POLL_LIMIT = 360;
                   {{ pct(row.totalReturn) }}
                 </td>
                 <td class="num">{{ row.winRate === null ? NA : pct(row.winRate * 100, false) }}</td>
-                <td class="num">{{ num(row.profitFactor) }}</td>
+                <td class="num" [title]="pfTitle(row.profitFactor)">{{ pf(row.profitFactor) }}</td>
                 <td class="num">
                   {{ row.maxDrawdownPct === null ? NA : pct(row.maxDrawdownPct, false) }}
                 </td>
@@ -236,6 +238,14 @@ export class BasketMatrixComponent {
 
   pct(v: number | null | undefined, signed = true): string {
     return formatPercent(v ?? null, { decimals: 2, signed });
+  }
+
+  pf(v: number | null): string {
+    return fmtProfitFactor(v);
+  }
+
+  pfTitle(v: number | null): string {
+    return profitFactorTitle(v);
   }
 
   num(v: number | null): string {
