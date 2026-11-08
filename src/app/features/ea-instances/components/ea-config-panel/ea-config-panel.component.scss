@@ -561,6 +561,18 @@
   color: var(--text-secondary);
   white-space: nowrap;
 }
+.zero.zero-off {
+  background: rgba(255, 149, 0, 0.14);
+  color: #b25f00;
+}
+.gate-off {
+  align-self: flex-start;
+  color: var(--loss, #ff3b30);
+  padding-left: 0;
+}
+.gf-note {
+  margin: 0 0 var(--space-2, 8px);
+}
 .zero {
   margin-left: 8px;
   font-size: 10.5px;

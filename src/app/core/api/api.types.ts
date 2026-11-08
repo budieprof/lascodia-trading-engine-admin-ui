@@ -2284,6 +2284,15 @@ export interface EAConfigInputs {
   enableChartPanel?: boolean;
   enableChartMarkers?: boolean;
 
+  // Strategy program batch 8 — tick-gap filler. The three values are the EFFECTIVE ones (an engine override
+  // when `mdGapFillOverride` is true, else the chart inputs); `mdGapFillActive` = the filler is running.
+  // Absent on EA builds before 8.47.287.
+  mdGapFill?: boolean;
+  mdGapFillRemote?: boolean;
+  mdGapFillMaxAgeHours?: number;
+  mdGapFillOverride?: boolean;
+  mdGapFillActive?: boolean;
+
   // ── Read-only (truly load-bearing — restart required) ──
   // NOTE: engineBaseUrl moved into the hot-reloadable block above in
   // v8.47.234 — it is now a probe-gated live override, not restart-only.
@@ -2950,7 +2959,7 @@ export interface PurgeRetryQueueRequest {
 
 /**
  * Per-instance config push body — Phase 2C admin wrapper around the engine-
- * wide UpdateEAConfigRequest. InstanceId is supplied via the route, but must
+ * wide UpdateEAConfigCommand. InstanceId is supplied via the route, but must
  * also be echoed in the body so System.Text.Json's `required` enforcement
  * passes — the controller's route-binding assignment of `command.InstanceId`
  * runs after JSON deserialisation, so the property is checked while still
@@ -2960,13 +2969,19 @@ export interface PurgeRetryQueueRequest {
 export interface UpdateInstanceConfigRequest {
   /** Required by the engine's `required string InstanceId` constraint; mirrors the route param. */
   instanceId?: string;
-  // Safety knobs (zero / undefined = keep current — legacy semantics)
+  // Safety knobs. Omitted (or 0) = keep current: the engine sends only positive values to the EA (batch 8 —
+  // before it, every unset knob went out as 0, which switched the per-symbol daily-loss gate off).
   maxPosPerSymbol?: number;
   maxLotPerOrder?: number;
   maxSpreadPoints?: number;
   maxConsecLosses?: number;
   consecLossPauseMin?: number;
   maxDailyLossPerSymbolPct?: number;
+  /**
+   * The ONLY way to switch the per-symbol daily-loss gate off (engine sends 0 + this flag; EA ≥ 8.47.287 refuses a
+   * bare 0). Never combine with a positive `maxDailyLossPerSymbolPct` (engine refuses).
+   */
+  disableMaxDailyLossPerSymbol?: true;
   maxOpenPositions?: number;
   maxDailyLossPct?: number;
   maxOrdersPerMin?: number;
@@ -3019,6 +3034,15 @@ export interface UpdateInstanceConfigRequest {
   enableChartMarkers?: boolean | null;
   /** Phase-13: owned-symbol CSV.  EA rejects empty / "CHART" / "ALL" and refuses removals that orphan open positions. */
   symbols?: string | null;
+
+  // Batch 8 — tick-gap filler override. Absent = no change. Any of the three puts the EA on an engine override
+  // (persisted across restarts); `mdGapFillOverride: 'clear'` drops it (back to the chart inputs) and wins over the
+  // others, so it is sent alone.
+  mdGapFill?: boolean;
+  mdGapFillRemote?: boolean;
+  /** 1..168. */
+  mdGapFillMaxAgeHours?: number;
+  mdGapFillOverride?: 'clear';
 }
 
 // ── Fleet command request bodies (mirror per-instance, no InstanceId) ────────
@@ -4548,24 +4572,6 @@ export interface UpsertAutoApplyConfigRequest {
 export interface WorkerOverrideKnobsDto {
   workerName: string;
   overrideKnobs: string[];
-}
-
-/**
- * Hot-reload EA safety config. Zero / undefined values mean "keep current"
- * per engine convention — the EA ignores them. Only `targetInstanceId` is
- * required when scoping to one EA; omit for fleet-wide push.
- */
-export interface UpdateEAConfigRequest {
-  targetInstanceId?: string | null;
-  maxPosPerSymbol?: number;
-  maxLotPerOrder?: number;
-  maxSpreadPoints?: number;
-  maxConsecLosses?: number;
-  consecLossPauseMin?: number;
-  maxDailyLossPerSymbolPct?: number;
-  maxOpenPositions?: number;
-  maxDailyLossPct?: number;
-  maxOrdersPerMin?: number;
 }
 
 export interface RefreshSymbolSpecsRequest {
