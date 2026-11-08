@@ -434,7 +434,32 @@
     </div>
 
     <!-- On-chart data: volume, trades, events, analysis overlays -->
-    <app-chart-overlays-menu />
+    <app-chart-overlays-menu
+      [open]="openMenu() === 'overlays'"
+      [overlayCount]="overlayCount()"
+      [(showVolume)]="showVolume"
+      [(sessionBreaks)]="sessionBreaks"
+      [(showTradeTimeline)]="showTradeTimeline"
+      [tradeTimelineInfo]="tradeTimelineInfo()"
+      [blackoutTitle]="blackoutTitle()"
+      [deltaOn]="deltaOn()"
+      [autoAnalysis]="autoAnalysis()"
+      [autoAnalysisOn]="autoAnalysisOn()"
+      [autoAnalysisLayers]="autoAnalysisLayers"
+      [footprintRowUnit]="footprintRowUnit()"
+      [footprintRowChoices]="footprintRowChoices()"
+      [orderFlowFeed]="orderFlowFeed"
+      [consolidatableSources]="consolidatableSources()"
+      (menuToggle)="toggleMenu('overlays', $event)"
+      (eventsToggle)="toggleEvents()"
+      (eventImpactCycle)="cycleEventImpact()"
+      (deltaToggle)="toggleDelta()"
+      (autoAnalysisToggle)="toggleAutoAnalysis()"
+      (autoLayerToggle)="toggleAutoLayer($event)"
+      (scorecard)="openScorecard()"
+      (volumeProfileModePick)="setVolumeProfileMode($event)"
+      (consolidatedSourceToggle)="toggleConsolidatedSource($event)"
+    />
 
     <div class="tb-sep"></div>
 

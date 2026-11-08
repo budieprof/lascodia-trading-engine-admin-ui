@@ -181,7 +181,6 @@ import {
   INDICATORS,
   defaultParams,
   indicatorById,
-  indicatorLabel,
 } from '../../indicators/registry';
 import {
   ChartHostComponent,
@@ -252,9 +251,7 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
-import type { ProfileExtrasSettings } from '../../overlays/profile-levels';
 import type { AlertableLevel } from '../../overlays/overlay-hits';
-import type { LayerGroupId } from '../../overlays/layer-groups';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -280,11 +277,6 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ReplayController } from '../../replay/replay-controller';
-import {
-  pageSlice,
-  CHART_OVERLAYS_MENU,
-  OVERLAYS_MENU_KEYS,
-} from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
 import { ChartLegendComponent } from './chart-legend.component';
@@ -436,7 +428,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartSessionStore } from './chart-session-store';
-import { ChartOverlaySettings, type OrderFlowLayer } from './chart-overlay-settings';
+import { ChartOverlaySettings } from './chart-overlay-settings';
 import { ChartDrawingTools } from './chart-drawing-tools';
 import { ChartDockState } from './chart-dock-state';
 import { ChartEditorState } from './chart-editor-state';
@@ -557,8 +549,8 @@ export { normaliseView };
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
-      provide: CHART_OVERLAYS_MENU,
-      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, OVERLAYS_MENU_KEYS),
+      provide: ChartOverlaySettings,
+      useFactory: (page: ChartAnalysisPageComponent) => page.overlaySettings,
       deps: [forwardRef(() => ChartAnalysisPageComponent)],
     },
     {
@@ -1535,19 +1527,12 @@ export class ChartAnalysisPageComponent {
   readonly showVolumeProfile = this.overlaySettings.showVolumeProfile;
   readonly volumeProfileMode = this.overlaySettings.volumeProfileMode;
   readonly vpMenuOpen = signal(false);
-  readonly volumeProfileModes = VOLUME_PROFILE_MODES;
   readonly showSupportResistance = this.overlaySettings.showSupportResistance;
   readonly showStructure = this.overlaySettings.showStructure;
   readonly profileExtras = this.overlaySettings.profileExtras;
-  toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
-    this.overlaySettings.toggleProfileExtra(key);
-  }
 
   /** Layer groups (PR-5), saved with the layout. */
   readonly layerGroups = this.overlaySettings.layerGroups;
-  layerGroupOpacity(id: LayerGroupId): number {
-    return this.overlaySettings.layerGroupOpacity(id);
-  }
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
   readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
@@ -1560,34 +1545,19 @@ export class ChartAnalysisPageComponent {
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
   readonly orderFlow = this.overlaySettings.orderFlow;
-  toggleOrderFlow(layer: OrderFlowLayer): void {
-    this.overlaySettings.toggleOrderFlow(layer);
-  }
-  /** The market-data source for the heatmap / depth / trades ('' = automatic). */
-  setOrderFlowSource(sourceId: string): void {
-    this.overlaySettings.setOrderFlowSource(sourceId);
-  }
   /** Multibook: the sources the consolidated heatmap may combine (every entitled source with a book). */
   readonly consolidatableSources = computed(() =>
     (this.orderFlowFeed.mdSources() ?? []).filter((s) => !!s.feeds?.book || !!s.feeds?.ticks),
   );
-  /** Whether a source is in the consolidated pick (all are when the pick is plain `consolidated`). */
-  consolidatedHas(sourceId: string): boolean {
-    return this.overlaySettings.consolidatedHas(sourceId);
-  }
   /** Multibook: turn one source in or out of the consolidated heatmap (at least one stays in). */
   toggleConsolidatedSource(sourceId: string): void {
     const all = this.consolidatableSources().map((s) => s.sourceId);
-    const current = all.filter((s) => this.consolidatedHas(s));
+    const current = all.filter((s) => this.overlaySettings.consolidatedHas(s));
     const next = current.includes(sourceId)
       ? current.filter((s) => s !== sourceId)
       : [...current, sourceId];
     if (!next.length) return;
-    this.setOrderFlowSource(consolidatedId(all, next));
-  }
-  readonly isConsolidatedPick = this.overlaySettings.isConsolidatedPick;
-  setTradeMinSize(value: number): void {
-    this.overlaySettings.setTradeMinSize(value);
+    this.overlaySettings.setOrderFlowSource(consolidatedId(all, next));
   }
   /** Tick replay's book at the head for the depth panel (undefined outside tick replay). */
   readonly tickReplayBook = computed<OrderBookSnapshot | null | undefined>(() => {
@@ -1599,18 +1569,12 @@ export class ChartAnalysisPageComponent {
     if (!tape) return null;
     return bookToSnapshot(this.symbol(), tape.sourceId ?? 'recording', tape.bookAt(head));
   });
-  setHeatmapOpacity(value: number): void {
-    this.overlaySettings.setHeatmapOpacity(value);
-  }
   /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height — MT5 points, else instrument ticks (UF02). */
   readonly footprintRowUnit = computed<'points' | 'ticks'>(() => {
     const f = this.facts();
     return !f.resolving && f.origin !== 'pair' && f.tickSize > 0 ? 'ticks' : 'points';
   });
   readonly footprintRowChoices = computed(() => footprintRowChoices(this.footprintRowUnit()));
-  setFootprintRows(points: number | null): void {
-    this.overlaySettings.setFootprintRows(points);
-  }
   /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
   readonly orderFlowReplayClip = computed(() => {
     if (!this.replay.active()) return null;
@@ -3407,18 +3371,6 @@ export class ChartAnalysisPageComponent {
    * "no weight to divide" versus "measured, and none of it is live" — so it
    * renders as an em dash rather than 0%.
    */
-
-  toggleOverlays(): void {
-    this.showOverlays.set(!this.showOverlays());
-  }
-
-  togglePositions(): void {
-    this.showPositions.set(!this.showPositions());
-  }
-
-  toggleOrders(): void {
-    this.showOrders.set(!this.showOrders());
-  }
 
   /**
    * Keep the watchlist's last price and a reference for the change column.
