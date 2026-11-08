@@ -23,7 +23,7 @@ describe('ea-config-fields', () => {
   it('keeps every setting key once', () => {
     const keys = HOT_RELOAD_FIELDS.map((f) => f.key);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(keys.length).toBe(51);
+    expect(keys.length).toBe(44); // W3d: 7 inputs EA 8.47.292 deleted are gone
   });
 
   it('parses a symbol CSV the way the EA does', () => {
@@ -140,9 +140,11 @@ describe('ea-config-fields', () => {
     expect(f.zeroMeans).toBeUndefined();
     expect(f.currentZeroMeans).toMatch(/^Off/);
     // A 0 is still a real value on settings whose 0 means something to the EA.
-    expect(buildConfigBody(ID, fields('maxSignalAgeSec'), { maxSignalAgeSec: '0' })).toEqual({
+    expect(
+      buildConfigBody(ID, fields('entryToleranceTpFrac'), { entryToleranceTpFrac: '0' }),
+    ).toEqual({
       instanceId: ID,
-      maxSignalAgeSec: 0,
+      entryToleranceTpFrac: 0,
     });
   });
 

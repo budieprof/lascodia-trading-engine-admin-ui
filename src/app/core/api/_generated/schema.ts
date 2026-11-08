@@ -27684,10 +27684,6 @@ export interface components {
       /** Format: int32 */
       entryToleranceMaxSignalAgeSec?: number | null;
       /** Format: int32 */
-      maxSignalAgeSec?: number | null;
-      /** Format: double */
-      maxAdverseTpDriftPct?: number | null;
-      /** Format: int32 */
       maxSlippagePoints?: number | null;
       /** Format: double */
       maxSlippageSlFrac?: number | null;
@@ -27725,15 +27721,9 @@ export interface components {
       specRefreshHour?: number | null;
       /** Format: int32 */
       tickBufferMax?: number | null;
-      telemetryEndpoint?: string | null;
       engineBaseUrl?: string | null;
-      /** Format: int32 */
-      telemetryPushSec?: number | null;
-      enableNewsBlackout?: boolean | null;
-      newsBlackoutFilePath?: string | null;
       logLevel?: string | null;
       enableFileLogging?: boolean | null;
-      logJsonFormat?: boolean | null;
       enableChartPanel?: boolean | null;
       enableChartMarkers?: boolean | null;
       symbols?: string | null;
@@ -31704,10 +31694,6 @@ export interface components {
       entryToleranceTpFrac?: number | null;
       /** Format: int32 */
       entryToleranceMaxSignalAgeSec?: number | null;
-      /** Format: int32 */
-      maxSignalAgeSec?: number | null;
-      /** Format: double */
-      maxAdverseTpDriftPct?: number | null;
       /** Format: double */
       maxSlippageSlFrac?: number | null;
       /** Format: double */
@@ -31746,15 +31732,9 @@ export interface components {
       specRefreshHour?: number | null;
       /** Format: int32 */
       tickBufferMax?: number | null;
-      telemetryEndpoint?: string | null;
       engineBaseUrl?: string | null;
-      /** Format: int32 */
-      telemetryPushSec?: number | null;
-      enableNewsBlackout?: boolean | null;
-      newsBlackoutFilePath?: string | null;
       logLevel?: string | null;
       enableFileLogging?: boolean | null;
-      logJsonFormat?: boolean | null;
       enableChartPanel?: boolean | null;
       enableChartMarkers?: boolean | null;
       symbols?: string | null;

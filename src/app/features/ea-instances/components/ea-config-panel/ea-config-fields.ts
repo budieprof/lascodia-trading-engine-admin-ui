@@ -17,8 +17,6 @@ export type HotReloadKey =
   | 'entryToleranceBandPct'
   | 'entryToleranceTpFrac'
   | 'entryToleranceMaxSignalAgeSec'
-  | 'maxSignalAgeSec'
-  | 'maxAdverseTpDriftPct'
   | 'maxSlippageSlFrac'
   | 'maxSpreadSlFrac'
   | 'maxSlippagePoints'
@@ -38,14 +36,9 @@ export type HotReloadKey =
   | 'backfillChunkSize'
   | 'specRefreshHour'
   | 'tickBufferMax'
-  | 'telemetryEndpoint'
   | 'engineBaseUrl'
-  | 'telemetryPushSec'
-  | 'enableNewsBlackout'
-  | 'newsBlackoutFilePath'
   | 'logLevel'
   | 'enableFileLogging'
-  | 'logJsonFormat'
   | 'enableChartPanel'
   | 'enableChartMarkers'
   | 'symbols'
@@ -454,33 +447,9 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
     ],
   },
   {
-    title: 'Signal freshness',
-    blurb: 'When a signal is too old or the price has moved too far to act on it.',
+    title: 'Market fill',
+    blurb: 'When a signal fills at market instead of waiting as a pending order.',
     fields: [
-      {
-        key: 'maxSignalAgeSec',
-        label: 'Ignore signals older than',
-        help: 'Signals older than this are skipped.',
-        kind: 'int',
-        unit: 's',
-        step: 5,
-        min: 0,
-        zeroMeans: 'Off',
-        badge: 'live',
-        takesEffect: 'Next SignalProcessor::Poll cycle.',
-      },
-      {
-        key: 'maxAdverseTpDriftPct',
-        label: 'Skip if price ran toward target by',
-        help: 'Skips the signal when price has already covered this share of the way from entry to take-profit.',
-        kind: 'double',
-        unit: '× TP',
-        step: 0.01,
-        min: 0,
-        zeroMeans: 'Off',
-        badge: 'live',
-        takesEffect: 'Next SignalProcessor::Poll cycle.',
-      },
       {
         key: 'entryToleranceTpFrac',
         label: 'Market-fill band (share of target distance)',
@@ -642,28 +611,6 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
     ],
   },
   {
-    title: 'News',
-    blurb: 'Pausing entries around scheduled news.',
-    fields: [
-      {
-        key: 'enableNewsBlackout',
-        label: 'Pause entries around scheduled news',
-        help: 'Blocks new entries during high-impact news windows.',
-        kind: 'bool',
-        badge: 'restart',
-        takesEffect: 'Cached on the news-blackout manager at OnInit.',
-      },
-      {
-        key: 'newsBlackoutFilePath',
-        label: 'Custom news schedule file',
-        help: 'Leave as is to use the built-in calendar.',
-        kind: 'string',
-        badge: 'restart',
-        takesEffect: 'Same cached path.',
-      },
-    ],
-  },
-  {
     title: 'Logs & chart',
     blurb: 'What the EA writes and shows on its chart.',
     fields: [
@@ -685,14 +632,6 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         takesEffect: 'File logger init cached at OnInit.',
       },
       {
-        key: 'logJsonFormat',
-        label: 'Log as JSON lines',
-        help: 'One JSON object per line, for log tools.',
-        kind: 'bool',
-        badge: 'restart',
-        takesEffect: 'File logger init cached at OnInit.',
-      },
-      {
         key: 'enableChartPanel',
         label: 'Status panel on chart',
         help: 'The EA’s dashboard drawn on its MT5 chart.',
@@ -707,31 +646,6 @@ export const HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
         kind: 'bool',
         badge: 'live',
         takesEffect: 'OperationalHelpers reads the shadow before each marker.',
-      },
-    ],
-  },
-  {
-    title: 'Telemetry',
-    blurb: 'Optional metrics push.',
-    fields: [
-      {
-        key: 'telemetryEndpoint',
-        label: 'Telemetry push address',
-        help: 'Leave blank to keep metrics in a local file only.',
-        kind: 'url',
-        badge: 'restart',
-        takesEffect: 'Cached on the telemetry config at OnInit.',
-      },
-      {
-        key: 'telemetryPushSec',
-        label: 'Push telemetry every',
-        help: 'Only used when an address is set.',
-        kind: 'int',
-        unit: 's',
-        step: 5,
-        min: 1,
-        badge: 'restart',
-        takesEffect: 'Same cached path.',
       },
     ],
   },
@@ -772,12 +686,7 @@ export const RESTART_HELP: Record<string, string> = {
   casEscalateThreshold: 'Shared-state write conflicts tolerated before a safety stop.',
   unmatchedDealExpirySec: 'How long a broker deal with no matching order is kept.',
   tickBufferMax: 'Ticks held in memory while the engine is unreachable.',
-  telemetryEndpoint: 'Blank = metrics stay in a local file.',
-  telemetryPushSec: 'Only used when a telemetry address is set.',
-  enableNewsBlackout: 'Blocks new entries during high-impact news windows.',
-  newsBlackoutFilePath: 'Blank = the built-in calendar.',
   enableFileLogging: 'Daily log files under MQL5/Files/Lascodia.',
-  logJsonFormat: 'One JSON object per line.',
   enableChartPanel: 'The EA’s dashboard drawn on its MT5 chart.',
 };
 
@@ -787,7 +696,6 @@ export const RESTART_UNITS: Record<string, string> = {
   casEscalateThreshold: 'conflicts',
   unmatchedDealExpirySec: 's',
   tickBufferMax: 'ticks',
-  telemetryPushSec: 's',
 };
 
 // ── Pure helpers (table-tested in ea-config-fields.spec.ts) ───────────────

@@ -774,12 +774,7 @@ export const RESTART_INPUTS: readonly RestartInputDef[] = [
 export const RESTART_BADGED_INPUTS: Readonly<Record<string, { inp: string; type: InputType }>> = {
   unmatchedDealExpirySec: { inp: 'InpUnmatchedDealExpirySec', type: 'i' },
   tickBufferMax: { inp: 'InpTickBufferMax', type: 'i' },
-  telemetryEndpoint: { inp: 'InpTelemetryEndpoint', type: 's' },
-  telemetryPushSec: { inp: 'InpTelemetryPushSec', type: 'i' },
-  enableNewsBlackout: { inp: 'InpEnableNewsBlackout', type: 'b' },
-  newsBlackoutFilePath: { inp: 'InpNewsBlackoutFilePath', type: 's' },
   enableFileLogging: { inp: 'InpEnableFileLogging', type: 'b' },
-  logJsonFormat: { inp: 'InpLogJsonFormat', type: 'b' },
   enableChartPanel: { inp: 'InpEnableChartPanel', type: 'b' },
 };
 

@@ -2238,8 +2238,6 @@ export interface EAConfigInputs {
   entryToleranceBandPct?: number;
   entryToleranceTpFrac?: number;
   entryToleranceMaxSignalAgeSec?: number;
-  maxSignalAgeSec?: number;
-  maxAdverseTpDriftPct?: number;
   maxSlippagePoints?: number;
   maxSlippageSlFrac?: number;
   maxSpreadSlFrac?: number;
@@ -2273,14 +2271,9 @@ export interface EAConfigInputs {
   backfillChunkSize?: number;
   specRefreshHour?: number;
   tickBufferMax?: number;
-  telemetryEndpoint?: string;
   engineBaseUrl?: string;
-  telemetryPushSec?: number;
-  enableNewsBlackout?: boolean;
-  newsBlackoutFilePath?: string;
   logLevel?: string;
   enableFileLogging?: boolean;
-  logJsonFormat?: boolean;
   enableChartPanel?: boolean;
   enableChartMarkers?: boolean;
 
@@ -2999,8 +2992,6 @@ export interface UpdateInstanceConfigRequest {
   entryToleranceBandPct?: number | null;
   entryToleranceTpFrac?: number | null;
   entryToleranceMaxSignalAgeSec?: number | null;
-  maxSignalAgeSec?: number | null;
-  maxAdverseTpDriftPct?: number | null;
   maxSlippagePoints?: number | null;
   maxSlippageSlFrac?: number | null;
   maxSpreadSlFrac?: number | null;
@@ -3022,14 +3013,9 @@ export interface UpdateInstanceConfigRequest {
   backfillChunkSize?: number | null;
   specRefreshHour?: number | null;
   tickBufferMax?: number | null;
-  telemetryEndpoint?: string | null;
   engineBaseUrl?: string | null;
-  telemetryPushSec?: number | null;
-  enableNewsBlackout?: boolean | null;
-  newsBlackoutFilePath?: string | null;
   logLevel?: string | null;
   enableFileLogging?: boolean | null;
-  logJsonFormat?: boolean | null;
   enableChartPanel?: boolean | null;
   enableChartMarkers?: boolean | null;
   /** Phase-13: owned-symbol CSV.  EA rejects empty / "CHART" / "ALL" and refuses removals that orphan open positions. */

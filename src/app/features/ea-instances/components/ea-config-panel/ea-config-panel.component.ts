@@ -1527,19 +1527,6 @@ export class EAConfigPanelComponent {
         edit,
       );
     }
-    if (field.key === 'telemetryEndpoint' && String(edit ?? '').trim() !== '') {
-      return validateField(
-        {
-          key: 'telemetryEndpoint',
-          kind: 'url',
-          label: '',
-          help: '',
-          badge: 'restart',
-          takesEffect: '',
-        },
-        edit,
-      );
-    }
     if (field.key === 'timeframes' && normalizeTimeframes(String(edit ?? '')).length === 0)
       return 'Pick at least one timeframe.';
     if (field.key === 'symbolMapping') {

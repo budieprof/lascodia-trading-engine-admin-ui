@@ -308,6 +308,20 @@ describe('restart-required inputs (SetInputs)', () => {
     expect(RESTART_BADGED_INPUTS['enableChartPanel'].inp).toBe('InpEnableChartPanel');
   });
 
+  it('offers none of the inputs EA 8.47.292 deleted', () => {
+    // W3d: the EA ignores these keys now; offering them would be a no-op restart.
+    for (const key of [
+      'telemetryEndpoint',
+      'telemetryPushSec',
+      'enableNewsBlackout',
+      'newsBlackoutFilePath',
+      'logJsonFormat',
+    ]) {
+      expect(RESTART_BADGED_INPUTS[key]).toBeUndefined();
+      expect(RESTART_INPUTS.some((d) => d.key === key)).toBe(false);
+    }
+  });
+
   it('marks the inputs that can cut the EA off as dangerous', () => {
     const dangerous = RESTART_INPUTS.filter((d) => d.dangerous).map((d) => d.key);
     expect(dangerous.sort()).toEqual(['engineBaseUrl', 'magicNumber']);
