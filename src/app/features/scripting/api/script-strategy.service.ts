@@ -12,6 +12,7 @@ import type {
   ScreenerRow,
   ScriptAlertBinding,
   ScriptBacktestRequest,
+  ScriptLiveOutputs,
   ScriptLiveStatus,
   ScriptParityReconcile,
   ScriptParityReconcileQueued,
@@ -51,6 +52,17 @@ export class ScriptStrategyService {
   /** §8 — the live session: status, emulator position/trades/orders, live report, divergences. */
   getLiveStatus(strategyId: number): Observable<ResponseData<ScriptLiveStatus>> {
     return this.api.get(`/strategy/${strategyId}/script/live`, { silent: true });
+  }
+
+  /**
+   * §8a — the live session's own outputs (SS-I7). `member` (K2): one member of a portfolio strategy, by engine symbol.
+   */
+  getLiveOutputs(
+    strategyId: number,
+    member?: string | null,
+  ): Observable<ResponseData<ScriptLiveOutputs>> {
+    const q = member ? `?member=${encodeURIComponent(member)}` : '';
+    return this.api.get(`/strategy/${strategyId}/script/live/outputs${q}`, { silent: true });
   }
 
   /** §8f — the rolling parity summary (live fills vs the emulator, paper R, drift). */

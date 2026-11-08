@@ -75,6 +75,7 @@ import { liveClosedTradesCsv } from '../report/report-csv';
 import { fileStamp, saveBlob } from '../shared/download';
 import { ScriptParityPanelComponent } from './script-parity-panel.component';
 import { LiveVsBacktestPanelComponent } from './live-vs-backtest-panel.component';
+import { ScriptLiveOutputsComponent } from './script-live-outputs.component';
 
 /** Fallback cadence; a live session advances on bar closes, so 15 s is plenty. */
 const POLL_MS = 15_000;
@@ -103,6 +104,7 @@ const STALE_MINUTES = 240;
     EATradeChartModalComponent,
     ScriptParityPanelComponent,
     LiveVsBacktestPanelComponent,
+    ScriptLiveOutputsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -515,6 +517,9 @@ const STALE_MINUTES = 240;
           [lifecycleStage]="lifecycleStage()"
           [lifecycleStageEnteredAt]="lifecycleStageEnteredAt()"
         />
+
+        <!-- §8a / SS-I7: the session's own plots and drawings; K2 member selector for a portfolio strategy. -->
+        <app-script-live-outputs [strategyId]="strategyId()" />
 
         @if (hasReport()) {
           <app-strategy-report
