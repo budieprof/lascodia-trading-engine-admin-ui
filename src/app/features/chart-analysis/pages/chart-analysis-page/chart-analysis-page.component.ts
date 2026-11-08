@@ -45,19 +45,8 @@ import {
   resolutionMs,
   type TvResolution,
 } from '../../datafeed/resolution';
-import {
-  applyStoredTick,
-  foldBars,
-  lastCompleteBarTime,
-  mergeForming,
-} from '../../datafeed/aggregate';
-import {
-  SessionRollover,
-  applySessionTick,
-  currentDayBars,
-  mergeSessionTail,
-} from '../../datafeed/session-bars';
-import { TradingCalendar, nextSessionPeriod, type SessionSpec } from '../../datafeed/session-calendar';
+import { currentDayBars } from '../../datafeed/session-bars';
+import { TradingCalendar, type SessionSpec } from '../../datafeed/session-calendar';
 import { tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
@@ -477,7 +466,7 @@ import {
   type ToolbarMenu,
   type StyleChoice,
 } from './chart-page.config';
-import { ChartHistoryPager } from './chart-history-pager';
+import { ChartSessionStore } from './chart-session-store';
 import { ChartDockState } from './chart-dock-state';
 import { ChartEditorState } from './chart-editor-state';
 import {
@@ -943,47 +932,30 @@ export class ChartAnalysisPageComponent {
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
-  readonly symbol = signal<string>('EURUSD');
-  readonly resolution = signal<TvResolution>('60');
+  /**
+   * US02b: the main series — symbol, timeframe, bars and whose they are, the forming bar, live prices, scroll-back —
+   * lives in {@link ChartSessionStore}; the page reads it under the names it always had.
+   */
+  readonly session: ChartSessionStore = new ChartSessionStore({
+    feed: this.feed,
+    host: () => this.host(),
+    replay: () => this.replay,
+    loadEvents: (extend) => this.loadEvents(extend),
+    extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
+  });
+  readonly symbol = this.session.symbol;
+  readonly resolution = this.session.resolution;
   readonly style = signal<ChartStyle>('candles');
   readonly showVolume = signal(true);
-  readonly bars = signal<Bar[]>([]);
-  /**
-   * The symbol and resolution `bars` hold. A switch changes the chart's at once, but the previous
-   * series stays on screen until the new one loads — so whatever takes the bars to be this
-   * symbol's (a run's forming bar, a run's drawings, a tick) checks this first.
-   */
-  private readonly barsFor = signal<SeriesId | null>(null, {
-    equal: (a, b) => a === b || sameSeries(a, b),
-  });
-  /**
-   * The series on screen, for the chart: it rebuilds every series when this changes, rather than
-   * diffing one instrument's bars against another's (CC-I1).
-   */
-  readonly dataKey = computed(() => {
-    const b = this.barsFor();
-    return b ? `${b.symbol}|${b.resolution}` : '';
-  });
-  /**
-   * The series whose oldest loaded bar is the start of the engine's history (a scroll-back page came
-   * back empty): the chart stops asking for more (CC-14). Cleared by every load of a series.
-   */
-  private readonly historyStart = signal<string | null>(null);
-  readonly historyComplete = computed(
-    () => !!this.dataKey() && this.historyStart() === this.dataKey(),
-  );
-  /**
-   * The symbol's session as the engine reports it with its chart bars: the trading days the chart's
-   * day-based studies and the Details pane count in, and the calendar a live price opens the next
-   * session-grid period by. Null until it is known — and for a symbol without one: UTC days.
-   */
-  readonly sessionSpec = computed(() => this.feed.sessionOf(this.symbol()));
-  private readonly tradingCalendar = computed(() => {
-    const spec = this.sessionSpec();
-    return spec ? new TradingCalendar(spec) : null;
-  });
-  readonly loading = signal(false);
-  readonly error = signal<string | null>(null);
+  readonly bars = this.session.bars;
+  /** The symbol and resolution `bars` hold ({@link ChartSessionStore.barsFor}). */
+  private readonly barsFor = this.session.barsFor;
+  readonly dataKey = this.session.dataKey;
+  readonly historyComplete = this.session.historyComplete;
+  readonly sessionSpec = this.session.sessionSpec;
+  private readonly tradingCalendar = this.session.tradingCalendar;
+  readonly loading = this.session.loading;
+  readonly error = this.session.error;
   readonly active = signal<ActiveIndicator[]>([]);
   readonly legend = signal<LegendSnapshot | null>(null);
   readonly indicatorMenuOpen = signal(false);
@@ -3256,7 +3228,7 @@ export class ChartAnalysisPageComponent {
     // from those throttled ticks. One small request a minute keeps the newest candle honest without
     // waiting for a reload.
     // US06: on the page's scheduler — not while the tab is hidden; re-read at once when it shows again.
-    this.scheduler.every('forming-resync', 60_000, () => void this.syncFormingBars());
+    this.scheduler.every('forming-resync', 60_000, () => void this.session.syncFormingBars());
   }
 
   /** US02: the trade layers' loads ({@link TradeLayersLoader}). */
@@ -3641,9 +3613,6 @@ export class ChartAnalysisPageComponent {
       });
   }
 
-  /** The series the newest {@link reload} loads (or loaded). */
-  private requested: SeriesId | null = null;
-
   /**
    * The URL's symbol and timeframe onto the chart: a deep link, or a link to another symbol
    * followed while the chart is open. The chart's own switches navigate as well
@@ -3655,7 +3624,7 @@ export class ChartAnalysisPageComponent {
     const symbol = params.get('symbol')?.toUpperCase() || this.symbol();
     const tf = this.route.snapshot.queryParamMap.get('tf');
     const resolution = tf && isSupportedResolution(tf) ? (tf as TvResolution) : this.resolution();
-    if (sameSeries(this.requested, { symbol, resolution })) return;
+    if (sameSeries(this.session.requested, { symbol, resolution })) return;
     this.symbol.set(symbol);
     this.resolution.set(resolution);
     void this.reload();
@@ -3664,19 +3633,15 @@ export class ChartAnalysisPageComponent {
   async reload(): Promise<void> {
     const symbol = this.symbol();
     const resolution = this.resolution();
-    this.requested = { symbol, resolution };
     // Bar Replay stays at its instant across a symbol or timeframe switch (CC-I4).
     const replayAnchor = this.replayHead();
     /** Still the chart's series? A switch made while this loads has a reload of its own. */
-    const current = () => symbol === this.symbol() && resolution === this.resolution();
-    this.loading.set(true);
-    this.error.set(null);
+    const current = () => this.session.isCurrent(symbol, resolution);
+    this.session.beginLoad(symbol, resolution);
     // Drawings belong to a symbol AND timeframe, so the scope has to move with
     // the chart before any drawing is read or written.
     this.drawings.setScope(symbol, resolution);
     this.loadTradingOverlays();
-    this.feed.invalidate(symbol, resolution);
-    this.rollover.reset();
     // The symbol's session, which the day-based studies count trading days by, comes with every
     // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
     if (!isSessionResolution(resolution) && !parseSynthetic(symbol)) void this.feed.learnSession(symbol);
@@ -3685,20 +3650,14 @@ export class ChartAnalysisPageComponent {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
       // Landing after a switch, these would go on screen under the next symbol's name.
       if (!current()) return;
-      this.historyStart.set(null);
-      this.bars.set(bars);
-      this.barsFor.set({ symbol, resolution });
+      this.session.acceptBars(symbol, resolution, bars);
       // US04: a synthetic's legs seed its live price; its chip says how it was built.
       const syn = parseSynthetic(symbol);
       const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
       this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
       this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
       if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
-      this.tailMergedAt = this.ticksApplied;
-      this.lastStored = lastCompleteBarTime(bars, resolution);
-      // The stored history ends at the last CLOSED bar; build the one still forming from real data
-      // rather than from whatever tick happens to arrive first. (The session grid's came with it.)
-      if (!isSessionResolution(resolution)) void this.syncFormingBars();
+      this.session.resetFormingState(bars, resolution);
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
@@ -3723,117 +3682,9 @@ export class ChartAnalysisPageComponent {
     }
   }
 
-  /** Scroll-back paging (CC-11, CC-14) — {@link ChartHistoryPager}. */
+  /** Scroll-back paging (CC-11, CC-14) — {@link ChartSessionStore.loadOlder}. */
   loadOlder(): Promise<void> {
-    return this.historyPager.loadOlder();
-  }
-
-  /** Built on first use: its accessors read the page's fields, so field order does not matter. */
-  private _historyPager?: ChartHistoryPager;
-  private get historyPager(): ChartHistoryPager {
-    return (this._historyPager ??= new ChartHistoryPager({
-      symbol: () => this.symbol(),
-      resolution: () => this.resolution(),
-      bars: this.bars,
-      barsFor: () => this.barsFor(),
-      loading: this.loading,
-      historyStart: this.historyStart,
-      feed: this.feed,
-      replay: () => this.replay,
-      host: () => this.host(),
-      loadEvents: (extend) => this.loadEvents(extend),
-      extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
-    }));
-  }
-
-  /**
-   * Time of the newest bar that is known to be COMPLETE in stored history. Every bar after it is
-   * still forming, and is rebuilt from M1 rather than trusted.
-   */
-  private lastStored: number | null = null;
-
-  /**
-   * Rebuild the forming bar (and any closed bar the engine has not yet stored) from M1.
-   *
-   * <p>The engine writes a bar only once it has closed, so the newest bar is never in the history
-   * and the chart had to invent it from live ticks — opening it at whatever price arrived first
-   * after the page loaded. Load the chart mid-bar and the candle jumped away from the previous close,
-   * with an open, high and low that covered seconds instead of the whole period. M1 trails the
-   * market by at most a minute, so it gives the real ones.</p>
-   *
-   * <p>Ticks still move the close between syncs; this corrects everything else.</p>
-   *
-   * <p>On the session grid (2h … 1M) the engine builds the forming bar itself, on its own calendar:
-   * this re-reads the newest bars from it instead ({@link syncSessionTail}).</p>
-   */
-  private async syncFormingBars(): Promise<void> {
-    const resolution = this.resolution();
-    const symbol = this.symbol();
-    if (isSessionResolution(resolution)) return this.syncSessionTail();
-    const stored = this.lastStored;
-    // While a switch loads, the bars (and `lastStored`) are still the previous series'.
-    const onScreen = () => sameSeries(this.barsFor(), { symbol, resolution });
-    if (resolution === '1' || stored === null || this.bars().length === 0 || !onScreen()) return;
-
-    const minutes = await this.feed.minuteBarsSince(symbol, stored + 1);
-    if (!minutes || minutes.length === 0) return;
-    // The operator may have switched symbol or timeframe while the request was in flight.
-    if (
-      symbol !== this.symbol() ||
-      resolution !== this.resolution() ||
-      stored !== this.lastStored ||
-      !onScreen()
-    )
-      return;
-
-    this.bars.set(
-      mergeForming(this.bars(), foldBars(minutes, resolution, this.feed.gridOf(symbol)), stored),
-    );
-  }
-
-  /** Ticks applied to the chart's newest bar, ever; against {@link tailMergedAt}: any since the last merge. */
-  private ticksApplied = 0;
-  /** {@link ticksApplied} when the engine's newest bars were last laid over the chart's. */
-  private tailMergedAt = 0;
-  /** The request for the newest session bars in flight, by series — shared by the minute resync and a rollover. */
-  private tailInFlight: { series: string; done: Promise<void> } | null = null;
-  /** One request per bar change when ticks pass the newest session bar's close (`SessionRollover`). */
-  private readonly rollover = new SessionRollover(() => Date.now());
-
-  /**
-   * Re-read the newest session-grid bars from the engine — the bar still forming, the one or two
-   * before it (a period that just closed may have been built before its last minute was stored), and
-   * any period that opened since the chart last asked — and lay them over the chart's
-   * ({@link mergeSessionTail}). Shared by the minute resync and a tick past the newest bar's close:
-   * one request at a time per series.
-   */
-  private syncSessionTail(): Promise<void> {
-    const series = `${this.symbol()}|${this.resolution()}`;
-    if (this.tailInFlight?.series === series) return this.tailInFlight.done;
-    const done: Promise<void> = this.fetchSessionTail().finally(() => {
-      if (this.tailInFlight?.done === done) this.tailInFlight = null;
-    });
-    this.tailInFlight = { series, done };
-    return done;
-  }
-
-  private async fetchSessionTail(): Promise<void> {
-    const symbol = this.symbol();
-    const resolution = this.resolution();
-    const onScreen = () =>
-      symbol === this.symbol() &&
-      resolution === this.resolution() &&
-      sameSeries(this.barsFor(), { symbol, resolution });
-    const held = this.bars();
-    if (held.length === 0 || !onScreen()) return;
-
-    const tail = await this.feed.sessionTail(symbol, resolution, held[held.length - 1].time);
-    // A failed request leaves the chart as it is; a switch made meanwhile has bars of its own.
-    if (!tail || !onScreen()) return;
-    // Ticks since the last merge are newer than the engine's forming bar: they keep its close.
-    const ticked = this.ticksApplied !== this.tailMergedAt;
-    this.tailMergedAt = this.ticksApplied;
-    this.bars.set(mergeSessionTail(this.bars(), tail, ticked));
+    return this.session.loadOlder();
   }
 
   private applyTick(tick: PriceTick): void {
@@ -3855,58 +3706,7 @@ export class ChartAnalysisPageComponent {
     const bid = typeof tick.bid === 'number' && Number.isFinite(tick.bid) ? tick.bid : price;
     this.liveQuote.set({ bid, ask });
 
-    // Right after a switch the bars on screen are still the previous series': not this tick's.
-    if (!sameSeries(this.barsFor(), { symbol: this.symbol(), resolution: this.resolution() }))
-      return;
-    const current = this.bars();
-    if (current.length === 0) return;
-
-    if (isSessionResolution(this.resolution())) {
-      this.applyTickOnSessionGrid(current, price, at);
-      return;
-    }
-
-    // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h — on the
-    // engine's clock, as the countdown and a run's live bar read it. A price past the newest bar's
-    // bucket opens its own bucket's bar, so the chart never stalls a timeframe behind the market.
-    const next = applyStoredTick(
-      current,
-      price,
-      at,
-      this.resolution(),
-      this.feed.gridOf(this.symbol()),
-    );
-    if (next) this.bars.set(next);
-  }
-
-  /**
-   * A live price on the session grid (2h … 1M), on the engine's clock: it moves the newest bar while
-   * that bar's period lasts. From the bar's close on, it opens the next period's bar itself — at the
-   * old bar's close, or with the session it is in after the weekend, laid out by the symbol's session
-   * (`nextSessionPeriod`) — as TradingView does on a period's first tick: the engine's forming bar is
-   * folded from closed M1, so for a period's first minute there is none to ask for. The minute
-   * resync then lays the engine's own bar over it. Where the chart cannot tell the period (a gap of
-   * a whole period, no session known), it asks for the newest bars instead, once per bar
-   * ({@link SessionRollover}).
-   */
-  private applyTickOnSessionGrid(current: Bar[], price: number, at: number): void {
-    const calendar = this.tradingCalendar();
-    const resolution = this.resolution();
-    const outcome = applySessionTick(
-      current,
-      price,
-      at,
-      calendar ? (last, now) => nextSessionPeriod(calendar, resolution, last, now) : undefined,
-    );
-    if (outcome.kind === 'update' || outcome.kind === 'open') {
-      this.ticksApplied++;
-      this.bars.set(outcome.bars);
-      return;
-    }
-    if (outcome.kind !== 'rollover') return;
-    const key = `${this.symbol()}|${this.resolution()}|${current[current.length - 1].time}`;
-    if (!this.rollover.request(key)) return;
-    void this.syncSessionTail().finally(() => this.rollover.done(key));
+    this.session.applyPrice(price, at);
   }
 
   // ── Toolbar actions ──────────────────────────────────────────────────────

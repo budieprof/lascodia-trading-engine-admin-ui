@@ -3,6 +3,7 @@ import { signal } from '@angular/core';
 import { convertToParamMap } from '@angular/router';
 
 import { ChartAnalysisPageComponent } from './chart-analysis-page.component';
+import { ChartSessionStore, type ChartSessionFeed } from './chart-session-store';
 
 // The page's symbol switch and its URL follower, run against just the state they touch (as the
 // page's dock and editor specs do). The feed's history request never answers: what is counted is
@@ -19,10 +20,19 @@ function setup(url: { tf?: string } = {}) {
     sessionOf: vi.fn(() => null),
   };
   const router = { navigate: vi.fn(() => Promise.resolve(true)) };
+  // US02b: the main series (symbol, timeframe, load state, requested series) is the page's ChartSessionStore.
+  const session = new ChartSessionStore({
+    feed: feed as unknown as ChartSessionFeed,
+    host: () => null,
+    replay: () => ({ shift: () => undefined }),
+    loadEvents: () => undefined,
+    extendCompareBars: () => Promise.resolve(),
+  });
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   Object.assign(p, {
-    symbol: signal('EURUSD'),
-    resolution: signal('60'),
+    session,
+    symbol: session.symbol,
+    resolution: session.resolution,
     replayActive: signal(false),
     replayHead: signal(null),
     // Layout memory per symbol (CC-I11): off unless a spec turns it on.
@@ -35,9 +45,8 @@ function setup(url: { tf?: string } = {}) {
     chartSync: signal({ symbol: false, interval: false, crosshair: true, time: true }),
     symbolMenuOpen: signal(false),
     symbolQuery: signal(''),
-    loading: signal(false),
-    error: signal<string | null>(null),
-    requested: null,
+    loading: session.loading,
+    error: session.error,
     route: { snapshot: { queryParamMap: convertToParamMap(url) } },
     router,
     drawings: { setScope: vi.fn() },
@@ -51,7 +60,6 @@ function setup(url: { tf?: string } = {}) {
     },
     active: signal([]),
     loadTradingOverlays: vi.fn(),
-    rollover: { reset: vi.fn() },
     feed,
   });
   /** The router's paramMap emitting `params` (the page subscribes `followRoute` to it). */
