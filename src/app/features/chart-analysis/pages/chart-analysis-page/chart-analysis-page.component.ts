@@ -579,6 +579,12 @@ export { normaliseView };
   // The template's sections (rail, strip, legend, menus, side pane, studies) render this page's state.
   // US02: each template section gets its slice of the page, not the page.
   providers: [
+    // US02b: the main series, for the sections that show it.
+    {
+      provide: ChartSessionStore,
+      useFactory: (page: ChartAnalysisPageComponent) => page.session,
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
     {
       provide: CHART_LEGEND,
       useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, LEGEND_KEYS),

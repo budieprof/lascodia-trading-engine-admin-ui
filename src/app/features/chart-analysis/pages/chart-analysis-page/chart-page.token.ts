@@ -6,7 +6,8 @@ import type { ChartAnalysisPageComponent } from './chart-analysis-page.component
  * studies strip, overlays menu) may read of the page — a SLICE, not the page. Each child injects its own token, typed
  * as exactly the members it uses ({@link pageSlice}: getters for those members and nothing else at run time), so a
  * section's dependencies are listed here, checked by the compiler against the page, and a spec provides a small fake.
- * (They used to inject the whole page through one `CHART_PAGE` token.)
+ * (They used to inject the whole page through one `CHART_PAGE` token.) US02b: the main series (symbol, timeframe,
+ * bars) is not in any slice: a section reads it from the page's ChartSessionStore (chart-session-store.ts), which the page provides.
  */
 type Page = ChartAnalysisPageComponent;
 
@@ -18,7 +19,9 @@ export function pageSlice<K extends keyof Page>(page: Page, keys: readonly K[]):
       enumerable: true,
       get: () => {
         const value = page[key] as unknown;
-        return typeof value === 'function' && !isSignal(value) ? (value as (...a: unknown[]) => unknown).bind(page) : value;
+        return typeof value === 'function' && !isSignal(value)
+          ? (value as (...a: unknown[]) => unknown).bind(page)
+          : value;
       },
     });
   }
@@ -40,12 +43,10 @@ export const LEGEND_KEYS = [
   'marketView',
   'onScriptAction',
   'precision',
-  'resolution',
   'resolutionLabel',
   'seriesOptions',
   'setSeriesAdjustment',
   'switchContinuousSeries',
-  'symbol',
   'symbolChips',
 ] as const;
 export type ChartLegendSlice = Pick<Page, (typeof LEGEND_KEYS)[number]>;
@@ -79,7 +80,9 @@ export const STUDIES_STRIP_KEYS = [
   'toggleScriptVisible',
 ] as const;
 export type ChartStudiesStripSlice = Pick<Page, (typeof STUDIES_STRIP_KEYS)[number]>;
-export const CHART_STUDIES_STRIP = new InjectionToken<ChartStudiesStripSlice>('CHART_STUDIES_STRIP');
+export const CHART_STUDIES_STRIP = new InjectionToken<ChartStudiesStripSlice>(
+  'CHART_STUDIES_STRIP',
+);
 
 /** The context menus's slice of the page. */
 export const CONTEXT_MENUS_KEYS = [
@@ -110,7 +113,9 @@ export const CONTEXT_MENUS_KEYS = [
   'takeSnapshot',
 ] as const;
 export type ChartContextMenusSlice = Pick<Page, (typeof CONTEXT_MENUS_KEYS)[number]>;
-export const CHART_CONTEXT_MENUS = new InjectionToken<ChartContextMenusSlice>('CHART_CONTEXT_MENUS');
+export const CHART_CONTEXT_MENUS = new InjectionToken<ChartContextMenusSlice>(
+  'CHART_CONTEXT_MENUS',
+);
 
 /** The panel strip's slice of the page. */
 export const PANEL_STRIP_KEYS = [
@@ -185,7 +190,9 @@ export const OVERLAYS_MENU_KEYS = [
   'volumeProfileModes',
 ] as const;
 export type ChartOverlaysMenuSlice = Pick<Page, (typeof OVERLAYS_MENU_KEYS)[number]>;
-export const CHART_OVERLAYS_MENU = new InjectionToken<ChartOverlaysMenuSlice>('CHART_OVERLAYS_MENU');
+export const CHART_OVERLAYS_MENU = new InjectionToken<ChartOverlaysMenuSlice>(
+  'CHART_OVERLAYS_MENU',
+);
 
 /** The drawing rail's slice of the page. */
 export const DRAWING_RAIL_KEYS = [
@@ -217,7 +224,6 @@ export const CHART_DRAWING_RAIL = new InjectionToken<ChartDrawingRailSlice>('CHA
 /** The side pane's slice of the page. */
 export const SIDE_PANE_KEYS = [
   'articles',
-  'bars',
   'calendarAll',
   'calendarCurrencies',
   'calendarEvent',
@@ -236,11 +242,9 @@ export const SIDE_PANE_KEYS = [
   'orderFlow',
   'orderFlowReplayClip',
   'precision',
-  'resolution',
   'resolutionLabel',
   'selectSymbol',
   'sidePane',
-  'symbol',
   'tickReplayBook',
   'timezone',
 ] as const;

@@ -70,12 +70,12 @@
       <dt>To</dt>
       <dd class="muted">{{ page.details().to }}</dd>
     </dl>
-    <app-performance-tiles [symbol]="page.symbol()" />
+    <app-performance-tiles [symbol]="session.symbol()" />
     <app-technicals-gauge
-      [bars]="page.bars()"
-      [timeframe]="page.resolutionLabel(page.resolution())"
+      [bars]="session.bars()"
+      [timeframe]="page.resolutionLabel(session.resolution())"
     />
-    <app-seasonals [symbol]="page.symbol()" />
+    <app-seasonals [symbol]="session.symbol()" />
   </aside>
 }
 
@@ -187,8 +187,8 @@
     <aside class="side-pane">
       <app-chart-panels-dock
         [panel]="panel"
-        [symbol]="page.symbol()"
-        [timeframe]="page.resolutionLabel(page.resolution())"
+        [symbol]="session.symbol()"
+        [timeframe]="page.resolutionLabel(session.resolution())"
         [digits]="page.precision()"
         [facts]="page.facts()"
         [timeZone]="page.timezone()"

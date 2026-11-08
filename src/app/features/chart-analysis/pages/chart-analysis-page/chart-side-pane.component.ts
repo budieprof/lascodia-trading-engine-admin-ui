@@ -11,6 +11,7 @@ import { ArticleFlagsPipe } from '../../panels/news-pane';
 import { ZonedDatePipe } from '../../panels/zoned-time';
 import { DecimalPipe } from '@angular/common';
 import { CHART_SIDE_PANE } from './chart-page.token';
+import { ChartSessionStore } from './chart-session-store';
 
 /**
  * The chart's side pane: symbol details, news, the economic calendar, the data window and the docked side panels.
@@ -41,4 +42,6 @@ import { CHART_SIDE_PANE } from './chart-page.token';
 })
 export class ChartSidePaneComponent {
   protected readonly page = inject(CHART_SIDE_PANE);
+  /** US02b: the main series (symbol, timeframe, bars). */
+  protected readonly session = inject(ChartSessionStore);
 }

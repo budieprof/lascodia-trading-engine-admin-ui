@@ -1,7 +1,7 @@
 <div class="legend" appMeasuredBottom (bottomChange)="page.legendBottom.set($event)">
   <div class="legend-title">
-    <strong>{{ page.symbol() }}</strong>
-    <span class="muted">{{ page.resolutionLabel(page.resolution()) }}</span>
+    <strong>{{ session.symbol() }}</strong>
+    <span class="muted">{{ page.resolutionLabel(session.resolution()) }}</span>
     <app-chart-market-chips
       [view]="page.marketView()"
       [chips]="page.symbolChips()"
