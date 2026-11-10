@@ -26,12 +26,21 @@ export class AssistantOpsApiService {
     return this.api.getEnvelope<AssistantMetrics>(`/assistant/metrics?hours=${Math.round(hours)}`);
   }
 
-  /** `GET assistant/lessons?status=&source=&take=` — newest first; status null = every status. */
-  lessons(status: string | null, source: string | null, take = 200): Observable<AssistantLesson[]> {
+  /**
+   * `GET assistant/lessons?status=&source=&take=&skip=` — newest first; status null = every
+   * status. An engine older than 3f04f4b1 ignores `skip` (the caller detects the repeat page).
+   */
+  lessons(
+    status: string | null,
+    source: string | null,
+    take = 100,
+    skip = 0,
+  ): Observable<AssistantLesson[]> {
     const q = new URLSearchParams();
     if (status) q.set('status', status);
     if (source) q.set('source', source);
     q.set('take', String(take));
+    if (skip > 0) q.set('skip', String(skip));
     return this.api
       .getEnvelope<AssistantLesson[]>(`/assistant/lessons?${q.toString()}`)
       .pipe(map((rows) => (Array.isArray(rows) ? rows : [])));

@@ -142,6 +142,27 @@ const METRICS = {
     failedAfterConfirmRate: 0.1176,
   },
   truncated: false,
+  // Engine 3f04f4b1+: the window's own verdict and limits (OLD_ENGINE=1 drops them to exercise the alert/list fallback).
+  ...(process.env.OLD_ENGINE
+    ? {}
+    : {
+        breaches: [
+          {
+            key: 'assistant-health:tool-errors:get_candles',
+            severity: 'Medium',
+            message:
+              "The assistant's get_candles tool failed 72 of 160 calls in the last 168 h (45%, threshold 40%); most often not_found (60).",
+          },
+        ],
+        thresholds: {
+          unverifiedRatePct: 30,
+          toolErrorRatePct: 40,
+          turnP95Seconds: 900,
+          spendGuardTrips: 1,
+          minTurns: 10,
+          toolMinCalls: 20,
+        },
+      }),
 };
 const ALERTS = {
   pager: { totalItemCount: 1 },
@@ -197,6 +218,7 @@ const LESSONS = [
     sourceRef: 'incident 2026-11-04',
     text: 'A spot analysis answer must quote the live price it used.',
     reviewedBy: 'admin-user:1',
+    reviewedByName: 'Bode Olaleye',
     reviewedAtUtc: '2026-11-05T10:00:00Z',
     reviewNote: 'Shipped with the engine',
     injectedCount: 57,
@@ -407,7 +429,9 @@ function stub(method, p, search) {
     title: text('h1'),
     breach: text('text=keeps failing'),
     tools: count('table.tools tbody tr'),
+    breachSource: text('.breaches .src'),
   });
+  results.health.alertListCalls = answered.filter((a) => a.includes('/alert/list')).length;
   await page
     .locator('button', { hasText: 'Last 30 days' })
     .first()
@@ -435,6 +459,7 @@ function stub(method, p, search) {
   await page.locator('.seg button', { hasText: 'All' }).click();
   await page.waitForTimeout(400);
   results.lessons.allCards = await count('li.lesson')();
+  results.lessons.reviewerName = await page.locator('text=Bode Olaleye').count();
   await page.screenshot({ path: path.join(OUT, 'lessons-all.png'), fullPage: true });
 
   await visit('/conversations?conversation=1', 'chat', {

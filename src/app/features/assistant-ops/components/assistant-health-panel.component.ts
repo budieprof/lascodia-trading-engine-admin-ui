@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { catchError, of } from 'rxjs';
+import { catchError, of, tap } from 'rxjs';
 
 import { createPolledResource } from '@core/polling/polled-resource';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -15,6 +15,12 @@ import {
   SPLITS,
   WINDOWS,
   breachFromAlert,
+  breachFromMetrics,
+  hasWindowVerdict,
+  thresholdsOf,
+  toneAgainst,
+  type HealthBreach,
+  type Tone,
   compact,
   countsText,
   duration,
@@ -25,7 +31,7 @@ import {
   usd,
   type Split,
 } from '../assistant-ops.logic';
-import type { AssistantTurnStats } from '../assistant-ops.types';
+import type { AssistantToolStats, AssistantTurnStats } from '../assistant-ops.types';
 
 const GOOD = '#34C759';
 const WARN = '#FF9500';
@@ -88,6 +94,14 @@ const INFO = '#0071E3';
       @if (breaches().length > 0) {
         <section class="breaches" role="alert" aria-label="Active assistant health alerts">
           <h3>Needs attention</h3>
+          <p class="muted small src">
+            @if (breachesFromWindow()) {
+              Engine limits crossed {{ windowLabel().toLowerCase() }}.
+            } @else {
+              Open engine alerts — the engine checks every few minutes over its own alert window,
+              not the window picked above.
+            }
+          </p>
           <ul>
             @for (b of breaches(); track b.key) {
               <li>
@@ -96,8 +110,7 @@ const INFO = '#0071E3';
                 <p>{{ b.detail }}</p>
                 @if (b.since) {
                   <span class="muted small" [title]="b.since | date: 'yyyy-MM-dd HH:mm' : 'UTC'"
-                    >Raised {{ b.since | relativeTime }} · checked by the engine every few minutes
-                    over its own alert window</span
+                    >Raised {{ b.since | relativeTime }}</span
                   >
                 }
               </li>
@@ -140,7 +153,15 @@ const INFO = '#0071E3';
               label="Posted unverified"
               [displayValue]="pctOf(s.unverifiedRate, s.answerAttempts)"
               [caption]="s.unverified + ' of ' + s.answerAttempts + ' answers'"
-              [dotColor]="tone(s.unverifiedRate, 0.15, 0.3, s.answerAttempts)"
+              [dotColor]="
+                color(
+                  toneAgainst(
+                    s.unverifiedRate * 100,
+                    limits().unverifiedRatePct,
+                    s.answerAttempts > 0
+                  )
+                )
+              "
             />
             <app-metric-card
               label="Held by the checks"
@@ -152,13 +173,21 @@ const INFO = '#0071E3';
               label="Time per question"
               [displayValue]="dur(s.wallP50Seconds)"
               [caption]="'slowest 5%: ' + dur(s.wallP95Seconds)"
-              [dotColor]="NEUTRAL"
+              [dotColor]="
+                split() === 'headless'
+                  ? NEUTRAL
+                  : color(toneAgainst(s.wallP95Seconds, limits().turnP95Seconds, s.turns > 0))
+              "
             />
             <app-metric-card
               label="Tool errors"
               [displayValue]="pctOf(s.toolErrorRate, s.avgToolCalls)"
               [caption]="s.avgToolCalls + ' tool calls per question'"
-              [dotColor]="tone(s.toolErrorRate, 0.2, 0.4, s.avgToolCalls)"
+              [dotColor]="
+                color(
+                  toneAgainst(s.toolErrorRate * 100, limits().toolErrorRatePct, s.avgToolCalls > 0)
+                )
+              "
             />
             <app-metric-card
               label="Cost"
@@ -207,7 +236,11 @@ const INFO = '#0071E3';
               label="Spend guard refusals"
               [value]="s.spendGuardTrips"
               caption="questions refused at a budget ceiling"
-              [dotColor]="s.spendGuardTrips > 0 ? BAD : NEUTRAL"
+              [dotColor]="
+                limits().spendGuardTrips > 0 && s.spendGuardTrips >= limits().spendGuardTrips
+                  ? BAD
+                  : NEUTRAL
+              "
             />
           </section>
 
@@ -295,7 +328,7 @@ const INFO = '#0071E3';
                         <code>{{ t.tool }}</code>
                       </td>
                       <td class="num">{{ t.calls }}</td>
-                      <td class="num" [class.bad]="t.calls > 0 && t.errorRate >= 0.4">
+                      <td class="num" [class.bad]="toolOverLimit(t)">
                         {{ t.errors }}
                         @if (t.calls > 0) {
                           <span class="muted">({{ pctOf(t.errorRate) }})</span>
@@ -405,6 +438,9 @@ const INFO = '#0071E3';
         margin: 2px 0;
         font-size: var(--text-sm);
         color: var(--text-secondary);
+      }
+      .breaches p.src {
+        margin: -4px 0 var(--space-2);
       }
       .sev {
         margin-left: var(--space-2);
@@ -533,17 +569,39 @@ export class AssistantHealthPanelComponent {
   readonly hours = signal(168);
   readonly split = signal<Split>('operator');
 
-  readonly metrics = createPolledResource(() => this.api.metrics(this.hours()), {
-    intervalMs: 120_000,
-  });
-
-  /** Optional: the engine's own verdicts. An engine or role without them just shows none. */
-  readonly alerts = createPolledResource(
-    () => this.api.activeHealthAlerts().pipe(catchError(() => of([]))),
-    { intervalMs: 300_000 },
+  readonly metrics = createPolledResource(
+    () =>
+      this.api.metrics(this.hours()).pipe(
+        // An engine without the window's verdict (older than 3f04f4b1): read its open alerts.
+        tap((m) => {
+          if (!hasWindowVerdict(m)) queueMicrotask(() => this.alerts.refresh());
+        }),
+      ),
+    { intervalMs: 120_000 },
   );
 
-  readonly breaches = computed(() => (this.alerts.value() ?? []).map(breachFromAlert));
+  /**
+   * Fallback only: the open AssistantHealth alerts, read while the metrics carry no verdict of
+   * their own. Never fetched against an engine that sends `breaches`.
+   */
+  readonly alerts = createPolledResource(
+    () =>
+      hasWindowVerdict(this.metrics.value())
+        ? of([])
+        : this.api.activeHealthAlerts().pipe(catchError(() => of([]))),
+    { intervalMs: 300_000, runImmediately: false },
+  );
+
+  readonly breachesFromWindow = computed(() => hasWindowVerdict(this.metrics.value()));
+
+  readonly breaches = computed<HealthBreach[]>(() => {
+    const m = this.metrics.value();
+    if (m && hasWindowVerdict(m)) return (m.breaches ?? []).map((b) => breachFromMetrics(b, m));
+    return (this.alerts.value() ?? []).map(breachFromAlert);
+  });
+
+  /** The engine's limits when it sends them, its defaults otherwise. */
+  readonly limits = computed(() => thresholdsOf(this.metrics.value()));
 
   readonly stats = computed<AssistantTurnStats | null>(() => {
     const m = this.metrics.value();
@@ -614,9 +672,19 @@ export class AssistantHealthPanelComponent {
     return parts.length ? `held for: ${parts.join(', ')}` : 'answers sent back for a fix';
   }
 
-  /** Colour for a "lower is better" rate; neutral when nothing stands behind it. */
-  protected tone(ratio: number, warnAt: number, badAt: number, denominator: number): string {
-    if (!denominator) return NEUTRAL;
-    return ratio >= badAt ? BAD : ratio >= warnAt ? WARN : GOOD;
+  protected readonly toneAgainst = toneAgainst;
+
+  protected color(t: Tone): string {
+    return t === 'bad' ? BAD : t === 'warn' ? WARN : t === 'good' ? GOOD : NEUTRAL;
+  }
+
+  /** The engine's per-tool rule: enough calls, and an error rate over the limit (0 = off). */
+  protected toolOverLimit(t: AssistantToolStats): boolean {
+    const l = this.limits();
+    return (
+      l.toolErrorRatePct > 0 &&
+      t.calls >= Math.max(1, l.toolMinCalls) &&
+      t.errorRate * 100 > l.toolErrorRatePct
+    );
   }
 }

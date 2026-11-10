@@ -63,7 +63,7 @@ const action = (kind: string) => lessonActions('Candidate').find((a) => a.kind =
 describe('AssistantLessonsPanelComponent', () => {
   it('opens on the review queue', () => {
     const p = panel();
-    expect(api.lessons).toHaveBeenCalledWith('Candidate', null, 200);
+    expect(api.lessons).toHaveBeenCalledWith('Candidate', null, 100, 0);
     expect(p.lessons()).toEqual([candidate]);
     expect(p.loading()).toBe(false);
   });
@@ -71,9 +71,9 @@ describe('AssistantLessonsPanelComponent', () => {
   it('"All" asks for every status, and a source filter is passed through', () => {
     const p = panel();
     p.setStatus('');
-    expect(api.lessons).toHaveBeenLastCalledWith(null, null, 200);
+    expect(api.lessons).toHaveBeenLastCalledWith(null, null, 100, 0);
     p.setSource('correction');
-    expect(api.lessons).toHaveBeenLastCalledWith(null, 'correction', 200);
+    expect(api.lessons).toHaveBeenLastCalledWith(null, 'correction', 100, 0);
   });
 
   it('reject will not send without a reason, then sends only the reason and reloads', () => {
@@ -135,5 +135,41 @@ describe('AssistantLessonsPanelComponent', () => {
     const p = panel();
     expect(p.loadError()).toBe('boom');
     expect(p.loading()).toBe(false);
+  });
+
+  it('a full page offers "Load more", which asks for the next page with skip and appends it', () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ ...candidate, id: 1000 - i }));
+    const page2 = Array.from({ length: 30 }, (_, i) => ({ ...candidate, id: 900 - i }));
+    api.lessons.mockReturnValueOnce(of(page1)).mockReturnValueOnce(of(page2));
+    const p = panel();
+    expect(p.hasMore()).toBe(true);
+    p.loadMore();
+    expect(api.lessons).toHaveBeenLastCalledWith('Candidate', null, 100, 100);
+    expect(p.lessons()).toHaveLength(130);
+    expect(p.hasMore()).toBe(false);
+  });
+
+  it('a refresh after loading more keeps every row on screen', () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ ...candidate, id: 1000 - i }));
+    const page2 = Array.from({ length: 100 }, (_, i) => ({ ...candidate, id: 900 - i }));
+    api.lessons.mockReturnValueOnce(of(page1)).mockReturnValueOnce(of(page2));
+    const p = panel();
+    p.loadMore();
+    p.load();
+    expect(api.lessons).toHaveBeenLastCalledWith('Candidate', null, 200, 0);
+  });
+
+  it('an engine that ignores skip: says so instead of repeating the page', () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ ...candidate, id: 1000 - i }));
+    api.lessons.mockReturnValueOnce(of(page1)).mockReturnValueOnce(of(page1));
+    const p = panel();
+    p.loadMore();
+    expect(p.lessons()).toHaveLength(100);
+    expect(p.hasMore()).toBe(false);
+    expect(p.moreNote()).toMatch(/only list the newest 100/);
+  });
+
+  it('a short first page offers no "Load more"', () => {
+    expect(panel().hasMore()).toBe(false);
   });
 });

@@ -87,6 +87,28 @@ export interface AssistantMetrics {
   approvals: AssistantApprovalStats;
   /** The window held more rows than the read cap; the figures cover the newest rows only. */
   truncated: boolean;
+  /**
+   * Health thresholds crossed over THIS window (engine 3f04f4b1+). Undefined on an older engine;
+   * empty — and `thresholds` null — when the engine could not read its options.
+   */
+  breaches?: AssistantHealthBreachDto[];
+  /** The `Llm:AssistantAlert*` thresholds in force (0 = rule off); null when unavailable. */
+  thresholds?: AssistantHealthThresholds | null;
+}
+
+export interface AssistantHealthBreachDto {
+  key: string;
+  severity: string;
+  message: string;
+}
+
+export interface AssistantHealthThresholds {
+  unverifiedRatePct: number;
+  toolErrorRatePct: number;
+  turnP95Seconds: number;
+  spendGuardTrips: number;
+  minTurns: number;
+  toolMinCalls: number;
 }
 
 // ── Lessons (GET/POST assistant/lessons…) ────────────────────────────────────
@@ -112,6 +134,9 @@ export interface AssistantLesson {
   sourceRef: string | null;
   createdBy: string | null;
   reviewedBy: string | null;
+  /** Display names of createdBy / reviewedBy when they are admin users (engine 3f04f4b1+). */
+  createdByName?: string | null;
+  reviewedByName?: string | null;
   reviewNote: string | null;
   createdAtUtc: string;
   reviewedAtUtc: string | null;

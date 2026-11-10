@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_THRESHOLDS,
   breachFromAlert,
+  breachFromMetrics,
+  hasWindowVerdict,
+  toneAgainst,
   countsText,
   duration,
   lessonActions,
@@ -12,7 +16,7 @@ import {
   reviewProblem,
   scopeLabel,
 } from './assistant-ops.logic';
-import type { AssistantLesson } from './assistant-ops.types';
+import type { AssistantLesson, AssistantMetrics, AssistantTurnStats } from './assistant-ops.types';
 
 const lesson = (over: Partial<AssistantLesson> = {}): AssistantLesson => ({
   id: 7,
@@ -121,6 +125,8 @@ describe('reviewBody', () => {
 describe('labels', () => {
   it('names people and scopes plainly', () => {
     expect(personLabel('admin-user:12')).toBe('Operator #12');
+    expect(personLabel('admin-user:12', 'Bode O.')).toBe('Bode O.');
+    expect(personLabel('admin-user:12', '  ')).toBe('Operator #12');
     expect(personLabel(null)).toBe('—');
     expect(scopeLabel('global', null)).toBe('Everywhere');
     expect(scopeLabel('symbol', 'EURUSD')).toBe('Symbol: EURUSD');
@@ -191,5 +197,135 @@ describe('breachFromAlert — the engine alert condition, in words', () => {
     });
     expect(b.severity).toBe('Medium');
     expect(b.title).toBe('Assistant health alert');
+  });
+});
+
+const stats = (over: Partial<AssistantTurnStats> = {}): AssistantTurnStats =>
+  ({
+    turns: 40,
+    answered: 30,
+    finalAnswerRate: 0.75,
+    answerAttempts: 38,
+    holdRate: 0.2,
+    gateHoldsNumbers: 0,
+    gateHoldsAbsence: 0,
+    gateHoldsCausal: 0,
+    unverifiedRate: 0.4211,
+    unverified: 16,
+    checkpointRate: 0,
+    spendGuardTrips: 2,
+    preflightBlocks: 0,
+    writesNotRun: 0,
+    writesRefused: 0,
+    toolParseRetries: 0,
+    outcomes: {},
+    wallP50Seconds: 200,
+    wallP95Seconds: 1000,
+    avgRounds: 0,
+    avgModelCalls: 0,
+    avgToolCalls: 0,
+    toolErrorRate: 0,
+    tokensInput: 0,
+    tokensOutput: 0,
+    tokensCacheRead: 0,
+    avgTokensInput: 0,
+    avgTokensOutput: 0,
+    cacheHitRatio: 0,
+    notionalCostUsd: 0,
+    avgNotionalCostUsd: 0,
+    ...over,
+  }) as AssistantTurnStats;
+
+const metrics = (over: Partial<AssistantMetrics> = {}): AssistantMetrics => ({
+  fromUtc: '',
+  toUtc: '',
+  windowHours: 168,
+  all: stats(),
+  operator: stats(),
+  headless: stats(),
+  tools: [
+    {
+      tool: 'get_candles',
+      calls: 160,
+      errors: 72,
+      errorRate: 0.45,
+      errorClasses: { not_found: 60 },
+      p50Ms: 0,
+      p95Ms: 0,
+      truncatedRate: 0,
+      avgResultChars: 0,
+      parallelShare: 0,
+      operatorCalls: 0,
+      headlessCalls: 0,
+      nonReads: {},
+    },
+  ],
+  approvals: {
+    proposed: 0,
+    confirmed: 0,
+    rejected: 0,
+    failed: 0,
+    pending: 0,
+    approvalRate: 0,
+    failedAfterConfirmRate: 0,
+  },
+  truncated: false,
+  ...over,
+});
+
+describe('thresholds and the window verdict', () => {
+  it('uses the metrics verdict only when the engine sent breaches AND its thresholds', () => {
+    expect(hasWindowVerdict(metrics())).toBe(false); // older engine: no field
+    expect(hasWindowVerdict(metrics({ breaches: [], thresholds: null }))).toBe(false); // options unavailable
+    expect(hasWindowVerdict(metrics({ breaches: [], thresholds: DEFAULT_THRESHOLDS }))).toBe(true);
+  });
+
+  it('tones a figure against the engine limit; a limit of 0 is a rule that is off', () => {
+    expect(toneAgainst(45, 40, true)).toBe('bad');
+    expect(toneAgainst(25, 40, true)).toBe('warn');
+    expect(toneAgainst(5, 40, true)).toBe('good');
+    expect(toneAgainst(99, 0, true)).toBe('neutral');
+    expect(toneAgainst(99, 40, false)).toBe('neutral');
+  });
+
+  it('rewrites the known rules from the window figures and the engine limits', () => {
+    const m = metrics({
+      thresholds: { ...DEFAULT_THRESHOLDS, unverifiedRatePct: 25 },
+      breaches: [],
+    });
+    const u = breachFromMetrics(
+      { key: 'assistant-health:unverified-rate', severity: 'Medium', message: 'x' },
+      m,
+    );
+    expect(u.detail).toContain('16 of 38 operator answers (42%)');
+    expect(u.detail).toContain('limit is 25%');
+    const t = breachFromMetrics(
+      { key: 'assistant-health:tool-errors:get_candles', severity: 'Medium', message: 'x' },
+      m,
+    );
+    expect(t.title).toBe('The get_candles tool keeps failing');
+    expect(t.detail).toContain('72 of 160 calls failed (45%)');
+    expect(t.detail).toContain('not found: 60');
+    const p = breachFromMetrics(
+      { key: 'assistant-health:turn-p95', severity: 'Medium', message: 'x' },
+      m,
+    );
+    expect(p.detail).toContain('16.7 min');
+    expect(p.detail).toContain('15.0 min');
+    expect(
+      breachFromMetrics(
+        { key: 'assistant-health:spend-guard', severity: 'Medium', message: 'x' },
+        m,
+      ).detail,
+    ).toContain('2 question(s)');
+  });
+
+  it('shows an unknown rule in the engine’s own words', () => {
+    const b = breachFromMetrics(
+      { key: 'assistant-health:brand-new', severity: 'High', message: 'Something new crossed.' },
+      metrics(),
+    );
+    expect(b.detail).toBe('Something new crossed.');
+    expect(b.severity).toBe('High');
   });
 });

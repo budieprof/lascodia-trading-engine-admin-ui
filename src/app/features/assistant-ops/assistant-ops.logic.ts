@@ -9,6 +9,8 @@
  */
 import type {
   AssistantHealthAlertRow,
+  AssistantHealthThresholds,
+  AssistantMetrics,
   AssistantLesson,
   AssistantLessonReviewAction,
   AssistantLessonReviewBody,
@@ -225,7 +227,8 @@ export function scopeLabel(kind: string, value: string | null): string {
 }
 
 /** `admin-user:12` → `Operator #12`; engine-made lessons have no person. */
-export function personLabel(who: string | null): string {
+export function personLabel(who: string | null, name?: string | null): string {
+  if (name && name.trim()) return name.trim();
   if (!who) return '—';
   const m = /^admin-user:(.+)$/.exec(who);
   return m ? `Operator #${m[1]}` : who;
@@ -371,4 +374,93 @@ export function breachFromAlert(a: AssistantHealthAlertRow): HealthBreach {
     title: 'Assistant health alert',
     detail: key || 'An assistant health threshold was crossed.',
   };
+}
+
+// ── Thresholds and breaches over the requested window (engine 3f04f4b1+) ────
+
+/** The engine defaults (`LlmOptions.AssistantAlert*`), used when the engine does not send its own. */
+export const DEFAULT_THRESHOLDS: AssistantHealthThresholds = {
+  unverifiedRatePct: 30,
+  toolErrorRatePct: 40,
+  turnP95Seconds: 900,
+  spendGuardTrips: 1,
+  minTurns: 10,
+  toolMinCalls: 20,
+};
+
+export function thresholdsOf(m: AssistantMetrics | null | undefined): AssistantHealthThresholds {
+  return m?.thresholds ?? DEFAULT_THRESHOLDS;
+}
+
+export type Tone = 'good' | 'warn' | 'bad' | 'neutral';
+
+/**
+ * Tone of a "lower is better" figure against an engine limit: bad over the limit, warn from
+ * half of it, good below. Neutral when the rule is off (limit 0) or there is no evidence yet.
+ */
+export function toneAgainst(value: number, limit: number, hasEvidence: boolean): Tone {
+  if (!limit || limit <= 0 || !hasEvidence) return 'neutral';
+  if (value > limit) return 'bad';
+  if (value >= limit / 2) return 'warn';
+  return 'good';
+}
+
+/**
+ * Whether the metrics answer carries the engine's own verdict for the window. An older engine
+ * has no `breaches` field; one that could not read its options sends `[]` with null thresholds —
+ * both mean "fall back to the open alerts".
+ */
+export function hasWindowVerdict(m: AssistantMetrics | null | undefined): boolean {
+  return !!m && Array.isArray(m.breaches) && m.thresholds != null;
+}
+
+/**
+ * One crossed threshold of this window, in plain words. The engine's own message names config
+ * keys and endpoints, so the known rules are rewritten from the window's figures; an unknown
+ * rule shows the engine's message as it is.
+ */
+export function breachFromMetrics(
+  b: { key: string; severity: string; message: string },
+  m: AssistantMetrics,
+): HealthBreach {
+  const t = thresholdsOf(m);
+  const op = m.operator;
+  const rule = b.key.replace(/^assistant-health:/, '');
+  const base = { key: b.key, severity: b.severity, since: null };
+  if (rule === 'unverified-rate')
+    return {
+      ...base,
+      title: 'Too many answers posted unverified',
+      detail:
+        `${op.unverified} of ${op.answerAttempts} operator answers (${pct(op.unverifiedRate)}) went out with a ` +
+        `check still objecting; the limit is ${t.unverifiedRatePct}%. The figures in them could not be traced ` +
+        'to something the assistant read.',
+    };
+  if (rule.startsWith('tool-errors:')) {
+    const name = rule.slice('tool-errors:'.length);
+    const tool = m.tools.find((x) => x.tool === name);
+    return {
+      ...base,
+      title: `The ${name} tool keeps failing`,
+      detail: tool
+        ? `${tool.errors} of ${tool.calls} calls failed (${pct(tool.errorRate)}); the limit is ${t.toolErrorRatePct}%.` +
+          (countsText(tool.errorClasses) !== '—'
+            ? ` Most often: ${countsText(tool.errorClasses)}.`
+            : '')
+        : b.message,
+    };
+  }
+  if (rule === 'turn-p95')
+    return {
+      ...base,
+      title: 'Operator questions are slow',
+      detail: `The slowest 5% took ${duration(op.wallP95Seconds)} or more (typical ${duration(op.wallP50Seconds)}); the limit is ${duration(t.turnP95Seconds)}.`,
+    };
+  if (rule === 'spend-guard')
+    return {
+      ...base,
+      title: 'The spend guard refused questions',
+      detail: `${m.all.spendGuardTrips} question(s) hit a token, call or dollar ceiling for a conversation or the day.`,
+    };
+  return { ...base, title: 'Assistant health alert', detail: b.message || b.key };
 }

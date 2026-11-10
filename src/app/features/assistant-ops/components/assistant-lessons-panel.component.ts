@@ -121,8 +121,8 @@ interface Review {
       } @else {
         <p class="muted small count">
           {{ lessons().length }} lesson{{ lessons().length === 1 ? '' : 's' }}
-          @if (lessons().length >= take) {
-            (the newest {{ take }})
+          @if (hasMore()) {
+            shown — newest first, more below
           }
         </p>
         <ul class="lessons">
@@ -179,7 +179,7 @@ interface Review {
                     l.createdAtUtc | relativeTime
                   }}</span>
                   @if (l.createdBy) {
-                    by {{ person(l.createdBy) }}
+                    by {{ person(l.createdBy, l.createdByName) }}
                   } @else {
                     by the assistant
                   }
@@ -190,7 +190,7 @@ interface Review {
                     <span [title]="l.reviewedAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC'">{{
                       l.reviewedAtUtc | relativeTime
                     }}</span>
-                    by {{ person(l.reviewedBy) }}
+                    by {{ person(l.reviewedBy, l.reviewedByName) }}
                     @if (l.reviewNote) {
                       — “{{ l.reviewNote }}”
                     }
@@ -215,6 +215,16 @@ interface Review {
             </li>
           }
         </ul>
+        @if (hasMore()) {
+          <div class="more">
+            <button type="button" class="act" [disabled]="loadingMore()" (click)="loadMore()">
+              {{ loadingMore() ? 'Loading…' : 'Load ' + pageSize + ' more' }}
+            </button>
+          </div>
+        }
+        @if (moreNote(); as note) {
+          <p class="muted small more-note" role="status">{{ note }}</p>
+        }
       }
 
       <app-confirm-dialog
@@ -497,6 +507,14 @@ interface Review {
         opacity: 0.5;
         cursor: default;
       }
+      .more {
+        display: flex;
+        justify-content: center;
+      }
+      .more-note {
+        margin: 0;
+        text-align: center;
+      }
       .form {
         display: grid;
         gap: var(--space-3);
@@ -527,13 +545,21 @@ export class AssistantLessonsPanelComponent {
   protected readonly scopeMax = SCOPE_VALUE_MAX;
   protected readonly noteMax = NOTE_MAX;
   protected readonly operatorKey = Permission.AccessOperator;
-  readonly take = 200;
+  /** Lessons per page ("Load more" asks for the next page with `skip`). */
+  readonly pageSize = 100;
+  /** The engine's cap on one request (`take` clamps to 1..500). */
+  private static readonly MaxTake = 500;
 
   /** '' = every status. Defaults to the review queue. */
   readonly status = signal('Candidate');
   readonly source = signal('');
 
   readonly lessons = signal<AssistantLesson[]>([]);
+  /** The last page came back full, so there may be more. */
+  readonly hasMore = signal(false);
+  readonly loadingMore = signal(false);
+  /** Why "Load more" stopped short (a failed page, or an engine that ignores `skip`). */
+  readonly moreNote = signal<string | null>(null);
   readonly loading = signal(true);
   readonly refreshing = signal(false);
   readonly loadError = signal<string | null>(null);
@@ -581,14 +607,21 @@ export class AssistantLessonsPanelComponent {
     this.load();
   }
 
+  /** (Re)load from the newest, keeping as many rows as are on screen (up to the engine's cap). */
   load(): void {
     this.inflight?.unsubscribe();
     if (this.lessons().length > 0) this.refreshing.set(true);
+    const take = Math.min(
+      AssistantLessonsPanelComponent.MaxTake,
+      Math.max(this.pageSize, this.lessons().length),
+    );
     this.inflight = this.api
-      .lessons(this.status() || null, this.source() || null, this.take)
+      .lessons(this.status() || null, this.source() || null, take, 0)
       .subscribe({
         next: (rows) => {
           this.lessons.set(rows);
+          this.hasMore.set(rows.length >= take);
+          this.moreNote.set(null);
           this.loadError.set(null);
           this.loading.set(false);
           this.refreshing.set(false);
@@ -597,6 +630,40 @@ export class AssistantLessonsPanelComponent {
           this.loadError.set(errorText(e, 'The engine did not answer GET assistant/lessons.'));
           this.loading.set(false);
           this.refreshing.set(false);
+        },
+      });
+  }
+
+  /** The next page, after the rows on screen. */
+  loadMore(): void {
+    if (this.loadingMore() || !this.hasMore()) return;
+    this.loadingMore.set(true);
+    this.moreNote.set(null);
+    const shown = this.lessons();
+    const filters = `${this.status()}|${this.source()}`;
+    this.api
+      .lessons(this.status() || null, this.source() || null, this.pageSize, shown.length)
+      .subscribe({
+        next: (rows) => {
+          this.loadingMore.set(false);
+          // The filters changed while this page was on its way: it belongs to another list.
+          if (`${this.status()}|${this.source()}` !== filters) return;
+          const seen = new Set(shown.map((l) => l.id));
+          const fresh = rows.filter((r) => !seen.has(r.id));
+          if (rows.length > 0 && fresh.length === 0) {
+            // The same page again: an engine that does not take `skip` yet.
+            this.hasMore.set(false);
+            this.moreNote.set(
+              `This engine can only list the newest ${shown.length} lessons; narrow the filters to see older ones.`,
+            );
+            return;
+          }
+          this.lessons.set([...shown, ...fresh]);
+          this.hasMore.set(rows.length >= this.pageSize);
+        },
+        error: (e: unknown) => {
+          this.loadingMore.set(false);
+          this.moreNote.set(errorText(e, 'Could not load more lessons.'));
         },
       });
   }
@@ -682,8 +749,8 @@ export class AssistantLessonsPanelComponent {
   protected sourceText(s: string): string {
     return sourceLabel(s);
   }
-  protected person(who: string | null): string {
-    return personLabel(who);
+  protected person(who: string | null, name?: string | null): string {
+    return personLabel(who, name);
   }
   protected scopeHint(kind: string): string {
     return (
