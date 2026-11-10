@@ -51,6 +51,7 @@ const session = () => { const n = new Date(); return {
     strategies: async () => { await go('/strategies'); await shot('strategies'); },
     clicks: async () => { await go(process.env.PATHX); await shot((process.env.NAME||'c')+'-0');
       let i = 0; for (const t of (process.env.CLICKS||'').split('|').filter(Boolean)) { i++;
+        if (t.startsWith('key:')) { await page.keyboard.press(t.slice(4)); await page.waitForTimeout(2500); await shot(`${process.env.NAME||'c'}-${i}`); continue; }
         if (t.startsWith('sel:')) { const sel = page.locator('select').last();
           const v = await sel.evaluate((el, txt) => [...el.options].find(o => o.text.includes(txt))?.value, t.slice(4));
           if (v == null) log.errors.push(`no option ${t}: ` + JSON.stringify(await page.locator("select").evaluateAll(els => els.map(e => [...e.options].map(o => o.text).slice(0,8))))); else await sel.selectOption(v);
