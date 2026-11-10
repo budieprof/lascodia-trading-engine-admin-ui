@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { signal } from '@angular/core';
 
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
@@ -136,89 +136,4 @@ describe('chart page — Pine Logs in the dock (PC-I6)', () => {
   });
 });
 
-describe('chart page — keyboard shortcuts leave the Pine editor’s typing alone', () => {
-  function keyed(): Page {
-    const p = page();
-    Object.assign(p, {
-      replayActive: signal(false),
-      paletteOpen: signal(false),
-      technicalsOpen: signal(false),
-      seasonalsOpen: signal(false),
-      tool: signal(null),
-      magnet: signal(false),
-      host: () => null,
-      drawings: {
-        selectedId: signal<string | null>('drawing:1'),
-        remove: vi.fn(),
-        undo: vi.fn(),
-        redo: vi.fn(),
-        copy: vi.fn(),
-        hasClipboard: false,
-      },
-    });
-    return p;
-  }
-  const key = (k: string, target: Partial<HTMLElement>, init: KeyboardEventInit = {}) => {
-    const ev = new KeyboardEvent('keydown', { key: k, cancelable: true, ...init });
-    Object.defineProperty(ev, 'target', { value: target });
-    return ev;
-  };
-  // jsdom implements no isContentEditable, so the editor's content is described, not rendered.
-  const editor = { tagName: 'DIV', isContentEditable: true };
-  const chart = { tagName: 'DIV', isContentEditable: false };
-
-  it('typing "m" in the editor does not toggle the magnet; on the chart it does', () => {
-    const p = keyed();
-    p.onKeydown(key('m', editor));
-    expect(p.magnet()).toBe(false);
-    p.onKeydown(key('m', chart));
-    expect(p.magnet()).toBe(true);
-  });
-
-  it('Backspace in the editor does not delete the selected drawing', () => {
-    const p = keyed();
-    const ev = key('Backspace', editor);
-    p.onKeydown(ev);
-    expect(p.drawings.remove).not.toHaveBeenCalled();
-    expect(ev.defaultPrevented).toBe(false);
-  });
-
-  it('Ctrl+Shift+K on the chart opens its command palette — not the console’s (CC-I11)', () => {
-    const p = keyed();
-    const ev = key('K', chart, { ctrlKey: true, shiftKey: true });
-    const stop = vi.spyOn(ev, 'stopPropagation');
-    p.onKeydown(ev);
-    expect(p.paletteOpen()).toBe(true);
-    expect(stop).toHaveBeenCalled();
-    expect(ev.defaultPrevented).toBe(true);
-  });
-
-  it('TradingView’s Alt keys drive the scale; "/" opens the indicators (CC-I11)', () => {
-    const p = keyed();
-    Object.assign(p, {
-      invertScale: signal(false),
-      scaleMode: signal('normal'),
-      resetScales: vi.fn(),
-      openStudiesDialog: vi.fn(),
-    });
-    p.onKeydown(key('®', chart, { altKey: true, code: 'KeyR' }));
-    expect(p.resetScales).toHaveBeenCalled();
-    p.onKeydown(key('ˆ', chart, { altKey: true, code: 'KeyI' }));
-    expect(p.invertScale()).toBe(true);
-    p.onKeydown(key('¬', chart, { altKey: true, code: 'KeyL' }));
-    expect(p.scaleMode()).toBe('log');
-    p.onKeydown(key('¬', chart, { altKey: true, code: 'KeyL' }));
-    expect(p.scaleMode()).toBe('normal');
-    p.onKeydown(key('/', chart));
-    expect(p.openStudiesDialog).toHaveBeenCalled();
-    // Typing "/" in the editor stays text.
-    p.onKeydown(key('/', editor));
-    expect(p.openStudiesDialog).toHaveBeenCalledTimes(1);
-  });
-
-  it('Ctrl+Z in the editor undoes text, not a drawing', () => {
-    const p = keyed();
-    p.onKeydown(key('z', editor, { ctrlKey: true }));
-    expect(p.drawings.undo).not.toHaveBeenCalled();
-  });
-});
+// The keyboard shortcuts (CC-I11, the editor's typing left alone) are ChartKeyboard's — chart-keyboard.spec (b10-ui).

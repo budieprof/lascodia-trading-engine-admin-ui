@@ -362,8 +362,6 @@ import {
   DOCK_WIDTH_KEY,
   loadDockWidth,
   loadWatchlistOpen,
-  DRAWING_HOTKEYS,
-  CHART_HOTKEYS,
   type ToolbarMenu,
   type StyleChoice,
 } from './chart-page.config';
@@ -420,6 +418,7 @@ import {
 import { ChartSymbolSearch } from './chart-symbol-search';
 import { ChartLinkedCharts } from './chart-linked-charts';
 import { ChartUndoController } from './chart-undo-controller';
+import { ChartKeyboard } from './chart-keyboard';
 import { marketView, type MarketView } from '../../datafeed/market-status';
 import {
   instrumentDescription,
@@ -499,7 +498,7 @@ export { normaliseView };
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: {
-    '(keydown)': 'onKeydown($event)',
+    '(keydown)': 'keyboard.onKeydown($event)',
     '(document:click)': 'closeRailFlyout()',
     tabindex: '0',
     // The shell gives a fill-height page the height its breadcrumbs leave (LayoutComponent).
@@ -4438,180 +4437,15 @@ export class ChartAnalysisPageComponent {
   }
 
   /**
-   * Keyboard shortcuts, matching TradingView's where they exist.
-   *
-   * Bound on the host rather than on `document` so typing in the symbol search
-   * or an indicator input never deletes the selected drawing.
+   * b10-ui: the keyboard shortcuts ({@link ChartKeyboard}); the host's `(keydown)` binding calls `keyboard.onKeydown`.
+   * Bound on the host rather than on `document` so typing in the symbol search or an indicator input never deletes the
+   * selected drawing.
    */
-  onKeydown(ev: KeyboardEvent): void {
-    // Ctrl/Cmd+Shift+M: maximise ⇄ restore the Pine Editor / Tester dock — before the editable check, so it also
-    // works while typing in the editor (CodeMirror binds nothing to it).
-    if (
-      this.dockTab() &&
-      (ev.ctrlKey || ev.metaKey) &&
-      ev.shiftKey &&
-      !ev.altKey &&
-      ev.key.toLowerCase() === 'm'
-    ) {
-      ev.preventDefault();
-      this.setDockMode('max');
-      return;
-    }
-    const target = ev.target as HTMLElement | null;
-    // The Pine editor is a contenteditable, not a field: typing "m" there toggled the magnet, and
-    // Backspace deleted the selected drawing.
-    if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable))
-      return;
-
-    // The Technicals view covers the chart: Esc returns to it, and no chart shortcut acts
-    // on drawings the operator cannot see.
-    if (this.technicalsOpen() || this.seasonalsOpen()) {
-      if (ev.key === 'Escape') {
-        ev.preventDefault();
-        this.technicalsOpen.set(false);
-        this.seasonalsOpen.set(false);
-      }
-      return;
-    }
-
-    const mod = ev.metaKey || ev.ctrlKey;
-    // The chart's command palette (CC-I11): ⌘⇧K / Ctrl+Shift+K (⌘K alone is the console's page search).
-    if (mod && ev.shiftKey && ev.key.toLowerCase() === 'k') {
-      ev.preventDefault();
-      // The console's palette listens on the document for ⌘K with or without Shift: not this one.
-      ev.stopPropagation();
-      this.paletteOpen.set(true);
-      return;
-    }
-    if (mod && ev.key.toLowerCase() === 'z') {
-      ev.preventDefault();
-      if (ev.shiftKey) this.chartUndo.redo();
-      else this.chartUndo.undo();
-      return;
-    }
-    if (mod && ev.key.toLowerCase() === 'y') {
-      ev.preventDefault();
-      this.chartUndo.redo();
-      return;
-    }
-    if (mod && ev.key.toLowerCase() === 'c' && !ev.shiftKey) {
-      const id = this.drawings.selectedId();
-      if (id && !window.getSelection()?.toString()) {
-        ev.preventDefault();
-        this.drawings.copy(id);
-      }
-      return;
-    }
-    if (mod && ev.key.toLowerCase() === 'v' && !ev.shiftKey) {
-      if (this.drawings.hasClipboard) {
-        ev.preventDefault();
-        this.host()?.pasteDrawing();
-      }
-      return;
-    }
-    if (ev.key === 'Enter' && this.tool()) {
-      if (this.host()?.finishDrawing()) ev.preventDefault();
-      return;
-    }
-    if (ev.key === 'Escape') {
-      // An Esc this branch acts on is consumed (preventDefault): the open order ticket
-      // (appModalA11y, a document listener that skips handled keys) closes on the NEXT one.
-      // An open toolbar menu (interval, style, templates, overlays, layouts) is what Esc closes
-      // first; it used to stay open while Esc went to the drawings behind it.
-      if (this.openMenu() !== null || this.layoutMenuOpen() || this.symbolMenuOpen()) {
-        ev.preventDefault();
-        this.openMenu.set(null);
-        this.layoutMenuOpen.set(false);
-        this.symbolMenuOpen.set(false);
-        return;
-      }
-      // TV: Esc first abandons a drawing in progress and drops the tool, then
-      // clears the selection.
-      const acted =
-        this.tool() !== null ||
-        this.railFlyout() !== null ||
-        this.magnetMenuOpen() ||
-        this.drawingMenu() !== null ||
-        this.drawings.selectedId() !== null;
-      if (this.host()?.cancelDrawing() || acted) ev.preventDefault();
-      this.railFlyout.set(null);
-      this.magnetMenuOpen.set(false);
-      this.drawingMenu.set(null);
-      this.tool.set(null);
-      this.drawings.selectedId.set(null);
-      return;
-    }
-    if (ev.key === 'Delete' || ev.key === 'Backspace') {
-      if (this.drawings.selectedIds().size) {
-        ev.preventDefault();
-        // Locked drawings stay: the lock is what stops a stray key deleting one (DR-06). Every other
-        // selected drawing goes (a multi-selection, DR-I10).
-        this.drawings.removeSelectedUnlocked();
-      }
-      return;
-    }
-    // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
-    // (Alt+T types "†") do not get in the way.
-    if (ev.altKey && !mod) {
-      // TradingView's chart keys (CC-I11): reset the view, invert / log / percent scale, snapshot.
-      const action = CHART_HOTKEYS[ev.code];
-      if (action) {
-        ev.preventDefault();
-        if (action === 'reset') this.resetScales();
-        else if (action === 'invert') this.invertScale.set(!this.invertScale());
-        else if (action === 'log')
-          this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
-        else if (action === 'percent')
-          this.scaleMode.set(this.scaleMode() === 'percent' ? 'normal' : 'percent');
-        else this.layoutActions.takeSnapshot();
-        return;
-      }
-      const kind = DRAWING_HOTKEYS[ev.code];
-      if (kind) {
-        ev.preventDefault();
-        this.tool.set(kind);
-        return;
-      }
-    }
-    // Bar Replay, TradingView's keys: Shift+→ forward, Shift+← back, Shift+↓ play / pause (CC-I4).
-    if (this.replayActive() && ev.shiftKey && !mod && !ev.altKey) {
-      const replayKey =
-        ev.key === 'ArrowRight'
-          ? () => void this.replay.step(1)
-          : ev.key === 'ArrowLeft'
-            ? () => void this.replay.step(-1)
-            : ev.key === 'ArrowDown'
-              ? () => this.replay.togglePlay()
-              : null;
-      if (replayKey) {
-        ev.preventDefault();
-        replayKey();
-        return;
-      }
-    }
-    if (ev.key.startsWith('Arrow') && this.drawings.selectedId() && !mod) {
-      // Nudge: one bar sideways / one pixel vertically; Shift ×10.
-      const k = ev.shiftKey ? 10 : 1;
-      const bars = ev.key === 'ArrowLeft' ? -k : ev.key === 'ArrowRight' ? k : 0;
-      const px = ev.key === 'ArrowUp' ? -k : ev.key === 'ArrowDown' ? k : 0;
-      if (this.host()?.nudgeSelectedDrawing(bars, px)) ev.preventDefault();
-      return;
-    }
-    // TradingView: "/" opens the indicators.
-    if (ev.key === '/' && !mod && !ev.altKey) {
-      ev.preventDefault();
-      this.openStudiesDialog();
-      return;
-    }
-    if (ev.key.toLowerCase() === 'm' && !mod) {
-      this.magnet.set(!this.magnet());
-      return;
-    }
-    if (/^[0-9]$/.test(ev.key) && !mod && !ev.altKey) {
-      ev.preventDefault();
-      this.openIntervalBox(ev.key);
-    }
-  }
+  readonly keyboard = new ChartKeyboard({
+    page: this,
+    host: () => this.host(),
+    openIntervalBox: (first) => this.openIntervalBox(first),
+  });
 
   drawingLabel(d: Drawing): string {
     return toolFor(d.kind)?.label ?? d.kind;
