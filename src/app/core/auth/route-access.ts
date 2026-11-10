@@ -79,6 +79,7 @@ export const ROUTE_ACCESS = {
   watchlist: rule(P.MarketdataRead),
   'spot-analysis': rule(P.AccessOperator),
   conversations: rule(P.AccessOperator),
+  assistant: rule(P.AccessOperator), // GET assistant/metrics, assistant/lessons
   'analysis-monitors': rule(P.AccessOperator),
   'algo-engineer/operations': rule(P.AccessOperator),
   'algo-engineer/scorecard': rule(P.AccessOperator),

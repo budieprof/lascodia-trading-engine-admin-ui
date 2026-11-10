@@ -67,6 +67,7 @@ import {
   threadTail,
 } from './chat-live';
 import { UI_ACTION_TOOL, parseUiAction } from './ui-action';
+import { PreflightBadgeComponent } from './preflight-badge.component';
 import {
   ACCEPT_ATTR,
   formatBytes,
@@ -248,6 +249,7 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
     EngineerTurnComponent,
     EngineerThinkingComponent,
     TurnScreenshotComponent,
+    PreflightBadgeComponent,
   ],
   template: `
     <section
@@ -803,6 +805,9 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
                       }}</span>
                       <span class="action-status">{{ m.actionStatus }}</span>
                     </div>
+                    <!-- The engine's dry run of this write (display only — approve / dismiss
+                         below are unchanged). Absent on page commands and literal http calls. -->
+                    <app-preflight-badge [toolName]="m.toolName" [toolArgsJson]="m.toolArgsJson" />
                     <!--
                       A page command is not an engine call, so the http_action rendering below
                       cannot describe it: it has no method and no path, and the generic

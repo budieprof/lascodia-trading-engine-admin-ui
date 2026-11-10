@@ -8,6 +8,7 @@
 /alerts
 /algo-engineer/operations
 /algo-engineer/scorecard
+/assistant
 /analyser-comparison
 /analyser-comparison/audit
 /analysis-monitors

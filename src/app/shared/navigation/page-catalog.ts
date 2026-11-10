@@ -631,6 +631,13 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
   },
   {
     group: 'LLM',
+    label: 'Assistant — Health & Lessons',
+    route: '/assistant',
+    keywords:
+      'admin assistant health metrics unverified answers held checks tool errors latency tokens cache cost approvals spend guard lessons review queue approve reject retire learned rules corrections',
+  },
+  {
+    group: 'LLM',
     label: 'Algo-Engineer — Change Scorecard',
     route: '/algo-engineer/scorecard',
     keywords:

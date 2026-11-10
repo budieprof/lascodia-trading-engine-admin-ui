@@ -220,6 +220,16 @@ export const routes: Routes = [
           ),
       },
       {
+        // The admin assistant's health (GET assistant/metrics) and lessons review queue.
+        path: 'assistant',
+        canActivate: [canAccessPath('assistant')],
+        data: { breadcrumb: 'Assistant' },
+        loadChildren: () =>
+          import('@features/assistant-ops/assistant-ops.routes').then(
+            (m) => m.ASSISTANT_OPS_ROUTES,
+          ),
+      },
+      {
         path: 'analysis-monitors',
         canActivate: [canAccessPath('analysis-monitors')],
         data: { breadcrumb: 'Analysis Monitors' },

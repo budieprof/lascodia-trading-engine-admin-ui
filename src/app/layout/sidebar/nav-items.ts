@@ -103,6 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Proposals', route: '/strategies/llm-proposals', icon: navIcon.Lightbulb },
       { label: 'Conversations', route: '/conversations', icon: navIcon.MessagesSquare },
+      { label: 'Assistant', route: '/assistant', icon: navIcon.BotMessageSquare },
       { label: 'Monitors', route: '/analysis-monitors', icon: navIcon.Telescope },
       { label: 'Agent Operations', route: '/algo-engineer/operations', icon: navIcon.Wrench },
       {
