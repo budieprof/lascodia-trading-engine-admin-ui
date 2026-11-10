@@ -24,8 +24,6 @@ import {
   Timeframe,
   CreateStrategyRequest,
   UpdateStrategyRequest,
-  StrategyTemplateDto,
-  CreateStrategyTemplateRequest,
   StrategyParameterSchemaDto,
   StrategyParameterFieldDto,
   RiskProfileDto,
@@ -49,37 +47,16 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-strategy-dialog.component';
 import { StrategyVersionHistoryComponent } from '../strategy-version-history/strategy-version-history.component';
-import { failureMessage } from '../../util/api-failure';
 import type { StrategyVersionFields } from '../../util/version-diff';
-import { SUB_CONFIG_SCHEMAS } from '../../util/sub-config-schema';
-import { SubConfigEditorComponent } from '../sub-config-editor/sub-config-editor.component';
-
-/**
- * Strategy types authored as Pine v6 scripts. Their Parameters JSON used to hold the retired JSON
- * rules DSL: a saved row without a script is legacy and never runs.
- */
-const PINE_STRATEGY_TYPES: readonly string[] = ['RuleBased', 'LlmProposal'];
+import {
+  StrategyConfigTabsComponent,
+  type StrategyFormTab,
+} from '../strategy-config-tabs/strategy-config-tabs.component';
+import { PINE_STRATEGY_TYPES, StrategyTemplateActions } from './strategy-template-actions';
 
 const STRATEGY_TYPES: readonly StrategyType[] = CREATABLE_STRATEGY_TYPES;
 
-/** Templates that can still seed a strategy — never a legacy JSON-rules (Pine type) one. */
-function loadableTemplates(list: StrategyTemplateDto[] | null | undefined): StrategyTemplateDto[] {
-  return (list ?? []).filter((t) => !PINE_STRATEGY_TYPES.includes(t.strategyType));
-}
-
-// Placeholders shown in each sub-config tab so operators see a working schema example
-// before they fill anything in. Pulled out as a const so the template stays readable
-// and so the same shapes are auto-suggested in any future template editor.
-const SUB_CONFIG_PLACEHOLDERS = {
-  riskOverrides:
-    '{"slMode":"Atr","slMultiplier":1.5,"tpMode":"Atr","tpMultiplier":2.5,"trailingStopAtrMultiplier":1.0}',
-  sizing: '{"mode":"PercentEquity","value":0.01}',
-  sessionFilter: '{"sessionStartUtc":"08:00","sessionEndUtc":"17:00","tradeWeekends":false}',
-  regimeGate: '{"allowedRegimes":["Trending","Breakout"]}',
-  multiTimeframeGate: '{"timeframe":"D1","indicator":"EMA","period":200,"comparator":"PriceAbove"}',
-} as const;
-
-type FormTab = 'inputs' | 'risk' | 'sizing' | 'filters' | 'gates';
+type FormTab = StrategyFormTab;
 
 const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
@@ -99,7 +76,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
   imports: [
     StrategyPreviewPanelComponent,
     ReactiveFormsModule,
-    SubConfigEditorComponent,
+    StrategyConfigTabsComponent,
     CloneStrategyDialogComponent,
     StrategyVersionHistoryComponent,
     ScriptAuthoringComponent,
@@ -126,16 +103,16 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         >
           <div class="dialog-header">
             <h3 class="dialog-title">{{ strategy() ? 'Edit Strategy' : 'Create Strategy' }}</h3>
-            @if (!strategy() && availableTemplates().length > 0) {
+            @if (!strategy() && templates.availableTemplates().length > 0) {
               <div class="template-loader">
                 <label class="template-loader-label">Load from template</label>
                 <select
                   class="form-input template-loader-select"
-                  [value]="selectedTemplateId() ?? ''"
-                  (change)="onTemplateSelect($any($event.target).value)"
+                  [value]="templates.selectedTemplateId() ?? ''"
+                  (change)="templates.onTemplateSelect($any($event.target).value)"
                 >
                   <option value="">— none —</option>
-                  @for (t of availableTemplates(); track t.id) {
+                  @for (t of templates.availableTemplates(); track t.id) {
                     <option [value]="t.id">{{ t.name }}</option>
                   }
                 </select>
@@ -476,76 +453,13 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               }
             }
 
-            <!-- ========== RISK OVERRIDES TAB ========== -->
-            @if (activeTab() === 'risk') {
-              <app-sub-config-editor
-                formControlName="riskOverridesJson"
-                [schema]="schemas.riskOverrides"
-                [placeholder]="placeholders.riskOverrides"
-              />
-              <span class="form-hint">
-                Optional. SL/TP/trailing-stop overrides for signals from this strategy. Leave a
-                field blank to inherit from the assigned risk profile.
-              </span>
-            }
-
-            <!-- ========== SIZING TAB ========== -->
-            @if (activeTab() === 'sizing') {
-              @if (isScriptAuthoring()) {
-                <!-- D126: a script sizes its own orders; the engine refuses a sizing config on one. -->
-                <div class="form-group" data-testid="script-sizing-note">
-                  <span class="form-hint">
-                    A Pine script sizes its own orders: <code>default_qty_type</code> /
-                    <code>default_qty_value</code> in its <code>strategy()</code> call, or
-                    <code>qty</code> on an order — in units of the underlying, as on TradingView
-                    (<code>qty = 100000</code> is one EURUSD lot). Every bound account trades that
-                    size, clamped by its risk profile. To trade more or less on one account, set
-                    that binding's lot multiplier on the strategy's Execution tab.
-                  </span>
-                </div>
-              } @else {
-                <app-sub-config-editor
-                  formControlName="sizingConfigJson"
-                  [schema]="schemas.sizing"
-                  [placeholder]="placeholders.sizing"
-                />
-                <span class="form-hint">
-                  Optional. Position-sizing model, clamped by the account's risk profile. Leave the
-                  mode blank to size at the risk profile's risk per trade.
-                </span>
-              }
-            }
-
-            <!-- ========== FILTERS TAB (session + news) ========== -->
-            @if (activeTab() === 'filters') {
-              <app-sub-config-editor
-                formControlName="sessionFilterJson"
-                [schema]="schemas.sessionFilter"
-                [placeholder]="placeholders.sessionFilter"
-              />
-              <span class="form-hint">
-                Optional. Time-of-day window (UTC) plus optional news embargo. Leave blank to trade
-                around the clock.
-              </span>
-            }
-
-            <!-- ========== GATES TAB (regime + higher-TF) ========== -->
-            @if (activeTab() === 'gates') {
-              <app-sub-config-editor
-                formControlName="regimeGateJson"
-                [schema]="schemas.regimeGate"
-                [placeholder]="placeholders.regimeGate"
-              />
-              <app-sub-config-editor
-                formControlName="multiTimeframeGateJson"
-                [schema]="schemas.mtfGate"
+            <!-- Risk / Sizing / Filters / Gates (b10-ui: their own component, bound to this form). -->
+            @if (activeTab() !== 'inputs') {
+              <app-strategy-config-tabs
+                [tab]="activeTab()"
+                [scriptAuthoring]="isScriptAuthoring()"
                 [strategyTimeframe]="formTimeframe()"
-                [placeholder]="placeholders.multiTimeframeGate"
               />
-              <span class="form-hint">
-                Optional. A regime allowlist and a higher-timeframe confirmation; both blank = no
-                gate.
-              </span>
             }
 
             <!-- A script previews through its own panel (scripting/run); a legacy
@@ -584,7 +498,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                 </div>
               }
 
-              @if (templateNameDraft() !== null) {
+              @if (templates.templateNameDraft() !== null) {
                 <div class="template-save-panel">
                   <label class="form-label" for="strategy-form-template-name">Template name</label>
                   <div class="template-save-row">
@@ -593,32 +507,32 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                       class="form-input"
                       type="text"
                       maxlength="120"
-                      [value]="templateNameDraft()"
-                      (input)="templateNameDraft.set($any($event.target).value)"
-                      (keydown.enter)="$event.preventDefault(); confirmSaveTemplate()"
+                      [value]="templates.templateNameDraft()"
+                      (input)="templates.templateNameDraft.set($any($event.target).value)"
+                      (keydown.enter)="$event.preventDefault(); templates.confirmSaveTemplate()"
                     />
                     <button
                       type="button"
                       class="btn btn-secondary"
-                      (click)="cancelSaveTemplate()"
-                      [disabled]="savingTemplate()"
+                      (click)="templates.cancelSaveTemplate()"
+                      [disabled]="templates.savingTemplate()"
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
                       class="btn btn-primary"
-                      (click)="confirmSaveTemplate()"
-                      [disabled]="savingTemplate() || !templateNameDraft()?.trim()"
+                      (click)="templates.confirmSaveTemplate()"
+                      [disabled]="templates.savingTemplate() || !templates.templateNameDraft()?.trim()"
                     >
-                      @if (savingTemplate()) {
+                      @if (templates.savingTemplate()) {
                         <span class="spinner"></span>
                       } @else {
                         Save template
                       }
                     </button>
                   </div>
-                  @if (templateError(); as terr) {
+                  @if (templates.templateError(); as terr) {
                     <span class="form-error" role="alert">{{ terr }}</span>
                   }
                 </div>
@@ -626,12 +540,12 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 
               <div class="dialog-buttons">
                 <!-- Templates carry no Pine script: a Pine-authored type cannot be one. -->
-                @if (!strategy() && !isRuleBased() && templateNameDraft() === null) {
+                @if (!strategy() && !isRuleBased() && templates.templateNameDraft() === null) {
                   <button
                     type="button"
                     class="btn btn-link save-template-btn"
-                    (click)="saveAsTemplate()"
-                    [disabled]="form.invalid || savingTemplate()"
+                    (click)="templates.saveAsTemplate()"
+                    [disabled]="form.invalid || templates.savingTemplate()"
                     title="Save the current configuration as a reusable template"
                   >
                     Save as template…
@@ -1178,15 +1092,15 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   /** The operator asked to continue this edit on the full page. */
   pageRequested = output<void>();
 
-  savingTemplate = signal(false);
-  /** Name being typed for "Save as template…"; null while that panel is closed. */
-  templateNameDraft = signal<string | null>(null);
-  templateError = signal<string | null>(null);
+  /** b10-ui: "Load from template" / "Save as template…" ({@link StrategyTemplateActions}); the template reads `templates`. */
+  readonly templates = new StrategyTemplateActions({
+    strategiesService: this.strategiesService,
+    notifications: this.notifications,
+    form: () => this.form,
+  });
   cloneOpen = signal(false);
   readonly busy = computed(() => this.saving());
   activeTab = signal<FormTab>('inputs');
-  availableTemplates = signal<StrategyTemplateDto[]>([]);
-  selectedTemplateId = signal<number | null>(null);
 
   // Live count of comma-separated symbols typed into the Symbol input —
   // used by the label and submit button to switch between single-create
@@ -1264,8 +1178,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
   }
   readonly timeframes = TIMEFRAMES;
   readonly timeframeLabels = TIMEFRAME_LABELS;
-  readonly placeholders = SUB_CONFIG_PLACEHOLDERS;
-  readonly schemas = SUB_CONFIG_SCHEMAS;
 
   form!: FormGroup;
 
@@ -1288,10 +1200,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
     // Lazy-load template chooser the first time the modal mounts. Volume is
     // operator-curated (typically <50 templates) so a single fetch is fine.
-    this.strategiesService.listTemplates().subscribe({
-      next: (res) => this.availableTemplates.set(loadableTemplates(res?.data)),
-      error: () => this.availableTemplates.set([]),
-    });
+    this.templates.load();
 
     // Mirror the symbol field into a signal so the parsedSymbols computed
     // updates as the operator types — drives the multi-symbol label and the
@@ -1453,8 +1362,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     // versions from a previously edited row would mislead the operator.
     this.versionHistory()?.reset();
     this.leaving = false;
-    this.templateNameDraft.set(null);
-    this.templateError.set(null);
+    this.templates.closeSavePanel();
     this.updateChangeReason.set('');
     this.cloneOpen.set(false);
     if (s && this.form) {
@@ -1492,7 +1400,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         multiTimeframeGateJson: '',
       });
       this.activeTab.set('inputs');
-      this.selectedTemplateId.set(null);
+      this.templates.selectedTemplateId.set(null);
     }
     if (this.form) {
       this.form.markAsPristine();
@@ -1566,93 +1474,6 @@ export class StrategyFormComponent implements OnInit, OnChanges {
       Custom: 'Custom',
     };
     return map[type] ?? this.formatType(type);
-  }
-
-  /**
-   * Hydrate the form from a template — does NOT touch Symbol or Name (those are
-   * always strategy-specific). Operators usually load a template, then tweak the
-   * symbol + give the new strategy a fresh name. Pre-filling those would be wrong.
-   */
-  onTemplateSelect(rawId: string): void {
-    if (!rawId) {
-      this.selectedTemplateId.set(null);
-      return;
-    }
-    const id = Number(rawId);
-    if (!Number.isFinite(id)) return;
-    const t = this.availableTemplates().find((x) => x.id === id);
-    if (!t) return;
-    this.selectedTemplateId.set(id);
-    this.form.patchValue({
-      strategyType: t.strategyType,
-      parametersJson: t.parametersJson ?? '',
-      riskProfileId: t.riskProfileId,
-      riskOverridesJson: t.riskOverridesJson ?? '',
-      sizingConfigJson: t.sizingConfigJson ?? '',
-      sessionFilterJson: t.sessionFilterJson ?? '',
-      regimeGateJson: t.regimeGateJson ?? '',
-      multiTimeframeGateJson: t.multiTimeframeGateJson ?? '',
-      description: t.description ?? this.form.get('description')?.value,
-    });
-    this.notifications.success(`Loaded template: ${t.name}`);
-  }
-
-  /**
-   * Opens the inline "Save as template" panel, pre-filled with the strategy
-   * name + " template" (so "EURUSD MA Cross" proposes "EURUSD MA Cross
-   * template"). The engine's verdict — e.g. a name clash — shows in the panel.
-   */
-  saveAsTemplate(): void {
-    if (this.form.invalid) return;
-    const baseName = (this.form.value.name as string)?.trim() || 'Untitled';
-    this.templateError.set(null);
-    this.templateNameDraft.set(`${baseName} template`);
-  }
-
-  cancelSaveTemplate(): void {
-    if (this.savingTemplate()) return;
-    this.templateNameDraft.set(null);
-    this.templateError.set(null);
-  }
-
-  confirmSaveTemplate(): void {
-    const name = this.templateNameDraft()?.trim();
-    if (!name || this.savingTemplate()) return;
-    const val = this.form.getRawValue();
-    const data: CreateStrategyTemplateRequest = {
-      name,
-      description: val.description || null,
-      strategyType: val.strategyType,
-      parametersJson: val.parametersJson || '{}',
-      riskProfileId: val.riskProfileId || null,
-      riskOverridesJson: val.riskOverridesJson || null,
-      sizingConfigJson: val.sizingConfigJson || null,
-      sessionFilterJson: val.sessionFilterJson || null,
-      regimeGateJson: val.regimeGateJson || null,
-      multiTimeframeGateJson: val.multiTimeframeGateJson || null,
-    };
-
-    this.savingTemplate.set(true);
-    this.templateError.set(null);
-    this.strategiesService.createTemplate(data, { silent: true }).subscribe({
-      next: (res) => {
-        this.savingTemplate.set(false);
-        if (res?.status) {
-          this.notifications.success(`Template '${name}' saved`);
-          this.templateNameDraft.set(null);
-          // Refresh dropdown so the new template appears immediately.
-          this.strategiesService.listTemplates().subscribe({
-            next: (list) => this.availableTemplates.set(loadableTemplates(list?.data)),
-          });
-        } else {
-          this.templateError.set(failureMessage(res, 'The engine did not save the template.'));
-        }
-      },
-      error: (err) => {
-        this.savingTemplate.set(false);
-        this.templateError.set(failureMessage(err, 'Saving the template failed.'));
-      },
-    });
   }
 
   /**
