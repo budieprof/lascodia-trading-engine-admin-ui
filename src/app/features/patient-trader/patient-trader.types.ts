@@ -81,6 +81,14 @@ export interface PatientTraderConfig {
   cardWatchExpiryHours: number;
   /** Admin user the headless analysis runs as; 0 = the oldest active admin. */
   analystAdminUserId: number;
+  /**
+   * The instruction each assistant analysis is given. Blank = the engine's built-in sentence.
+   * `{symbol}` and `{timeframe}` are filled in per market. The mode line, the cards already
+   * watching and the gate limits are always added after it by the engine.
+   */
+  analysisInstruction: string;
+  /** The engine's built-in instruction (read-only; shown and used by "Reset to default"). */
+  defaultAnalysisInstruction?: string;
 }
 
 export type PatientTraderEngine = 'Assistant' | 'Classic';
@@ -125,6 +133,7 @@ export const DEFAULT_PATIENT_TRADER_CONFIG: PatientTraderConfig = {
   analysisMaxResumes: 8,
   cardWatchExpiryHours: 24,
   analystAdminUserId: 0,
+  analysisInstruction: '',
 };
 
 /** One market's current standing view. */

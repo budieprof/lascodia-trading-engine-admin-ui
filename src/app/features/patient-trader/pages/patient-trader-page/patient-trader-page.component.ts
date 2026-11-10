@@ -33,6 +33,18 @@ import {
  * is answerable before a penny is risked) and fill rate (do its entries ever actually get hit).
  */
 /** A new set with `id` flipped — signals compare by reference, so mutating in place is invisible. */
+/**
+ * Editable copy of a config, with the engine's built-in instruction filled in when none is saved,
+ * so the box shows the text actually being sent rather than an empty field.
+ */
+function withInstructionShown(c: PatientTraderConfig): PatientTraderConfig {
+  const next = structuredClone(c);
+  if (!next.analysisInstruction?.trim()) {
+    next.analysisInstruction = next.defaultAnalysisInstruction ?? '';
+  }
+  return next;
+}
+
 function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
   const next = new Set(set);
   if (!next.delete(id)) next.add(id);
@@ -241,6 +253,36 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                       name="analystAdminUserId"
                     />
                   </div>
+                </div>
+
+                <div class="field">
+                  <div class="instr-head">
+                    <label for="pt-instruction">Analysis instruction</label>
+                    <span class="instr-tag" [class.custom]="isCustomInstruction(d)">
+                      {{ isCustomInstruction(d) ? 'Custom' : 'Built-in' }}
+                    </span>
+                    <span class="spacer"></span>
+                    @if (isCustomInstruction(d)) {
+                      <button type="button" class="linkish" (click)="resetInstruction()">
+                        Reset to default
+                      </button>
+                    }
+                  </div>
+                  <textarea
+                    id="pt-instruction"
+                    rows="6"
+                    [maxlength]="instructionMaxLength"
+                    [(ngModel)]="d.analysisInstruction"
+                    name="analysisInstruction"
+                    [placeholder]="d.defaultAnalysisInstruction ?? ''"
+                  ></textarea>
+                  <p class="muted small">
+                    What the assistant is asked to do for each market. Use
+                    <code>{{ '{' }}symbol{{ '}' }}</code> and <code>{{ '{' }}timeframe{{ '}' }}</code>
+                    for the market being read. The engine always adds the mode, the cards already
+                    being watched and the gate limits after it. Applies from the next analysis.
+                    {{ d.analysisInstruction.length }} / {{ instructionMaxLength }}
+                  </p>
                 </div>
               }
 
@@ -999,7 +1041,8 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         gap: var(--space-3);
       }
       input,
-      select {
+      select,
+      textarea {
         font: inherit;
         padding: 7px 10px;
         border: 1px solid var(--border);
@@ -1010,6 +1053,35 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
       input[type='checkbox'] {
         width: auto;
         padding: 0;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 110px;
+        line-height: 1.45;
+      }
+      .instr-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .instr-head > label {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+      }
+      .instr-head .spacer {
+        flex: 1;
+      }
+      .instr-tag {
+        font-size: 10px;
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+      }
+      .instr-tag.custom {
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .linkish {
         border: none;
@@ -1461,9 +1533,26 @@ export class PatientTraderPageComponent {
   private readonly seedDraft = effect(() => {
     const loaded = this.config();
     if (loaded && this.localDraft() === null) {
-      this.localDraft.set(structuredClone(loaded));
+      this.localDraft.set(withInstructionShown(loaded));
     }
   });
+
+  readonly instructionMaxLength = 8000;
+
+  /** True when the instruction differs from the engine's built-in one. */
+  isCustomInstruction(c: PatientTraderConfig): boolean {
+    const text = (c.analysisInstruction ?? '').trim();
+    return text.length > 0 && text !== (c.defaultAnalysisInstruction ?? '').trim();
+  }
+
+  /** Puts the built-in instruction back in the box. Saved, it is stored as "use the default". */
+  resetInstruction(): void {
+    const current = this.draft();
+    if (!current) return;
+    const next = structuredClone(current);
+    next.analysisInstruction = next.defaultAnalysisInstruction ?? '';
+    this.localDraft.set(next);
+  }
 
   readonly saving = signal(false);
   readonly saveMessage = signal<string | null>(null);
@@ -1524,6 +1613,8 @@ export class PatientTraderPageComponent {
       .map((m) => ({ ...m, symbol: m.symbol.trim().toUpperCase() }))
       .filter((m) => m.symbol.length > 0);
     payload.mode = payload.mode as PatientTraderMode;
+    // Read-only on the engine; the built-in text saved unchanged is stored as "use the default".
+    delete payload.defaultAnalysisInstruction;
 
     this.saving.set(true);
     this.saveMessage.set(null);
@@ -1531,7 +1622,7 @@ export class PatientTraderPageComponent {
     this.svc.saveConfig(payload, { reason: this.reason }).subscribe({
       next: (result) => {
         // The PERSISTED state wins — anything governance queued or refused shows its real reading.
-        this.localDraft.set(structuredClone(result.config));
+        this.localDraft.set(withInstructionShown(result.config));
         this.saveMessage.set(result.message ?? 'Saved.');
         this.saving.set(false);
         this.reason = '';
