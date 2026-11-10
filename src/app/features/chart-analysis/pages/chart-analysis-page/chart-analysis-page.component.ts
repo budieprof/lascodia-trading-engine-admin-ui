@@ -95,7 +95,6 @@ import {
   type ChartScriptCatalog,
   type ChartScriptItem,
 } from '../../scripts/chart-script.service';
-import { isBusy } from '../../scripts/script-run-state';
 import type { ScriptChip } from '../../scripts/script-chip.component';
 import {
   displayOverrides,
@@ -258,15 +257,7 @@ import {
   type CompareSeriesSpec,
 } from '../../compare/compare-series';
 import { CompareDialogComponent } from '../../compare/compare-dialog.component';
-import {
-  linkedCharts,
-  panelLayers,
-  panelStudyChoices,
-  sharedRun,
-  withStudy,
-  withoutStudy,
-  type PanelScript,
-} from '../../workspace/chart-panels';
+import { sharedRun } from '../../workspace/chart-panels';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
   recalled,
@@ -280,14 +271,7 @@ import {
 } from '../../chart/chart-settings-dialog.component';
 import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 import { ChartLayoutActions } from './chart-layout-actions';
-import {
-  UndoHistory,
-  describeChange,
-  sameUndoable,
-  undoableOf,
-  type UndoEntry,
-  type UndoableChart,
-} from '../../workspace/undo-history';
+import type { UndoableChart } from '../../workspace/undo-history';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 
@@ -434,6 +418,8 @@ import {
   type SyntheticSpec,
 } from '../../compare/synthetic';
 import { ChartSymbolSearch } from './chart-symbol-search';
+import { ChartLinkedCharts } from './chart-linked-charts';
+import { ChartUndoController } from './chart-undo-controller';
 import { marketView, type MarketView } from '../../datafeed/market-status';
 import {
   instrumentDescription,
@@ -1983,8 +1969,8 @@ export class ChartAnalysisPageComponent {
     calendarCodeOf: (symbol) =>
       this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null,
     loadCalendar: (code) => this.instruments.calendar(code).then((cal) => (cal ? exchangeSessionsOf(cal) : null)),
-    linkSymbol: (id, symbol) => this.linkSymbol(id, symbol),
-    linkInterval: (id, r) => this.linkInterval(id, r),
+    linkSymbol: (id, symbol) => this.linked.linkSymbol(id, symbol),
+    linkInterval: (id, r) => this.linked.linkInterval(id, r),
   });
   readonly splitLayout = this.split.layout;
   readonly comparePanels = this.split.panels;
@@ -2201,16 +2187,16 @@ export class ChartAnalysisPageComponent {
     // CC-I11: one undo history. Drawing steps arrive from the drawing store; studies, scripts and chart settings are
     // recorded here as the operator changes them (a burst of changes within half a second is one step).
     this.drawings.undoHook = {
-      recorded: (symbol) => this.undoHistory.record({ kind: 'drawing', symbol }),
-      dropped: (symbol) => this.undoHistory.dropDrawing(symbol),
+      recorded: (symbol) => this.chartUndo.undoHistory.record({ kind: 'drawing', symbol }),
+      dropped: (symbol) => this.chartUndo.undoHistory.dropDrawing(symbol),
     };
     this.destroyRef.onDestroy(() => {
       this.drawings.undoHook = null;
-      clearTimeout(this.undoTimer);
+      this.chartUndo.dispose();
     });
     effect(() => {
-      const now = this.undoableState();
-      untracked(() => this.noteUndoable(now));
+      const now = this.chartUndo.undoableState();
+      untracked(() => this.chartUndo.noteUndoable(now));
     });
     // A live price belongs to one symbol: a switch waits for the new symbol's first tick.
     effect(() => {
@@ -2242,7 +2228,7 @@ export class ChartAnalysisPageComponent {
           if (last === undefined) continue;
           for (const s of p.scripts)
             if (s.ranTo !== last && !sharedRun(main, s, p.symbol, p.resolution))
-              this.runPanelScript(p.id, s.item.key);
+              this.linked.runPanelScript(p.id, s.item.key);
         }
       });
     });
@@ -3003,13 +2989,13 @@ export class ChartAnalysisPageComponent {
       replaceUrl: true,
     });
     void this.reload();
-    if (propagate) this.linkSymbol('main', symbol);
+    if (propagate) this.linked.linkSymbol('main', symbol);
   }
 
   /** Switch the main chart's timeframe — and, with interval sync on, the charts linked to it (CC-I5). */
   selectResolution(r: TvResolution, propagate = true): void {
     if (r === this.resolution()) return;
-    if (propagate) this.linkInterval('main', r);
+    if (propagate) this.linked.linkInterval('main', r);
     this.resolution.set(r);
     void this.router.navigate([], {
       relativeTo: this.route,
@@ -3796,212 +3782,6 @@ export class ChartAnalysisPageComponent {
     void this.loadPanel(id);
   }
 
-  // ── Linked charts (CC-I5) ──────────────────────────────────────────────────
-
-  /** A chart's link group ('main' is the main chart). */
-  private linkOf(id: string): number {
-    return id === 'main'
-      ? this.mainLink()
-      : (this.comparePanels().find((p) => p.id === id)?.link ?? 0);
-  }
-
-  /** The charts in `id`'s link group besides it. */
-  private linkedTo(id: string): string[] {
-    return linkedCharts(id, this.linkOf(id), this.mainLink(), this.comparePanels());
-  }
-
-  private hostOf(id: string): ChartHostComponent | undefined {
-    if (id === 'main') return this.host();
-    return this.panelHosts()[this.comparePanels().findIndex((p) => p.id === id)];
-  }
-
-  /** The operator's crosshair on one chart: the linked charts put theirs on the same bar (crosshair sync). */
-  onChartCrosshair(id: string, utcMs: number | null): void {
-    if (!this.chartSync().crosshair) return;
-    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncCrosshair(utcMs);
-  }
-
-  /** The operator panned or zoomed one chart: the linked charts show the same span (time sync). */
-  onChartRange(id: string, range: { fromMs: number; toMs: number }): void {
-    if (!this.chartSync().time) return;
-    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncRange(range.fromMs, range.toMs);
-  }
-
-  /** A chart switched symbol: with symbol sync on, the charts linked to it follow. */
-  private linkSymbol(source: string, symbol: string): void {
-    if (!this.chartSync().symbol) return;
-    for (const t of this.linkedTo(source)) {
-      if (t === 'main') {
-        if (this.symbol() !== symbol) this.selectSymbol(symbol, false);
-      } else if (this.comparePanels().find((p) => p.id === t)?.symbol !== symbol)
-        this.setPanelSymbol(t, symbol, false);
-    }
-  }
-
-  /** A chart switched timeframe: with interval sync on, the charts linked to it follow. */
-  private linkInterval(source: string, resolution: string): void {
-    if (!this.chartSync().interval) return;
-    for (const t of this.linkedTo(source)) {
-      if (t === 'main') {
-        if (this.resolution() !== resolution)
-          this.selectResolution(resolution as TvResolution, false);
-      } else if (this.comparePanels().find((p) => p.id === t)?.resolution !== resolution)
-        this.setPanelResolution(t, resolution, false);
-    }
-  }
-
-  setPanelLink(id: string, link: number): void {
-    this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, link: linkGroupOf(link) } : p)),
-    );
-  }
-
-  setMainLink(link: number): void {
-    this.mainLink.set(linkGroupOf(link));
-  }
-
-  /** The sync switches the layout menu offers. */
-  readonly syncKeys: ReadonlyArray<{ key: keyof ChartSync; label: string; title: string }> = [
-    {
-      key: 'symbol',
-      label: 'symbol',
-      title: 'A symbol switch on one linked chart switches the others',
-    },
-    {
-      key: 'interval',
-      label: 'interval',
-      title: 'A timeframe switch on one linked chart switches the others',
-    },
-    { key: 'crosshair', label: 'crosshair', title: 'The crosshair moves on every linked chart' },
-    {
-      key: 'time',
-      label: 'time range',
-      title: 'Panning or zooming one linked chart shows the same span on the others',
-    },
-  ];
-
-  setSync(key: keyof ChartSync, on: boolean): void {
-    this.chartSync.update((s) => ({ ...s, [key]: on }));
-  }
-
-  // ── The other charts' studies and scripts (CC-I5) ─────────────────────────
-
-  /** The studies another chart offers (those reading its own bars only). */
-  readonly panelStudyDefs = panelStudyChoices(INDICATORS);
-  /** The Pine indicators another chart offers: My scripts and the examples. */
-  readonly panelScriptChoices = computed(() => {
-    const c = this.scriptCatalog();
-    return c ? [...c.mine, ...c.examples].filter((i) => i.kind === 'indicator') : [];
-  });
-
-  /** "+ Study" on another chart: a built-in (`study:<id>`) or a Pine indicator (`script:<key>`). */
-  panelAdd(id: string, choice: string): void {
-    if (choice.startsWith('study:')) {
-      const def = indicatorById(choice.slice(6));
-      if (!def) return;
-      const uid = `${def.id}-${Date.now().toString(36)}`;
-      this.comparePanels.update((list) =>
-        list.map((p) =>
-          p.id === id ? { ...p, indicators: withStudy(p.indicators, def, uid) } : p,
-        ),
-      );
-    } else if (choice.startsWith('script:')) {
-      const item = this.panelScriptChoices().find((i) => i.key === choice.slice(7));
-      if (!item) return;
-      this.comparePanels.update((list) =>
-        list.map((p) =>
-          p.id === id && !p.scripts.some((s) => s.item.key === item.key)
-            ? {
-                ...p,
-                scripts: [
-                  ...p.scripts,
-                  { item, values: {}, result: null, error: null, ranTo: null },
-                ],
-              }
-            : p,
-        ),
-      );
-    }
-  }
-
-  removePanelStudy(id: string, uid: string): void {
-    this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, indicators: withoutStudy(p.indicators, uid) } : p)),
-    );
-  }
-
-  removePanelScript(id: string, key: string): void {
-    this.comparePanels.update((list) =>
-      list.map((p) =>
-        p.id === id ? { ...p, scripts: p.scripts.filter((s) => s.item.key !== key) } : p,
-      ),
-    );
-  }
-
-  /** Runs of the other charts' scripts in flight, by `panel|key`. */
-  private readonly panelRuns = new Set<string>();
-
-  /**
-   * Run one of another chart's scripts on its series, to now. A run the main chart already has (same script, inputs
-   * and series) is drawn from there instead — a second chart never doubles the engine's work for it.
-   */
-  private runPanelScript(id: string, key: string): void {
-    const panel = this.comparePanels().find((p) => p.id === id);
-    const script = panel?.scripts.find((s) => s.item.key === key);
-    const last = panel?.bars.at(-1);
-    if (!panel || !script || !last) return;
-    const flight = `${id}|${key}`;
-    if (this.panelRuns.has(flight)) return;
-    this.panelRuns.add(flight);
-    const { symbol, resolution } = panel;
-    const land = (patch: Partial<PanelScript>): void => {
-      this.panelRuns.delete(flight);
-      this.comparePanels.update((list) =>
-        list.map((p) =>
-          p.id === id && p.symbol === symbol && p.resolution === resolution
-            ? {
-                ...p,
-                scripts: p.scripts.map((s) =>
-                  s.item.key === key ? { ...s, ...patch, ranTo: last.time } : s,
-                ),
-              }
-            : p,
-        ),
-      );
-    };
-    const bars = Math.min(Math.max(panel.bars.length, PAGE_BARS), MAX_SCRIPT_BARS);
-    this.chartScripts
-      .runOnChart(script.item, symbol, resolution, script.values, bars, { chartType: 'standard' })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => land(result.error ? { error: result.error } : { result, error: null }),
-        error: (e: unknown) =>
-          land({
-            error: isBusy(e)
-              ? 'The engine is busy: it runs again at the next bar.'
-              : e instanceof Error
-                ? e.message
-                : 'The run failed.',
-          }),
-      });
-  }
-
-  /** Each other chart's script layers, the same array while nothing it draws changed (no redraw per tick). */
-  private readonly panelLayerCache = new Map<string, ChartScriptLayer[]>();
-  readonly panelLayerMap = computed(() => {
-    const main = this.scriptRuns();
-    const out = new Map<string, ChartScriptLayer[]>();
-    for (const p of this.comparePanels()) {
-      const next = panelLayers(p.scripts, main, p.symbol, p.resolution);
-      const prev = this.panelLayerCache.get(p.id);
-      const layers = prev && sameLayers(prev, next) ? prev : next;
-      this.panelLayerCache.set(p.id, layers);
-      out.set(p.id, layers);
-    }
-    return out;
-  });
-  readonly noLayers: ChartScriptLayer[] = [];
-
   panelPrecision(symbol: string): number {
     return this.panelFacts(symbol).precision;
   }
@@ -4052,6 +3832,26 @@ export class ChartAnalysisPageComponent {
   readonly mainLink = signal(0);
   /** What linked charts follow of each other (CC-I5). */
   readonly chartSync = signal<Required<ChartSync>>(restoredSync(undefined));
+
+  // ── Linked charts and the other charts' studies / scripts (CC-I5) ──────────
+  /** b10-ui: link groups + sync, and each other chart's studies / scripts ({@link ChartLinkedCharts}); the template reads `linked`. */
+  readonly linked = new ChartLinkedCharts({
+    comparePanels: this.comparePanels,
+    mainLink: this.mainLink,
+    chartSync: this.chartSync,
+    symbol: () => this.symbol(),
+    resolution: () => this.resolution(),
+    host: () => this.host(),
+    panelHosts: () => this.panelHosts(),
+    selectSymbol: (symbol, propagate) => this.selectSymbol(symbol, propagate),
+    selectResolution: (r, propagate) => this.selectResolution(r, propagate),
+    setPanelSymbol: (id, symbol, propagate) => this.setPanelSymbol(id, symbol, propagate),
+    setPanelResolution: (id, r, propagate) => this.setPanelResolution(id, r, propagate),
+    scriptCatalog: () => this.scriptCatalog(),
+    scriptRuns: () => this.scriptRuns(),
+    chartScripts: this.chartScripts,
+    destroyRef: this.destroyRef,
+  });
 
   /** A layout's split view, restored: the arrangement, then each other chart's series and studies, loaded. */
   private restoreSplit(
@@ -4339,137 +4139,6 @@ export class ChartAnalysisPageComponent {
     }
   }
 
-  // ── One undo history (CC-I11) ────────────────────────────────────────────
-
-  readonly undoHistory = new UndoHistory();
-  /** What undo covers of the chart as it stands (studies, scripts, settings), changing only when that changes. */
-  private readonly undoableState = computed(() => undoableOf(this.captureState()), {
-    equal: sameUndoable,
-  });
-  /** The chart as the last recorded step left it. */
-  private undoBaseline: UndoableChart | null = null;
-  /** The chart before a burst of changes still settling; recorded as one step when it settles. */
-  private undoPending: UndoableChart | null = null;
-  private undoTimer: ReturnType<typeof setTimeout> | undefined;
-  /** True while an undo / redo puts the chart back: that is not a new step. */
-  private undoing = false;
-
-  /** A step of the history applies to the chart on screen: chart steps always, drawing steps of this symbol. */
-  private readonly undoApplies = (e: UndoEntry): boolean =>
-    e.kind === 'chart' || e.symbol === this.symbol();
-
-  readonly undoTitle = computed(() => {
-    this.undoHistory.revision();
-    const e = this.undoHistory.peekUndo(this.undoApplies);
-    return e ? `Undo ${this.undoEntryLabel(e)} (⌘Z)` : 'Nothing to undo';
-  });
-  readonly redoTitle = computed(() => {
-    this.undoHistory.revision();
-    const e = this.undoHistory.peekRedo(this.undoApplies);
-    return e ? `Redo ${this.undoEntryLabel(e)} (⇧⌘Z)` : 'Nothing to redo';
-  });
-  readonly canUndo = computed(() => {
-    this.undoHistory.revision();
-    this.drawings.canUndo();
-    return this.undoHistory.peekUndo(this.undoApplies) !== null;
-  });
-  readonly canRedo = computed(() => {
-    this.undoHistory.revision();
-    this.drawings.canRedo();
-    return this.undoHistory.peekRedo(this.undoApplies) !== null;
-  });
-
-  private undoEntryLabel(e: UndoEntry): string {
-    return e.kind === 'drawing' ? 'drawing' : e.label;
-  }
-
-  /** The undoable chart changed: a new step once the burst settles (not while a layout or an undo is applied). */
-  private noteUndoable(now: UndoableChart): void {
-    if (!this.restored || this.applyingState || this.undoing) {
-      if (!this.undoPending) this.undoBaseline = now;
-      return;
-    }
-    if (!this.undoBaseline) {
-      this.undoBaseline = now;
-      return;
-    }
-    if (sameUndoable(now, this.undoBaseline)) return;
-    this.undoPending ??= this.undoBaseline;
-    this.undoBaseline = now;
-    clearTimeout(this.undoTimer);
-    this.undoTimer = setTimeout(() => this.commitUndoStep(), 500);
-  }
-
-  private commitUndoStep(): void {
-    clearTimeout(this.undoTimer);
-    const before = this.undoPending;
-    const after = this.undoBaseline;
-    this.undoPending = null;
-    if (!before || !after || sameUndoable(before, after)) return;
-    this.undoHistory.record({
-      kind: 'chart',
-      before,
-      after,
-      label: describeChange(before, after, (i) => this.labelFor(i)),
-    });
-  }
-
-  /** Ctrl+Z, the toolbar and the context menu: the newest step that applies to this chart goes back. */
-  undo(): void {
-    this.commitUndoStep();
-    const e = this.undoHistory.undo(this.undoApplies);
-    if (!e) return;
-    if (e.kind === 'drawing') this.drawings.undo();
-    else this.restoreUndoable(e.before);
-  }
-
-  redo(): void {
-    this.commitUndoStep();
-    const e = this.undoHistory.redo(this.undoApplies);
-    if (!e) return;
-    if (e.kind === 'drawing') this.drawings.redo();
-    else this.restoreUndoable(e.after);
-  }
-
-  /**
-   * Put the chart's studies, scripts and settings back as `u` held them. Scripts that left come back (run again
-   * with their inputs), scripts that came go, scripts whose inputs changed run again with the old ones; a change of
-   * display only is applied in place.
-   */
-  private restoreUndoable(u: UndoableChart): void {
-    this.undoing = true;
-    try {
-      this.applyChartSettings(u.settings);
-      this.active.set(u.indicators.map((i) => ({ ...i, params: { ...i.params } })));
-      const target = new Map(u.scripts.map((w) => [w.key, w]));
-      for (const w of this.workspaceScripts())
-        if (!target.has(w.key)) this.removeScriptFromChart(w.key);
-      for (const w of u.scripts) {
-        const run = this.scriptRuns().find((r) => r.item.key === w.key);
-        if (run && JSON.stringify(run.values) === JSON.stringify(w.values)) {
-          if (JSON.stringify(run.display ?? {}) !== JSON.stringify(w.display ?? {}))
-            this.scriptRuns.update((list) =>
-              list.map((r) =>
-                r === run ? { ...r, display: w.display ? { ...w.display } : undefined } : r,
-              ),
-            );
-          continue;
-        }
-        if (!run) this.restoringScripts.update((l) => [...l.filter((x) => x.key !== w.key), w]);
-        this.runScript(
-          run?.item ?? restoredScriptItem(w, this.chartScripts.savedScripts()),
-          { ...w.values },
-          true,
-        );
-      }
-    } finally {
-      queueMicrotask(() => {
-        this.undoBaseline = this.undoableState();
-        this.undoing = false;
-      });
-    }
-  }
-
   /** Zoom/scroll/pane heights waiting for the chart's first data. */
   private pendingView: ChartWorkspaceState['view'] = null;
   /** The series a pending view is for (a symbol's remembered zoom); null: whatever loads next. */
@@ -4480,6 +4149,26 @@ export class ChartAnalysisPageComponent {
   private restored = false;
   /** Restored scripts whose run has not come back yet — still part of the layout. */
   private readonly restoringScripts = signal<WorkspaceScript[]>([]);
+
+  // ── One undo history (CC-I11) ────────────────────────────────────────────
+
+  /** b10-ui: the undo history, undo / redo and their titles ({@link ChartUndoController}); the template reads `chartUndo`. */
+  readonly chartUndo = new ChartUndoController({
+    captureState: () => this.captureState(),
+    symbol: () => this.symbol(),
+    drawings: this.drawings,
+    restored: () => this.restored,
+    applyingState: () => this.applyingState,
+    labelFor: (i) => this.labelFor(i),
+    applyChartSettings: (s) => this.applyChartSettings(s),
+    active: this.active,
+    workspaceScripts: () => this.workspaceScripts(),
+    removeScriptFromChart: (key) => this.removeScriptFromChart(key),
+    scriptRuns: this.scriptRuns,
+    restoringScripts: this.restoringScripts,
+    runScript: (item, values, replace) => this.runScript(item, values, replace),
+    savedScripts: () => this.chartScripts.savedScripts(),
+  });
 
   /**
    * Apply a saved workspace. Missing fields fall back to the chart's defaults, so a new layout
@@ -4539,10 +4228,7 @@ export class ChartAnalysisPageComponent {
         this.applyingState = false;
         this.restored = true;
         // Another layout's chart: its steps are not this one's to undo (drawing steps stay, they are per symbol).
-        clearTimeout(this.undoTimer);
-        this.undoPending = null;
-        this.undoBaseline = this.undoableState();
-        this.undoHistory.clearChart();
+        this.chartUndo.rebase();
       });
     }
   }
@@ -4799,13 +4485,13 @@ export class ChartAnalysisPageComponent {
     }
     if (mod && ev.key.toLowerCase() === 'z') {
       ev.preventDefault();
-      if (ev.shiftKey) this.redo();
-      else this.undo();
+      if (ev.shiftKey) this.chartUndo.redo();
+      else this.chartUndo.undo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'y') {
       ev.preventDefault();
-      this.redo();
+      this.chartUndo.redo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'c' && !ev.shiftKey) {
