@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { StrategyPreviewPanelComponent } from '../strategy-preview-panel/strategy-preview-panel.component';
+import { StrategyTypedParametersComponent } from '../strategy-typed-parameters/strategy-typed-parameters.component';
 import {
   CLASSIC_PINE_LIBRARY_HINT,
   CREATABLE_STRATEGY_TYPES,
@@ -77,6 +78,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
     StrategyPreviewPanelComponent,
     ReactiveFormsModule,
     StrategyConfigTabsComponent,
+    StrategyTypedParametersComponent,
     CloneStrategyDialogComponent,
     StrategyVersionHistoryComponent,
     ScriptAuthoringComponent,
@@ -358,63 +360,13 @@ const TIMEFRAME_LABELS: Record<string, string> = {
               }
 
               <!-- Typed parameter form (v1) — drives the Parameters JSON textarea
-                   below for strategy types with a registered schema. Operators on
-                   types without a schema see only the textarea (legacy behaviour). -->
+                   below for strategy types with a registered schema (b10-ui: its own component). -->
               @if (parameterSchema(); as schema) {
-                <div class="typed-params">
-                  <header class="typed-params-head">
-                    <span>Typed parameters · {{ schema.fields.length }} fields</span>
-                    <span class="muted small">edits sync to Parameters JSON below</span>
-                  </header>
-                  <div class="typed-params-grid">
-                    @for (f of schema.fields; track f.name) {
-                      <div class="typed-params-field">
-                        <label class="form-label" [title]="f.description ?? ''">
-                          {{ f.label }}
-                          @if (f.description) {
-                            <span class="muted small"> — {{ f.description }}</span>
-                          }
-                        </label>
-                        @if (f.kind === 'enum' && f.enumValues; as opts) {
-                          <select
-                            class="form-input"
-                            [value]="parameterValues()[f.name] ?? f.default"
-                            (change)="setParameter(f.name, $any($event.target).value)"
-                          >
-                            @for (o of opts; track o) {
-                              <option [value]="o">{{ o }}</option>
-                            }
-                          </select>
-                        } @else if (f.kind === 'bool') {
-                          <input
-                            type="checkbox"
-                            [checked]="$any(parameterValues()[f.name] ?? f.default)"
-                            (change)="setParameter(f.name, $any($event.target).checked)"
-                          />
-                        } @else {
-                          <input
-                            class="form-input"
-                            [type]="f.kind === 'int' || f.kind === 'decimal' ? 'number' : 'text'"
-                            [min]="f.min ?? null"
-                            [max]="f.max ?? null"
-                            [step]="f.step ?? (f.kind === 'int' ? 1 : 0.01)"
-                            [value]="parameterValues()[f.name] ?? f.default"
-                            (input)="
-                              setParameter(
-                                f.name,
-                                f.kind === 'int'
-                                  ? +$any($event.target).value
-                                  : f.kind === 'decimal'
-                                    ? +$any($event.target).value
-                                    : $any($event.target).value
-                              )
-                            "
-                          />
-                        }
-                      </div>
-                    }
-                  </div>
-                </div>
+                <app-strategy-typed-parameters
+                  [schema]="schema"
+                  [values]="parameterValues()"
+                  (changed)="setParameter($event.name, $event.value)"
+                />
               }
 
               <!-- Script mode replaces the parameters block with the script panel above. -->
@@ -904,32 +856,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         font-size: 11px;
         color: #0071e3;
         font-weight: normal;
-      }
-      .typed-params {
-        background: var(--bg-tertiary, #fafafa);
-        border: 1px solid var(--border, #e5e5ea);
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 12px;
-      }
-      .typed-params-head {
-        display: flex;
-        justify-content: space-between;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary, #636366);
-        margin-bottom: 8px;
-      }
-      .typed-params-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
-        gap: 8px 12px;
-      }
-      .typed-params-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
       }
       .modal-footer-hint {
         font-size: 11px;
