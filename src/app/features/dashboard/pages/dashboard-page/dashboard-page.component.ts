@@ -14,7 +14,6 @@ import { catchError, forkJoin, map, merge, of, throttleTime } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { EChartsOption } from 'echarts';
 
-import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -57,16 +56,13 @@ import type {
   WorkerHealthDto,
 } from '@core/api/api.types';
 
-const PALETTE = [
-  '#0071E3',
-  '#34C759',
-  '#FF9500',
-  '#AF52DE',
-  '#5AC8FA',
-  '#FF3B30',
-  '#FFCC00',
-  '#30D158',
-];
+/**
+ * Strategy-allocation hues, in fixed order. Validated with the dataviz palette checker in light
+ * and dark (lightness band, chroma, colour-blind separation of neighbours). Green and red stay
+ * out: on this page they mean profit and loss. Past six strategies the tail folds into "Other".
+ */
+const ALLOC_PALETTE = ['#0071E3', '#E8620C', '#8E44AD', '#0F9D8A', '#B58100', '#D6336C'];
+const ALLOC_OTHER = '#8E8E93';
 
 interface ActivityEntry {
   id: string;
@@ -85,7 +81,6 @@ interface ActivityEntry {
     RouterLink,
     DatePipe,
     DecimalPipe,
-    MetricCardComponent,
     ChartCardComponent,
     PageHeaderComponent,
     ConfirmDialogComponent,
@@ -103,13 +98,9 @@ interface ActivityEntry {
           {{ realtimeOnline() ? 'Realtime live' : 'Realtime offline' }}
         </span>
         <!--
-          Multi-account scope is owned by the global selector in the
-          header chrome (AccountScopePillComponent) — it shows on
-          every page so flipping it reshapes orders, positions,
-          drawdown, and the dashboard tiles in lockstep.  When the
-          operator has a single live account, render a lightweight
-          label here too so the chosen account is still visible on
-          the page header.
+          Multi-account scope is owned by the global selector in the header
+          chrome (AccountScopePillComponent). With a single live account, a
+          lightweight label here keeps the chosen account visible.
         -->
         @if (account(); as a) {
           @if (liveAccounts().length <= 1) {
@@ -121,87 +112,130 @@ interface ActivityEntry {
       </app-page-header>
 
       <!--
-        Hero: the four numbers an operator checks first get full tiles; the
-        rest sit in one compact strip beneath. Twelve equal tiles gave the
-        equity figure the same weight as the worker count.
+        Hero: equity is the one number the page leads with. Realized (30d),
+        drawdown and the open book sit beside it at the next size down; the
+        rest of the old KPI tiles live in the strip underneath.
       -->
-      <div class="hero-strip">
-        <div class="kpi-grid">
-          <app-metric-card
-            label="Account Equity"
-            [value]="equity()"
-            format="currency"
-            dotColor="#0071E3"
-          />
-          <!--
-            The same 30-day window the equity curve, daily P&L and P&L-by-symbol
-            charts draw. It used to sum the whole fetched page (the newest 1,000
-            closed trades, ~3 months), so the tile read −$148k directly above a
-            30-day curve ending at +$3k — two "recent" P&Ls on one screen.
-          -->
-          <app-metric-card
-            [label]="realizedLabel()"
-            [value]="realizedPnl30d()"
-            format="currency"
-            [colorByValue]="true"
-          />
-          <app-metric-card
-            label="Drawdown"
-            [value]="drawdownPct()"
-            format="percent"
-            [colorByValue]="true"
-            [invertColor]="true"
-            [dotColor]="drawdownDot()"
-          />
-          <app-metric-card
-            label="Open Positions"
-            [value]="openPositionCount()"
-            format="number"
-            dotColor="#5AC8FA"
-          />
-        </div>
-        <div class="stat-strip">
-          @for (s of secondaryStats(); track s.label) {
-            <div class="strip-item" [title]="s.hint ?? ''">
-              <span class="strip-label">{{ s.label }}</span>
-              <span
-                class="strip-value"
-                [class.profit]="s.tone === 'good'"
-                [class.loss]="s.tone === 'bad'"
-                [class.warn]="s.tone === 'warn'"
-              >
-                {{ s.value }}
-              </span>
+      <section class="hero" aria-label="Account summary">
+        <div class="hero-main">
+          <span class="eyebrow">Account equity</span>
+          <div class="hero-figure">{{ fmtMoney(equity()) }}</div>
+          <div class="hero-sub">
+            @if (account(); as a) {
+              <span>{{ a.accountName ?? a.accountId }}</span>
+              <span class="sep" aria-hidden="true"></span>
+              <span>Balance {{ fmtMoney(a.balance) }}</span>
+              <span class="sep" aria-hidden="true"></span>
+              <span>Margin used {{ marginUsedPct() | number: '1.1-1' }}%</span>
+            } @else {
+              <span>No live account in scope</span>
+            }
+          </div>
+          <dl class="hero-pnl">
+            <div>
+              <dt>Unrealized</dt>
+              <dd [class]="toneClass(unrealizedPnl())">{{ fmtMoney(unrealizedPnl(), true) }}</dd>
             </div>
-          }
+            <div>
+              <dt>Today</dt>
+              <dd [class]="toneClass(todaysPnl())">{{ fmtMoney(todaysPnl(), true) }}</dd>
+            </div>
+            <div>
+              <!--
+                The same 30-day window the equity curve, daily P&L and P&L-by-symbol
+                charts draw, so the tile and the charts agree.
+              -->
+              <dt>{{ realizedLabel() }}</dt>
+              <dd [class]="toneClass(realizedPnl30d())">{{ fmtMoney(realizedPnl30d(), true) }}</dd>
+            </div>
+          </dl>
         </div>
-      </div>
+
+        <div class="hero-side">
+          <div class="hero-tile">
+            <div class="tile-head">
+              <span class="eyebrow">Drawdown</span>
+              @if (drawdown(); as d) {
+                <span class="mode-chip" [attr.data-tone]="drawdownMeter().tone">
+                  {{ d.recoveryMode }}
+                </span>
+              }
+            </div>
+            <div class="tile-figure" [class.loss]="(drawdownPct() ?? 0) >= 10">
+              {{ drawdownPct() === null ? '—' : (drawdownPct() | number: '1.2-2') + '%' }}
+            </div>
+            <!-- Meter against the engine's recovery thresholds: Reduced 10 %, Halted 20 %. -->
+            <div
+              class="meter"
+              [attr.data-tone]="drawdownMeter().tone"
+              role="meter"
+              aria-label="Drawdown"
+              [attr.aria-valuenow]="drawdownPct() ?? 0"
+              aria-valuemin="0"
+              [attr.aria-valuemax]="DD_SCALE"
+            >
+              <span class="meter-fill" [style.width.%]="drawdownMeter().pct"></span>
+              <span class="meter-tick" [style.left.%]="(10 / DD_SCALE) * 100"></span>
+              <span class="meter-tick" [style.left.%]="(20 / DD_SCALE) * 100"></span>
+            </div>
+            <div class="meter-scale" aria-hidden="true">
+              <span>0%</span>
+              <span [style.left.%]="(10 / DD_SCALE) * 100">10% reduced</span>
+              <span [style.left.%]="(20 / DD_SCALE) * 100">20% halted</span>
+            </div>
+          </div>
+
+          <a class="hero-tile tile-link" routerLink="/positions">
+            <div class="tile-head">
+              <span class="eyebrow">Open positions</span>
+              <span class="tile-arrow" aria-hidden="true">→</span>
+            </div>
+            <div class="tile-figure">
+              {{ openPositionCount() === null ? '—' : openPositionCount() }}
+            </div>
+            <div class="tile-sub">
+              @if (exposureRows().length > 0) {
+                {{ exposureTotalLots() | number: '1.2-2' }} lots ·
+                {{ exposureRows().length }} symbol{{ exposureRows().length === 1 ? '' : 's' }}
+              } @else if (openPositionsKnown()) {
+                Flat book
+              } @else {
+                Unavailable
+              }
+            </div>
+          </a>
+        </div>
+      </section>
+
+      <!-- Secondary stats: one quiet row, hairline-divided, instead of eight boxes. -->
+      <section class="stat-row" aria-label="Key figures">
+        @for (s of secondaryStats(); track s.label) {
+          <div class="stat" [title]="s.hint ?? ''">
+            <span class="stat-label">{{ s.label }}</span>
+            <span class="stat-value" [attr.data-tone]="s.tone || null">{{ s.value }}</span>
+          </div>
+        }
+      </section>
 
       <!-- Equity curve dominates; daily P&L histogram alongside. -->
-      <div class="charts-2-1">
+      <div class="grid-2-1">
         <app-chart-card
           title="Equity Curve"
           subtitle="Cumulative realized P&L, last 30 days"
           [options]="equityCurveChart()"
-          height="260px"
+          height="280px"
           [loading]="loading()"
         />
         <app-chart-card
           title="Daily P&L"
           subtitle="Realized P&L per day, last 30 days"
           [options]="dailyPnlChart()"
-          height="260px"
+          height="280px"
           [loading]="loading()"
         />
       </div>
 
-      <!--
-        3-up: P&L by symbol attribution, exposure, allocation. P&L sizes
-        itself to its row count (top 10 + "Other") so bars never collapse
-        into invisibility; exposure is a plain bar list because two or three
-        symbols in a 380px chart box was mostly empty canvas.
-      -->
-      <div class="charts-3">
+      <div class="grid-3">
         <app-chart-card
           title="P&L by Symbol"
           [subtitle]="pnlBySymbolSubtitle()"
@@ -209,128 +243,164 @@ interface ActivityEntry {
           [height]="pnlBySymbolHeight()"
           [loading]="loading()"
         />
-        <!--
-          Styled like the chart cards it sits between (title over subtitle, card
-          padding) and stretched to the row, so an empty book no longer leaves a
-          short box and a hole beside two 300px charts.
-        -->
-        <section class="exposure-panel">
+
+        <section class="card">
           <header class="card-head">
             <h3>Position Exposure</h3>
             <p>Open lots by symbol</p>
           </header>
           @if (!openPositionsKnown()) {
-            <div class="empty-panel">Open positions unavailable</div>
+            <div class="empty">Open positions unavailable</div>
           } @else if (exposureRows().length > 0) {
-            <ul class="xbar-list">
+            <ul class="bar-list">
               @for (r of exposureRows(); track r.symbol) {
-                <li class="xbar-row">
-                  <span class="mono xbar-symbol">{{ r.symbol }}</span>
-                  <span class="xbar-track">
-                    <span class="xbar-fill" [style.width.%]="r.pct"></span>
-                  </span>
-                  <span class="mono xbar-value">{{ r.lots | number: '1.2-2' }}</span>
+                <li class="bar-row">
+                  <span class="mono bar-name">{{ r.symbol }}</span>
+                  <span class="bar-track"
+                    ><span class="bar-fill" [style.width.%]="r.pct"></span
+                  ></span>
+                  <span class="mono bar-value">{{ r.lots | number: '1.2-2' }}</span>
                 </li>
               }
             </ul>
-            <div class="xbar-total muted">
+            <div class="card-foot">
               {{ exposureTotalLots() | number: '1.2-2' }} lots across
               {{ exposureRows().length }} symbol{{ exposureRows().length === 1 ? '' : 's' }}
             </div>
           } @else {
-            <div class="empty-panel">No open positions</div>
+            <div class="empty">No open positions</div>
           }
         </section>
-        <app-chart-card
-          title="Strategy Allocation"
-          [subtitle]="allocationSubtitle()"
-          [options]="allocationChart()"
-          height="300px"
-          [loading]="loading()"
-        />
+
+        <!--
+          Ensemble weights as a part-to-whole bar plus a ranked list. The donut
+          made close weights hard to compare and its legend truncated names.
+        -->
+        <section class="card">
+          <header class="card-head">
+            <h3>Strategy Allocation</h3>
+            <p>{{ allocationSubtitle() }}</p>
+          </header>
+          @if (allocationRows().length > 0) {
+            <div class="seg-bar alloc-bar" role="img" [attr.aria-label]="allocationSubtitle()">
+              @for (r of allocationRows(); track r.key) {
+                <span
+                  class="seg"
+                  [style.flex-grow]="r.share"
+                  [style.background]="r.color"
+                  [title]="r.name + ' · ' + (r.share | number: '1.1-1') + '%'"
+                ></span>
+              }
+            </div>
+            <ul class="alloc-list">
+              @for (r of allocationRows(); track r.key) {
+                <li class="alloc-row">
+                  <span class="swatch" [style.background]="r.color"></span>
+                  @if (r.strategyId !== null) {
+                    <a
+                      class="alloc-name"
+                      [routerLink]="['/strategies', r.strategyId]"
+                      [title]="r.name"
+                    >
+                      {{ r.name }}
+                    </a>
+                  } @else {
+                    <span class="alloc-name">{{ r.name }}</span>
+                  }
+                  <span class="mono alloc-pct">{{ r.share | number: '1.1-1' }}%</span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <div class="empty">No active strategy holds an allocation</div>
+          }
+        </section>
       </div>
 
-      <!-- Top open positions + pending signals queue. -->
-      <div class="tables-2">
-        <section class="panel">
-          <header class="panel-head">
+      <div class="grid-3-2">
+        <section class="card flush">
+          <header class="card-head row">
             <h3>Top Open Positions</h3>
             @if (openPositions().length > 0) {
-              <a routerLink="/positions" class="link">View all ({{ openPositions().length }})</a>
+              <a routerLink="/positions" class="link">View all {{ openPositions().length }} →</a>
             }
           </header>
           @if (topOpenPositions().length > 0) {
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Dir</th>
-                  <th class="num">Lots</th>
-                  <th class="num">Entry</th>
-                  <th class="num">Current</th>
-                  <th class="num">Unrealized</th>
-                  <th>Opened</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (p of topOpenPositions(); track p.id) {
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
                   <tr>
-                    <td class="mono">{{ p.symbol }}</td>
-                    <td
-                      class="dir"
-                      [class.buy]="p.direction === 'Long'"
-                      [class.sell]="p.direction === 'Short'"
-                    >
-                      {{ p.direction === 'Long' ? '↑' : '↓' }}
-                    </td>
-                    <td class="num mono">{{ p.openLots | number: '1.2-2' }}</td>
-                    <td class="num mono">{{ fmtPrice(p.symbol, p.averageEntryPrice) }}</td>
-                    <td class="num mono">{{ fmtPrice(p.symbol, p.currentPrice) }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="p.unrealizedPnL > 0"
-                      [class.loss]="p.unrealizedPnL < 0"
-                    >
-                      {{ p.unrealizedPnL >= 0 ? '+' : '' }}{{ p.unrealizedPnL | number: '1.2-2' }}
-                    </td>
-                    <td class="muted">{{ p.openedAt | relativeTime }}</td>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th class="num">Lots</th>
+                    <th class="num">Entry</th>
+                    <th class="num">Current</th>
+                    <th class="num">Unrealized</th>
+                    <th class="num">Opened</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (p of topOpenPositions(); track p.id) {
+                    <tr>
+                      <td class="mono strong">{{ p.symbol }}</td>
+                      <td>
+                        <span
+                          class="side"
+                          [attr.data-side]="p.direction === 'Long' ? 'buy' : 'sell'"
+                        >
+                          {{ p.direction === 'Long' ? '▲ Long' : '▼ Short' }}
+                        </span>
+                      </td>
+                      <td class="num mono">{{ p.openLots | number: '1.2-2' }}</td>
+                      <td class="num mono">{{ fmtPrice(p.symbol, p.averageEntryPrice) }}</td>
+                      <td class="num mono">{{ fmtPrice(p.symbol, p.currentPrice) }}</td>
+                      <td class="num mono strong" [class]="toneClass(p.unrealizedPnL)">
+                        {{ p.unrealizedPnL >= 0 ? '+' : '' }}{{ p.unrealizedPnL | number: '1.2-2' }}
+                      </td>
+                      <td class="num muted">{{ p.openedAt | relativeTime }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           } @else if (!openPositionsKnown()) {
-            <div class="empty-panel">Open positions unavailable</div>
+            <div class="empty">Open positions unavailable</div>
           } @else {
-            <div class="empty-panel">No open positions</div>
+            <div class="empty">No open positions</div>
           }
         </section>
 
-        <section class="panel">
-          <header class="panel-head">
-            <h3>Pending Signals</h3>
+        <section class="card flush">
+          <header class="card-head row">
+            <h3>
+              Pending Signals
+              @if ((pendingSignalCount() ?? 0) > 0) {
+                <span class="count-badge">{{ pendingSignalCount() }}</span>
+              }
+            </h3>
             @if (pendingSignals().length > 0) {
-              <a routerLink="/trade-signals" class="link">
-                View all ({{ pendingSignalCount() }})
-              </a>
+              <a routerLink="/trade-signals" class="link">View all →</a>
             }
           </header>
           @if (pendingSignals().length > 0) {
-            <ul class="signal-list">
+            <ul class="rows signal-list">
               @for (sig of pendingSignals(); track sig.id) {
                 <li class="signal-item">
+                  <span class="side" [attr.data-side]="sig.direction === 'Buy' ? 'buy' : 'sell'">
+                    {{ sig.direction === 'Buy' ? '▲' : '▼' }} {{ sig.direction }}
+                  </span>
                   <div class="signal-main">
-                    <span class="signal-symbol mono">{{ sig.symbol }}</span>
-                    <span
-                      class="signal-direction"
-                      [class.buy]="sig.direction === 'Buy'"
-                      [class.sell]="sig.direction === 'Sell'"
-                    >
-                      {{ sig.direction === 'Buy' ? '↑' : '↓' }} {{ sig.direction }}
+                    <span class="mono strong">{{ sig.symbol }}</span>
+                    <span class="muted small">{{ sig.generatedAt | relativeTime }}</span>
+                  </div>
+                  <div
+                    class="confidence"
+                    [title]="'Confidence ' + (sig.confidence * 100).toFixed(0) + '%'"
+                  >
+                    <span class="conf-track">
+                      <span class="conf-fill" [style.width.%]="sig.confidence * 100"></span>
                     </span>
-                    <span class="signal-confidence mono">
-                      {{ (sig.confidence * 100).toFixed(0) }}%
-                    </span>
-                    <span class="muted age">{{ sig.generatedAt | relativeTime }}</span>
+                    <span class="mono small">{{ (sig.confidence * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="signal-actions">
                     <button
@@ -356,115 +426,117 @@ interface ActivityEntry {
               }
             </ul>
           } @else {
-            <div class="empty-panel">No pending signals</div>
+            <div class="empty">No signals waiting for approval</div>
           }
         </section>
       </div>
 
-      <!--
-        Activity feed + worker health on one row, alerts + overfit watchlist
-        on the next. Four panels in a three-column grid left the watchlist
-        alone on a half-empty row.
-      -->
       <div class="ops-grid">
-        <section class="panel ops-activity">
-          <header class="panel-head">
+        <section class="card flush ops-activity">
+          <header class="card-head row">
             <h3>Recent Activity</h3>
-            <span class="panel-note">Last {{ activityFeed().length }} events</span>
+            <span class="muted small">Last {{ activityFeed().length }} events</span>
           </header>
           @if (activityFeed().length > 0) {
-            <ul class="activity">
+            <ul class="rows activity">
               @for (e of activityFeed(); track e.id) {
                 <li class="activity-item" [attr.data-kind]="e.kind">
+                  <span class="kind-dot" aria-hidden="true"></span>
                   <span class="activity-tag">{{ e.kind }}</span>
-                  <span class="mono activity-symbol">{{ e.symbol }}</span>
-                  <span class="activity-text">{{ e.text }}</span>
-                  @if (e.detail) {
-                    <span class="muted activity-detail">{{ e.detail }}</span>
-                  }
-                  <!-- One absolute stamp per row; mixed "about 20 hours ago" / "1 day ago" read as two scales. -->
-                  <span class="muted activity-time" [title]="e.at | date: 'd MMM yyyy, HH:mm:ss'">
+                  <span class="mono strong">{{ e.symbol }}</span>
+                  <span class="activity-text">
+                    {{ e.text }}
+                    @if (e.detail) {
+                      <span class="activity-detail" [class]="detailTone(e)">{{ e.detail }}</span>
+                    }
+                  </span>
+                  <!-- One absolute stamp per row; mixed relative times read as two scales. -->
+                  <span class="muted small nowrap" [title]="e.at | date: 'd MMM yyyy, HH:mm:ss'">
                     {{ e.at | date: 'd MMM HH:mm' }}
                   </span>
                 </li>
               }
             </ul>
           } @else {
-            <div class="empty-panel">No recent activity</div>
+            <div class="empty">No recent activity</div>
           }
         </section>
 
-        <section class="panel ops-workers">
-          <header class="panel-head">
+        <section class="card ops-workers">
+          <header class="card-head row">
             <h3>Worker Health</h3>
-            <a routerLink="/worker-health" class="link">All workers</a>
+            <a routerLink="/worker-health" class="link">All workers →</a>
           </header>
-          <div class="worker-summary">
-            <div class="ws-stat ws-healthy">
-              <strong>{{ healthyWorkerCount() }}</strong>
-              <span>Healthy</span>
+          @if (totalWorkerCount() > 0) {
+            <div class="worker-headline">
+              <span class="tile-figure">{{ healthyWorkerCount() }}</span>
+              <span class="muted">of {{ totalWorkerCount() }} healthy</span>
             </div>
-            <div class="ws-stat ws-degraded" [class.ws-empty]="degradedWorkerCount() === 0">
-              <strong>{{ degradedWorkerCount() }}</strong>
-              <span>Degraded</span>
+            <!-- Every worker sits in exactly one bucket, so the segments sum to the total. -->
+            <div class="seg-bar" role="img" [attr.aria-label]="workerSummaryLabel()">
+              @for (s of workerSegments(); track s.label) {
+                @if (s.count > 0) {
+                  <span
+                    class="seg"
+                    [attr.data-status]="s.label"
+                    [style.flex-grow]="s.count"
+                    [title]="s.count + ' ' + s.label"
+                  ></span>
+                }
+              }
             </div>
-            <div class="ws-stat ws-failed" [class.ws-empty]="failedWorkerCount() === 0">
-              <strong>{{ failedWorkerCount() }}</strong>
-              <span>Failed</span>
-            </div>
-            <div class="ws-stat ws-idle" [class.ws-empty]="idleWorkerCount() === 0">
-              <strong>{{ idleWorkerCount() }}</strong>
-              <span>Idle</span>
-            </div>
-            <div class="ws-stat ws-stale" [class.ws-empty]="staleWorkerCount() === 0">
-              <strong>{{ staleWorkerCount() }}</strong>
-              <span>Stale</span>
-            </div>
-          </div>
-          @if (problemWorkers().length > 0) {
-            <ul class="worker-list">
-              @for (w of problemWorkers(); track w.name) {
-                <li class="worker-row" [attr.data-status]="w.statusLabel">
-                  <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
-                  <span class="worker-name mono" [title]="w.name">{{ w.name }}</span>
-                  <span class="worker-meta muted">{{ w.statusLabel }}</span>
-                  @if (w.lastErrorMessage) {
-                    <span class="worker-err" [title]="w.lastErrorMessage">
-                      {{ w.lastErrorMessage }}
-                    </span>
-                  }
+            <ul class="legend">
+              @for (s of workerSegments(); track s.label) {
+                <li [class.dim]="s.count === 0">
+                  <span class="status-dot" [attr.data-status]="s.label"></span>
+                  <span class="mono">{{ s.count }}</span> {{ s.label }}
                 </li>
               }
             </ul>
-          } @else if (totalWorkerCount() > 0) {
-            <div class="all-good">All {{ totalWorkerCount() }} workers nominal</div>
+            @if (problemWorkers().length > 0) {
+              <ul class="worker-list">
+                @for (w of problemWorkers(); track w.name) {
+                  <li class="worker-row">
+                    <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
+                    <span class="worker-name mono" [title]="w.name">{{ w.name }}</span>
+                    <span class="worker-meta" [attr.data-status]="w.statusLabel">{{
+                      w.statusLabel
+                    }}</span>
+                    @if (w.lastErrorMessage) {
+                      <span class="worker-err" [title]="w.lastErrorMessage">{{
+                        w.lastErrorMessage
+                      }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+            } @else {
+              <div class="all-good">✓ All {{ totalWorkerCount() }} workers nominal</div>
+            }
           } @else {
-            <div class="empty-panel">No worker data yet</div>
+            <div class="empty">No worker data yet</div>
           }
         </section>
 
-        <section class="panel ops-alerts">
-          <header class="panel-head">
+        <section class="card flush ops-alerts">
+          <header class="card-head row">
             <h3>Recent Alerts</h3>
-            <a routerLink="/alerts" class="link">All alerts</a>
+            <a routerLink="/alerts" class="link">All alerts →</a>
           </header>
           @if (recentAlerts().length > 0) {
-            <ul class="alerts">
+            <ul class="rows alerts">
               @for (a of recentAlerts(); track a.id) {
                 <li class="alert-item">
-                  <span
-                    class="alert-pill"
-                    [attr.data-severity]="a.severity"
-                    [title]="a.isActive ? 'Rule enabled' : 'Rule disabled'"
-                  >
+                  <span class="sev" [attr.data-severity]="a.severity">{{ a.severity }}</span>
+                  <span class="alert-type" [title]="a.isActive ? 'Rule enabled' : 'Rule disabled'">
                     {{ a.alertType }}
+                    @if (!a.isActive) {
+                      <span class="muted small">· rule disabled</span>
+                    }
                   </span>
-                  <span class="mono">{{ a.symbol ?? 'fleet' }}</span>
-                  <span class="muted alert-channel">
-                    {{ a.severity }}{{ a.isActive ? '' : ' · rule disabled' }}
-                  </span>
+                  <span class="mono muted small">{{ a.symbol ?? 'fleet' }}</span>
                   <span
-                    class="muted alert-time"
+                    class="muted small nowrap"
                     [title]="a.lastTriggeredAt | date: 'd MMM yyyy, HH:mm'"
                   >
                     {{ a.lastTriggeredAt | relativeTime }}
@@ -473,19 +545,19 @@ interface ActivityEntry {
               }
             </ul>
           } @else if (alertsUnavailable()) {
-            <div class="empty-panel">Recently fired alerts could not be loaded</div>
+            <div class="empty">Recently fired alerts could not be loaded</div>
           } @else {
-            <div class="empty-panel">No alert has fired yet</div>
+            <div class="empty">No alert has fired yet</div>
           }
         </section>
 
-        <section class="panel ops-overfit">
-          <header class="panel-head">
+        <section class="card flush ops-overfit">
+          <header class="card-head row">
             <h3>Overfit Watchlist</h3>
-            <a routerLink="/ml-models" class="link">All models</a>
+            <a routerLink="/ml-models" class="link">All models →</a>
           </header>
           @if (overfitWatchlist().length > 0) {
-            <ul class="overfit-list">
+            <ul class="rows overfit-list">
               @for (m of overfitWatchlist(); track m.mlModelId) {
                 <li class="overfit-item">
                   <a
@@ -493,85 +565,74 @@ interface ActivityEntry {
                     class="overfit-pair"
                     [title]="m.reason"
                   >
-                    <span class="mono">{{ m.symbol }} {{ m.timeframe }}</span>
-                    <span class="muted small">{{ m.learnerArchitecture }}</span>
+                    <span class="mono strong">{{ m.symbol }} {{ m.timeframe }}</span>
+                    <span class="muted small"
+                      >{{ m.learnerArchitecture }} · {{ m.resolvedSignals }} signals</span
+                    >
                   </a>
                   <div class="overfit-stats">
-                    <span class="overfit-stat">
+                    <span class="kv">
                       <span class="muted small">CV</span>
                       <span class="mono">{{
                         m.cvSharpe !== null ? m.cvSharpe.toFixed(2) : '—'
                       }}</span>
                     </span>
-                    <span class="overfit-stat">
+                    <span class="kv">
                       <span class="muted small">Live 7d</span>
                       <span class="mono" [class.loss]="(m.liveSharpe7d ?? 0) <= 0">
                         {{ m.liveSharpe7d !== null ? m.liveSharpe7d.toFixed(2) : '—' }}
                       </span>
                     </span>
                     @if (m.sharpeRatio !== null) {
-                      <span class="overfit-ratio-pill">
-                        {{ m.sharpeRatio.toFixed(1) }}× drift
-                      </span>
+                      <span class="pill" data-tone="warn"
+                        >{{ m.sharpeRatio.toFixed(1) }}× drift</span
+                      >
                     } @else {
-                      <span class="overfit-collapse-pill">edge collapse</span>
+                      <span class="pill" data-tone="bad">edge collapse</span>
                     }
-                    <span class="muted small">{{ m.resolvedSignals }} signals</span>
                   </div>
                 </li>
               }
             </ul>
           } @else {
-            <div class="empty-panel">No models flagged — CV/live Sharpe in line</div>
+            <div class="empty">No models flagged — CV and live Sharpe in line</div>
           }
         </section>
       </div>
 
-      <!-- Compact status footer — same strip styling as the hero's secondary stats. -->
-      <div class="stat-strip status-strip">
-        <div class="strip-item">
-          <span class="strip-label">Engine</span>
-          <span class="strip-value" [class.profit]="healthStatus()" [class.loss]="!healthStatus()">
-            {{ healthStatus() ? 'Running' : 'Stopped' }}
-          </span>
+      <!-- System footer: engine mode, account margin, models, signal cadence. -->
+      <footer class="status-row">
+        <div class="status-item">
+          <span
+            class="status-dot"
+            [attr.data-status]="healthStatus() ? 'Healthy' : 'Failed'"
+          ></span>
+          <span class="stat-label">Engine</span>
+          <span class="strong">{{ healthStatus() ? 'Running' : 'Stopped' }}</span>
           @if (engineStatus(); as s) {
-            <!--
-              paperMode is the raw EngineConfig string ("true" / "false"), not a mode name — the
-              card used to print a literal "false" under "Running".
-            -->
-            <span class="strip-sub">
+            <!-- paperMode is the raw EngineConfig string ("true" / "false"), not a mode name. -->
+            <span class="muted">
               {{ isPaperMode(s.paperMode) ? 'paper trading' : 'live trading' }} · checked
               {{ s.checkedAt | relativeTime }}
             </span>
           }
         </div>
-        <div class="strip-item">
-          <span class="strip-label">Drawdown</span>
-          @if (drawdown(); as d) {
-            <span class="strip-value" [class.loss]="d.drawdownPct > 0">
-              {{ d.drawdownPct | number: '1.2-2' }}%
-            </span>
-            <span class="strip-sub">{{ d.recoveryMode }} mode</span>
-          } @else {
-            <span class="strip-value muted">—</span>
-          }
-        </div>
-        <div class="strip-item">
-          <span class="strip-label">Account</span>
+        <div class="status-item">
+          <span class="stat-label">Account</span>
           @if (account(); as a) {
-            <span class="strip-value">{{ a.accountName ?? a.accountId }}</span>
-            <span class="strip-sub">
-              {{ a.currency ?? '' }} · margin {{ marginUsedPct() | number: '1.1-1' }}%
-            </span>
+            <span class="strong">{{ a.accountName ?? a.accountId }}</span>
+            <span class="muted"
+              >{{ a.currency ?? '' }} · margin {{ marginUsedPct() | number: '1.1-1' }}%</span
+            >
           } @else {
-            <span class="strip-value muted">—</span>
+            <span class="muted">—</span>
           }
         </div>
-        <div class="strip-item">
-          <span class="strip-label">ML Models</span>
+        <div class="status-item">
+          <span class="stat-label">ML models</span>
           @if (activeMlModelCount() !== null) {
-            <span class="strip-value">{{ activeMlModelCount() | number }} active</span>
-            <span class="strip-sub">
+            <span class="strong">{{ activeMlModelCount() | number }} active</span>
+            <span class="muted">
               @if (mostRecentMlModel(); as m) {
                 latest {{ m.symbol }} {{ m.timeframe }} · {{ m.trainedAt | relativeTime }}
               } @else {
@@ -579,19 +640,19 @@ interface ActivityEntry {
               }
             </span>
           } @else {
-            <span class="strip-value muted">—</span>
+            <span class="muted">—</span>
           }
         </div>
-        <div class="strip-item">
-          <span class="strip-label">Last Signal</span>
+        <div class="status-item">
+          <span class="stat-label">Last signal</span>
           @if (lastSignalAt()) {
-            <span class="strip-value">{{ lastSignalAt() | relativeTime }}</span>
-            <span class="strip-sub">{{ todaysSignalCount() | number }} today</span>
+            <span class="strong">{{ lastSignalAt() | relativeTime }}</span>
+            <span class="muted">{{ todaysSignalCount() | number }} today</span>
           } @else {
-            <span class="strip-value muted">No signals yet</span>
+            <span class="muted">No signals yet</span>
           }
         </div>
-      </div>
+      </footer>
 
       <!--
         Approving a signal sends it to the accounts for execution — one stray
@@ -615,8 +676,10 @@ interface ActivityEntry {
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
+        gap: var(--space-5);
       }
+
+      /* ── Header pills ─────────────────────────────────────────── */
       .head-pill {
         display: inline-flex;
         align-items: center;
@@ -629,21 +692,22 @@ interface ActivityEntry {
         font-weight: var(--font-medium);
       }
       .head-pill .dot {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
         background: var(--text-tertiary);
       }
       .head-pill[data-state='up'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        background: color-mix(in srgb, var(--profit) 13%, transparent);
+        color: var(--tone-green);
       }
       .head-pill[data-state='up'] .dot {
         background: var(--profit);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--profit) 25%, transparent);
       }
       .head-pill[data-state='down'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        background: color-mix(in srgb, var(--loss) 13%, transparent);
+        color: var(--tone-red);
       }
       .head-pill[data-state='down'] .dot {
         background: var(--loss);
@@ -651,155 +715,332 @@ interface ActivityEntry {
       .head-pill[data-state='muted'] .dot {
         display: none;
       }
-      .head-pill.account-select {
-        gap: 6px;
-        cursor: pointer;
+
+      /* ── Shared atoms ─────────────────────────────────────────── */
+      .eyebrow,
+      .stat-label {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
       }
-      .head-pill.account-select .select-label {
-        opacity: 0.7;
-        font-size: 11px;
+      .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-variant-numeric: tabular-nums;
       }
-      .head-pill.account-select .select-native {
-        appearance: none;
-        background: transparent;
-        border: 0;
-        color: inherit;
-        font: inherit;
-        font-size: 12px;
-        padding: 0 14px 0 2px;
-        cursor: pointer;
-        background-image:
-          linear-gradient(45deg, transparent 50%, currentColor 50%),
-          linear-gradient(135deg, currentColor 50%, transparent 50%);
-        background-position:
-          calc(100% - 8px) 50%,
-          calc(100% - 4px) 50%;
-        background-size:
-          4px 4px,
-          4px 4px;
-        background-repeat: no-repeat;
+      .strong {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
       }
-      .head-pill.account-select .select-native:focus {
-        outline: 1px solid var(--accent);
-        outline-offset: 2px;
-        border-radius: 2px;
+      .muted {
+        color: var(--text-tertiary);
+      }
+      .small {
+        font-size: 10.5px;
+      }
+      .nowrap {
+        white-space: nowrap;
+      }
+      .profit {
+        color: var(--tone-green);
+      }
+      .loss {
+        color: var(--tone-red);
+      }
+      .link {
+        color: var(--accent);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+      }
+      .link:hover {
+        text-decoration: underline;
       }
 
-      .hero-strip {
+      /* ── Hero ─────────────────────────────────────────────────── */
+      .hero {
         position: relative;
-        padding: var(--space-4) var(--space-5);
-        background: var(--bg-glass);
-        backdrop-filter: var(--blur-md);
-        -webkit-backdrop-filter: var(--blur-md);
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+        gap: var(--space-5);
+        padding: var(--space-6);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
-        overflow: hidden;
-        box-shadow: var(--shadow-sm);
-      }
-      .hero-strip::before {
-        content: '';
-        position: absolute;
-        inset: 0;
         background:
-          radial-gradient(circle at 0% 0%, rgba(10, 132, 255, 0.08), transparent 40%),
-          radial-gradient(circle at 100% 100%, rgba(52, 199, 89, 0.06), transparent 40%);
-        pointer-events: none;
+          radial-gradient(
+            120% 140% at 0% 0%,
+            color-mix(in srgb, var(--accent) 9%, transparent),
+            transparent 55%
+          ),
+          var(--bg-secondary);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
       }
-      @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-        .hero-strip {
-          background: var(--bg-secondary);
-        }
-      }
-      /* minmax(0, 1fr) keeps every tile the same width — with plain 1fr a long
-         currency value widened its own column and squeezed its neighbours. */
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-3);
-        position: relative;
-        z-index: 1;
-        align-items: start;
-      }
-      @media (max-width: 900px) {
-        .kpi-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* One strip style for the demoted hero stats and the status footer. */
-      .stat-strip {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+      .hero-main {
+        display: flex;
+        flex-direction: column;
         gap: var(--space-2);
-        position: relative;
-        z-index: 1;
-        margin-top: var(--space-3);
+        min-width: 0;
       }
-      .stat-strip.status-strip {
-        margin-top: 0;
+      .hero-figure {
+        font-size: clamp(36px, 4vw, 52px);
+        font-weight: var(--font-semibold);
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+        color: var(--text-primary);
+        overflow-wrap: anywhere;
       }
-      .strip-item {
+      .hero-sub {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .sep {
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .hero-pnl {
+        margin: auto 0 0;
+        padding-top: var(--space-4);
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, auto));
+        justify-content: start;
+        gap: var(--space-8);
+      }
+      .hero-pnl div {
         display: flex;
         flex-direction: column;
         gap: 2px;
         min-width: 0;
-        padding: var(--space-2) var(--space-3);
-        background: var(--bg-secondary);
+      }
+      .hero-pnl dt {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .hero-pnl dd {
+        margin: 0;
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .hero-side {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      .hero-tile {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        min-width: 0;
+        padding: var(--space-4);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
         border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
+        color: inherit;
+        text-decoration: none;
       }
-      .strip-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
+      .tile-link {
+        transition:
+          border-color var(--dur-base) var(--ease-out-soft),
+          transform var(--dur-base) var(--ease-out-soft);
+      }
+      .tile-link:hover {
+        border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+        transform: translateY(-1px);
+      }
+      .tile-link:hover .tile-arrow {
+        color: var(--accent);
+        transform: translateX(2px);
+      }
+      .tile-arrow {
         color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        transition: transform var(--dur-base) var(--ease-out-soft);
       }
-      .strip-value {
-        font-size: var(--text-sm);
+      .tile-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+      .tile-figure {
+        font-size: var(--text-2xl);
         font-weight: var(--font-semibold);
+        letter-spacing: -0.02em;
+        line-height: 1.1;
         color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
       }
-      .strip-value.warn {
-        color: var(--warning);
+      .tile-figure.loss {
+        color: var(--tone-red);
       }
-      .strip-sub {
+      .tile-sub {
+        margin-top: auto;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .mode-chip,
+      .pill,
+      .count-badge,
+      .side,
+      .sev {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
         font-size: 10.5px;
-        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      [data-tone='good'].mode-chip {
+        background: color-mix(in srgb, var(--profit) 14%, transparent);
+        color: var(--tone-green);
+      }
+      [data-tone='warn'].mode-chip,
+      [data-tone='warn'].pill {
+        background: color-mix(in srgb, var(--warning) 15%, transparent);
+        color: var(--tone-amber);
+      }
+      [data-tone='bad'].mode-chip,
+      [data-tone='bad'].pill {
+        background: color-mix(in srgb, var(--loss) 14%, transparent);
+        color: var(--tone-red);
       }
 
-      .charts-2-1 {
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        gap: var(--space-4);
-        align-items: start;
+      /* Drawdown meter: fill carries severity, track is a light step of the same hue. */
+      .meter {
+        --meter: var(--profit);
+        position: relative;
+        height: 8px;
+        margin-top: auto;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--meter) 16%, transparent);
       }
-      .charts-3 {
+      .meter[data-tone='warn'] {
+        --meter: var(--warning);
+      }
+      .meter[data-tone='bad'] {
+        --meter: var(--loss);
+      }
+      .meter[data-tone='none'] {
+        --meter: var(--text-tertiary);
+      }
+      .meter-fill {
+        display: block;
+        height: 100%;
+        min-width: 4px;
+        border-radius: inherit;
+        background: var(--meter);
+        transition: width var(--dur-slow) var(--ease-out-soft);
+      }
+      .meter-tick {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 2px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: var(--text-tertiary);
+        opacity: 0.55;
+      }
+      .meter-scale {
+        position: relative;
+        height: 14px;
+        font-size: 10px;
+        color: var(--text-tertiary);
+      }
+      .meter-scale span {
+        position: absolute;
+        top: 0;
+        white-space: nowrap;
+        transform: translateX(-50%);
+      }
+      .meter-scale span:first-child {
+        transform: none;
+      }
+      .meter-scale span:last-child {
+        transform: translateX(-70%);
+      }
+
+      /* ── Secondary stat row ───────────────────────────────────── */
+      .stat-row {
         display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+      }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+        padding: var(--space-3) var(--space-4);
+        /* Left and top hairlines; the card clips the outer ones, so only inner dividers show
+           (including between wrapped rows). */
+        box-shadow:
+          -1px 0 0 var(--border),
+          0 -1px 0 var(--border);
+      }
+      .stat-value {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stat-value[data-tone='good'] {
+        color: var(--tone-green);
+      }
+      .stat-value[data-tone='bad'] {
+        color: var(--tone-red);
+      }
+      .stat-value[data-tone='warn'] {
+        color: var(--tone-amber);
+      }
+
+      /* ── Grids ────────────────────────────────────────────────── */
+      .grid-2-1,
+      .grid-3,
+      .grid-3-2,
+      .ops-grid {
+        display: grid;
+        gap: var(--space-4);
+        align-items: stretch;
+      }
+      .grid-2-1 {
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      }
+      .grid-3 {
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-4);
         align-items: start;
       }
-      .tables-2 {
-        display: grid;
-        grid-template-columns: 3fr 2fr;
-        gap: var(--space-4);
+      .grid-3 > .card {
+        align-self: stretch;
+      }
+      /* Lists keep their natural height: stretching a short list to a tall neighbour left a
+         blank band under its last row. */
+      .grid-3-2 {
+        grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
         align-items: start;
       }
       .ops-grid {
-        display: grid;
         grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-4);
         align-items: start;
       }
       .ops-activity {
@@ -813,40 +1054,62 @@ interface ActivityEntry {
         grid-column: span 3;
       }
       @media (max-width: 1200px) {
-        .charts-2-1,
-        .charts-3,
-        .tables-2 {
-          grid-template-columns: 1fr;
-        }
+        .hero,
+        .grid-2-1,
+        .grid-3,
+        .grid-3-2,
         .ops-grid {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
-        .ops-activity,
-        .ops-workers,
-        .ops-alerts,
-        .ops-overfit {
+        .ops-grid > * {
           grid-column: auto;
         }
       }
+      @media (max-width: 640px) {
+        .hero {
+          padding: var(--space-4);
+        }
+        .hero-side {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .hero-pnl {
+          gap: var(--space-4);
+        }
+      }
 
-      /* Exposure card — mirrors app-chart-card (its row neighbours): card
-         padding, base-size title with the subtitle beneath it, and stretched to
-         the row so it never collapses into a short box beside two charts. */
-      .exposure-panel {
-        align-self: stretch;
+      /* ── Cards ────────────────────────────────────────────────── */
+      .card {
         display: flex;
         flex-direction: column;
-        min-height: 0;
+        min-width: 0;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
       }
+      .card.flush {
+        padding: 0;
+        overflow: hidden;
+      }
       .card-head {
         margin-bottom: var(--space-4);
       }
+      .card-head.row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .card.flush > .card-head {
+        margin: 0;
+        padding: var(--space-4) var(--space-5);
+        border-bottom: 1px solid var(--border);
+      }
       .card-head h3 {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
         margin: 0;
         font-size: var(--text-base);
         font-weight: var(--font-semibold);
@@ -857,354 +1120,391 @@ interface ActivityEntry {
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
-      .exposure-panel .empty-panel {
+      .count-badge {
+        background: color-mix(in srgb, var(--warning) 16%, transparent);
+        color: var(--tone-amber);
+      }
+      .card-foot {
+        margin-top: auto;
+        padding-top: var(--space-3);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        border-top: 1px solid var(--border);
+      }
+      .empty {
         flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
+        min-height: 120px;
+        margin: var(--space-4);
+        padding: var(--space-5);
+        text-align: center;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
         border: 1px dashed var(--border);
         border-radius: var(--radius-sm);
       }
+      .card:not(.flush) > .empty {
+        margin: 0;
+      }
 
-      /* Exposure bar list */
-      .xbar-list {
+      /* Ranked bar list (exposure). */
+      .bar-list,
+      .alloc-list,
+      .rows,
+      .legend,
+      .worker-list {
         list-style: none;
         margin: 0;
         padding: 0;
       }
-      .xbar-row {
+      .bar-row {
         display: grid;
-        grid-template-columns: 72px 1fr 56px;
+        grid-template-columns: 72px minmax(0, 1fr) 48px;
         align-items: center;
         gap: var(--space-3);
-        padding: 5px 0;
+        padding: 6px 0;
         font-size: var(--text-xs);
       }
-      .xbar-symbol {
+      .bar-name {
         font-weight: var(--font-semibold);
       }
-      .xbar-track {
+      .bar-track {
         height: 8px;
         border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
         overflow: hidden;
       }
-      .xbar-fill {
+      .bar-fill {
         display: block;
         height: 100%;
-        background: #0071e3;
+        background: var(--accent);
         border-radius: var(--radius-full);
       }
-      .xbar-value {
+      .bar-value {
         text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .xbar-total {
-        margin-top: auto;
-        padding-top: var(--space-2);
-        font-size: 10.5px;
-        border-top: 1px solid var(--border);
       }
 
-      .panel {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+      /* Part-to-whole bar: 2px surface gaps between segments. */
+      .seg-bar {
+        display: flex;
+        gap: 2px;
+        height: 10px;
+        border-radius: var(--radius-full);
         overflow: hidden;
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
       }
-      .panel-head {
-        display: flex;
+      .seg {
+        min-width: 4px;
+        flex-basis: 0;
+      }
+      .alloc-bar {
+        height: 14px;
+        margin-bottom: var(--space-4);
+      }
+      .alloc-row {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr) auto;
         align-items: center;
-        justify-content: space-between;
-        padding: var(--space-3) var(--space-5);
+        gap: var(--space-2);
+        padding: 6px 0;
+        font-size: var(--text-xs);
         border-bottom: 1px solid var(--border);
       }
-      .panel-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
+      .alloc-row:last-child {
+        border-bottom: none;
       }
-      .link {
-        color: var(--accent);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
+      .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
       }
-      .link:hover {
-        text-decoration: underline;
-      }
-      /* A panel-head annotation sits where its siblings put their link, at the
-         link's size — inheriting the body size made it outweigh the title. */
-      .panel-note {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
+      .alloc-name {
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
+      a.alloc-name:hover {
+        color: var(--accent);
+      }
+      .alloc-pct {
+        color: var(--text-secondary);
+      }
 
+      /* ── Table ────────────────────────────────────────────────── */
+      .table-wrap {
+        overflow-x: auto;
+      }
       .table {
         width: 100%;
         border-collapse: collapse;
       }
       .table th,
       .table td {
-        padding: var(--space-2) var(--space-4);
+        padding: 10px var(--space-4);
         text-align: left;
         border-bottom: 1px solid var(--border);
         font-size: var(--text-xs);
+        white-space: nowrap;
       }
-      .table tr:last-child td {
+      .table th:first-child,
+      .table td:first-child {
+        padding-left: var(--space-5);
+      }
+      .table th:last-child,
+      .table td:last-child {
+        padding-right: var(--space-5);
+      }
+      .table tbody tr:last-child td {
         border-bottom: none;
       }
+      .table tbody tr {
+        transition: background var(--dur-fast);
+      }
+      .table tbody tr:hover {
+        background: color-mix(in srgb, var(--accent) 5%, transparent);
+      }
       .table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
         font-size: 10.5px;
         font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
       }
-      .table td.num,
-      .table th.num {
+      .table .num {
         text-align: right;
-        font-variant-numeric: tabular-nums;
       }
-      .table td.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
+      .side[data-side='buy'] {
+        background: color-mix(in srgb, var(--profit) 13%, transparent);
+        color: var(--tone-green);
       }
-      .dir {
-        font-weight: var(--font-semibold);
-        font-size: var(--text-sm);
-      }
-      .dir.buy {
-        color: var(--profit);
-      }
-      .dir.sell {
-        color: var(--loss);
-      }
-      .profit {
-        color: var(--profit);
-      }
-      .loss {
-        color: var(--loss);
+      .side[data-side='sell'] {
+        background: color-mix(in srgb, var(--loss) 13%, transparent);
+        color: var(--tone-red);
       }
 
-      .signal-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 320px;
+      /* ── Row lists (signals, activity, alerts, overfit) ───────── */
+      .rows {
         overflow-y: auto;
       }
-      .signal-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-2) var(--space-4);
+      .rows > li {
+        padding: 10px var(--space-5);
         border-bottom: 1px solid var(--border);
-        gap: var(--space-3);
+        font-size: var(--text-xs);
+        transition: background var(--dur-fast);
       }
-      .signal-item:last-child {
+      .rows > li:last-child {
         border-bottom: none;
       }
-      .signal-item:hover {
-        background: var(--bg-tertiary);
+      .rows > li:hover {
+        background: color-mix(in srgb, var(--accent) 5%, transparent);
+      }
+      .signal-list {
+        max-height: 340px;
+      }
+      .signal-item {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr) 96px auto;
+        align-items: center;
+        gap: var(--space-3);
       }
       .signal-main {
         display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+      }
+      .confidence {
+        display: flex;
         align-items: center;
-        gap: var(--space-3);
+        gap: var(--space-2);
+      }
+      .conf-track {
         flex: 1;
-        font-size: var(--text-xs);
+        height: 5px;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        overflow: hidden;
       }
-      .signal-symbol {
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .signal-direction {
-        font-weight: var(--font-semibold);
-      }
-      .signal-direction.buy {
-        color: var(--profit);
-      }
-      .signal-direction.sell {
-        color: var(--loss);
-      }
-      .signal-confidence {
-        margin-left: auto;
-        color: var(--text-secondary);
-      }
-      .age {
-        font-size: 10.5px;
+      .conf-fill {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: inherit;
       }
       .signal-actions {
         display: flex;
         gap: var(--space-1);
       }
       .action-btn {
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
         border-radius: var(--radius-full);
-        border: none;
+        border: 1px solid transparent;
         cursor: pointer;
         font-weight: var(--font-semibold);
         font-size: 13px;
+        transition:
+          background var(--dur-fast),
+          transform var(--dur-fast);
+      }
+      .action-btn:active {
+        transform: scale(0.94);
       }
       .action-btn.approve {
-        background: rgba(52, 199, 89, 0.15);
-        color: #248a3d;
+        background: color-mix(in srgb, var(--profit) 14%, transparent);
+        color: var(--tone-green);
       }
       .action-btn.approve:hover {
-        background: rgba(52, 199, 89, 0.25);
+        background: color-mix(in srgb, var(--profit) 26%, transparent);
       }
       .action-btn.reject {
-        background: rgba(255, 59, 48, 0.15);
-        color: #d70015;
+        background: color-mix(in srgb, var(--loss) 12%, transparent);
+        color: var(--tone-red);
       }
       .action-btn.reject:hover {
-        background: rgba(255, 59, 48, 0.25);
-      }
-      .empty-panel {
-        padding: var(--space-6) var(--space-5);
-        text-align: center;
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
+        background: color-mix(in srgb, var(--loss) 24%, transparent);
       }
 
       .activity {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 360px;
-        overflow-y: auto;
+        max-height: 420px;
       }
       .activity-item {
+        --kind: var(--text-tertiary);
         display: grid;
-        grid-template-columns: 64px 70px 1fr auto auto;
+        grid-template-columns: 8px 56px 64px minmax(0, 1fr) auto;
         align-items: center;
-        gap: var(--space-2);
-        padding: 6px var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
+        gap: var(--space-3);
       }
-      .activity-item:last-child {
-        border-bottom: none;
+      .activity-item[data-kind='fill'],
+      .activity-item[data-kind='open'] {
+        --kind: var(--accent);
+      }
+      .activity-item[data-kind='close'] {
+        --kind: var(--profit);
+      }
+      .activity-item[data-kind='signal'] {
+        --kind: var(--warning);
+      }
+      .activity-item[data-kind='reject'] {
+        --kind: var(--loss);
+      }
+      .kind-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--kind);
       }
       .activity-tag {
         font-size: 10px;
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
         color: var(--text-secondary);
-        text-align: center;
-      }
-      .activity-item[data-kind='fill'] .activity-tag,
-      .activity-item[data-kind='open'] .activity-tag {
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--accent);
-      }
-      .activity-item[data-kind='close'] .activity-tag {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .activity-item[data-kind='reject'] .activity-tag {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .activity-item[data-kind='signal'] .activity-tag {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-      }
-      .activity-symbol {
-        font-weight: var(--font-semibold);
       }
       .activity-text {
-        color: var(--text-primary);
-      }
-      .activity-detail {
-        font-size: 10.5px;
-      }
-      .activity-time {
-        font-size: 10.5px;
-        text-align: right;
-      }
-
-      .worker-summary {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: var(--space-2);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .ws-stat {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: var(--space-2) 0;
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-      }
-      .ws-stat strong {
-        font-size: var(--text-base);
-        font-variant-numeric: tabular-nums;
-      }
-      .ws-stat span {
-        font-size: 10px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .ws-empty {
-        opacity: 0.45;
-      }
-      .ws-healthy strong {
-        color: #248a3d;
-      }
-      .ws-degraded strong {
-        color: #c93400;
-      }
-      .ws-failed strong {
-        color: #d70015;
-      }
-      .ws-idle strong {
-        color: var(--text-secondary);
-      }
-      .ws-stale strong {
-        color: #8a2be2;
-      }
-
-      .worker-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 220px;
-        overflow-y: auto;
-      }
-      /* minmax(0, 1fr): a plain 1fr track is at least as wide as its content,
-         so a 46-character worker name pushed the status label out of the card. */
-      .worker-row {
-        display: grid;
-        grid-template-columns: 12px minmax(0, 1fr) auto;
-        align-items: center;
-        gap: var(--space-2);
-        padding: 6px var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .worker-name {
         min-width: 0;
+        color: var(--text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .activity-detail {
+        margin-left: var(--space-2);
+        font-size: 10.5px;
+      }
+
+      /* ── Worker health ────────────────────────────────────────── */
+      .worker-headline {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+        font-size: var(--text-xs);
+      }
+      .seg[data-status='Healthy'],
+      .status-dot[data-status='Healthy'] {
+        background: var(--profit);
+      }
+      .seg[data-status='Idle'],
+      .status-dot[data-status='Idle'] {
+        background: var(--text-tertiary);
+      }
+      .seg[data-status='Stale'],
+      .status-dot[data-status='Stale'] {
+        background: var(--tone-purple);
+      }
+      .seg[data-status='Degraded'],
+      .status-dot[data-status='Degraded'] {
+        background: var(--warning);
+      }
+      .seg[data-status='Failed'],
+      .status-dot[data-status='Failed'] {
+        background: var(--loss);
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2) var(--space-4);
+        margin-top: var(--space-3);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .legend li {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend li.dim {
+        opacity: 0.45;
+      }
+      .status-dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+      }
+      .worker-list {
+        margin-top: var(--space-4);
+        border-top: 1px solid var(--border);
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      /* minmax(0, 1fr): a long worker name must ellipsise, not push the label out. */
+      .worker-row {
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+      }
       .worker-row:last-child {
         border-bottom: none;
       }
-      .worker-row .worker-err {
+      .worker-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .worker-meta {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .worker-meta[data-status='Failed'] {
+        color: var(--tone-red);
+      }
+      .worker-meta[data-status='Degraded'] {
+        color: var(--tone-amber);
+      }
+      .worker-meta[data-status='Stale'] {
+        color: var(--tone-purple);
+      }
+      .worker-err {
         grid-column: 2 / -1;
         color: var(--text-tertiary);
         font-family: 'SF Mono', 'Fira Code', monospace;
@@ -1212,148 +1512,117 @@ interface ActivityEntry {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        margin-top: 2px;
-      }
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--text-tertiary);
-      }
-      .status-dot[data-status='Healthy'] {
-        background: var(--profit);
-      }
-      .status-dot[data-status='Degraded'] {
-        background: var(--warning);
-      }
-      .status-dot[data-status='Failed'] {
-        background: var(--loss);
-      }
-      .status-dot[data-status='Stale'] {
-        background: var(--warning);
       }
       .all-good {
-        padding: var(--space-3) var(--space-4);
+        margin-top: var(--space-4);
+        padding: var(--space-3);
         text-align: center;
-        color: #248a3d;
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--profit) 10%, transparent);
+        color: var(--tone-green);
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
       }
 
+      /* ── Alerts ───────────────────────────────────────────────── */
       .alerts {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 320px;
-        overflow-y: auto;
+        max-height: 340px;
       }
       .alert-item {
         display: grid;
-        grid-template-columns: auto auto 1fr auto;
+        grid-template-columns: 64px minmax(0, 1fr) auto auto;
         align-items: center;
-        gap: var(--space-2);
-        padding: 6px var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .alert-item:last-child {
-        border-bottom: none;
-      }
-      .alert-pill {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
+        gap: var(--space-3);
       }
       /* Colour carries severity, not whether the rule is switched on. */
-      .alert-pill[data-severity='High'],
-      .alert-pill[data-severity='Critical'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+      .sev {
+        justify-self: start;
       }
-      .alert-pill[data-severity='Medium'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+      .sev[data-severity='High'],
+      .sev[data-severity='Critical'] {
+        background: color-mix(in srgb, var(--loss) 14%, transparent);
+        color: var(--tone-red);
       }
-      .alert-channel,
-      .alert-time {
-        font-size: 10.5px;
+      .sev[data-severity='Medium'] {
+        background: color-mix(in srgb, var(--warning) 15%, transparent);
+        color: var(--tone-amber);
       }
-      .alert-time {
+      .alert-type {
+        min-width: 0;
+        color: var(--text-primary);
+        font-weight: var(--font-medium);
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .overfit-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
+      /* ── Overfit watchlist ────────────────────────────────────── */
       .overfit-item {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-2) 0;
-        border-bottom: 1px solid var(--border);
         flex-wrap: wrap;
-      }
-      .overfit-item:last-child {
-        border-bottom: none;
+        gap: var(--space-3);
       }
       .overfit-pair {
         display: flex;
         flex-direction: column;
         gap: 2px;
-        text-decoration: none;
         color: var(--text-primary);
+        text-decoration: none;
       }
-      .overfit-pair:hover {
-        text-decoration: underline;
+      .overfit-pair:hover .strong {
+        color: var(--accent);
       }
       .overfit-stats {
         display: flex;
         align-items: center;
-        gap: var(--space-3);
-        font-size: var(--text-xs);
+        gap: var(--space-4);
       }
-      .overfit-stat {
+      .kv {
         display: flex;
         flex-direction: column;
         align-items: flex-end;
-        gap: 2px;
-      }
-      .overfit-stat .mono {
-        font-variant-numeric: tabular-nums;
-      }
-      .overfit-stat .mono.loss {
-        color: #d70015;
-      }
-      .overfit-ratio-pill {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        white-space: nowrap;
-      }
-      .overfit-collapse-pill {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        white-space: nowrap;
+        gap: 1px;
       }
 
-      .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
+      /* ── Status footer ────────────────────────────────────────── */
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3) var(--space-6);
+        padding: var(--space-3) var(--space-5);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        font-size: var(--text-xs);
       }
-      .muted {
-        color: var(--text-tertiary);
+      .status-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-width: 0;
+        white-space: nowrap;
+      }
+      /* Phone overrides — last, so they beat the base rules above. */
+      @media (max-width: 640px) {
+        /* Phone: the event text needs the room the kind label took; the dot still carries kind. */
+        .activity-item {
+          grid-template-columns: 8px 60px minmax(0, 1fr) auto;
+        }
+        .activity-tag {
+          display: none;
+        }
+        .signal-item {
+          grid-template-columns: auto minmax(0, 1fr) 64px auto;
+          gap: var(--space-2);
+        }
+        .conf-track {
+          display: none;
+        }
+        .rows > li {
+          padding-inline: var(--space-4);
+        }
       }
     `,
   ],
@@ -1710,17 +1979,37 @@ export class DashboardPageComponent implements OnInit {
    */
   readonly drawdownPct = computed(() => this.drawdown()?.drawdownPct ?? null);
 
-  /** Engine defaults: Reduced from 10 %, Halted from 20 %. */
-  readonly drawdownDot = computed(() => {
+  /** Drawdown meter scale: 0-25 %, so both engine thresholds (Reduced 10 %, Halted 20 %) show. */
+  readonly DD_SCALE = 25;
+
+  /** Fill width and severity of the drawdown meter. */
+  readonly drawdownMeter = computed<{ pct: number; tone: 'good' | 'warn' | 'bad' | 'none' }>(() => {
     const dd = this.drawdownPct();
-    if (dd == null) return 'var(--text-tertiary)';
-    if (dd >= 20) return '#FF3B30';
-    if (dd >= 10) return '#FF9500';
-    return '#34C759';
+    if (dd == null) return { pct: 0, tone: 'none' };
+    const pct = Math.min(100, Math.max(0, (dd / this.DD_SCALE) * 100));
+    return { pct, tone: dd >= 20 ? 'bad' : dd >= 10 ? 'warn' : 'good' };
   });
 
+  /** USD with thousands separators; `signed` prefixes a plus on gains. "—" for unknown. */
+  fmtMoney(v: number | null | undefined, signed = false): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    const s = usd(v);
+    return signed && v > 0 ? `+${s}` : s;
+  }
+
+  /** profit / loss class for a signed figure; none for zero or unknown. */
+  toneClass(v: number | null | undefined): string {
+    return v == null || v === 0 ? '' : v > 0 ? 'profit' : 'loss';
+  }
+
+  /** A close's signed P&L detail gets its sign colour; other details stay muted. */
+  detailTone(e: ActivityEntry): string {
+    if (e.kind !== 'close' || !e.detail) return 'muted';
+    return e.detail.startsWith('+') ? 'profit' : e.detail.startsWith('-') ? 'loss' : 'muted';
+  }
+
   /**
-   * The demoted hero stats. Formatted here so the strip shows one number
+   * The stat row under the hero (unrealized and today's P&L live in the hero). Formatted here so the strip shows one number
    * style (USD, thousands separators, fixed decimals) and colour only where
    * the sign or a threshold means something — a 63 % win rate is not "good"
    * next to a losing book, and a 0.7 profit factor is not.
@@ -1728,12 +2017,6 @@ export class DashboardPageComponent implements OnInit {
   readonly secondaryStats = computed<
     { label: string; value: string; tone: 'good' | 'bad' | 'warn' | ''; hint?: string }[]
   >(() => {
-    const money = (v: number | null) =>
-      v == null
-        ? '—'
-        : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
-    const signTone = (v: number | null): 'good' | 'bad' | '' =>
-      v == null || v === 0 ? '' : v > 0 ? 'good' : 'bad';
     const pf = this.profitFactor();
     const pfTone: 'good' | 'bad' | 'warn' | '' =
       pf == null ? '' : pf >= 1.5 ? 'good' : pf >= 1 ? 'warn' : 'bad';
@@ -1748,12 +2031,6 @@ export class DashboardPageComponent implements OnInit {
     const stale = this.staleWorkerCount();
     const idle = this.idleWorkerCount();
     return [
-      {
-        label: 'Unrealized P&L',
-        value: money(this.unrealizedPnl()),
-        tone: signTone(this.unrealizedPnl()),
-      },
-      { label: 'Today P&L', value: money(this.todaysPnl()), tone: signTone(this.todaysPnl()) },
       {
         label: 'Win rate (30d)',
         value: closed === 0 ? '—' : `${this.winRatePct().toFixed(1)}%`,
@@ -1853,6 +2130,21 @@ export class DashboardPageComponent implements OnInit {
           w.statusLabel === 'Failed' || w.statusLabel === 'Degraded' || w.statusLabel === 'Stale',
       )
       .slice(0, 5),
+  );
+
+  /** Worker buckets in severity order for the segmented bar and its legend. */
+  readonly workerSegments = computed(() => {
+    const b = this.workerBuckets();
+    return (['Healthy', 'Idle', 'Stale', 'Degraded', 'Failed'] as const).map((label) => ({
+      label,
+      count: b[label],
+    }));
+  });
+
+  readonly workerSummaryLabel = computed(() =>
+    this.workerSegments()
+      .map((s) => `${s.count} ${s.label.toLowerCase()}`)
+      .join(', '),
   );
 
   /** The engine reports paper mode as the raw config string, "true" or "false". */
@@ -2006,7 +2298,7 @@ export class DashboardPageComponent implements OnInit {
         valueFormatter: (v) => usd(tooltipNumber(v)),
       },
       xAxis: this.timeAxis(),
-      yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      yAxis: valueAxis(),
       series: [
         {
           type: 'line',
@@ -2049,7 +2341,7 @@ export class DashboardPageComponent implements OnInit {
     return {
       grid: { top: 16, right: 12, bottom: 28, left: 50 },
       xAxis: this.timeAxis(),
-      yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      yAxis: valueAxis(),
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -2118,7 +2410,7 @@ export class DashboardPageComponent implements OnInit {
     if (rows.length === 0) return emptyChart('No trades in the last 30 days');
     return {
       grid: { top: 8, right: 24, bottom: 28, left: 8, containLabel: true },
-      xAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      xAxis: valueAxis(),
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.symbol),
@@ -2175,7 +2467,7 @@ export class DashboardPageComponent implements OnInit {
    * (the engine resolves names for non-deleted strategies only) is the
    * fallback test.
    */
-  private readonly currentAllocations = computed(() => {
+  readonly currentAllocations = computed(() => {
     const active = this.activeStrategies();
     const names = new Map((active ?? []).map((s) => [s.id, s.name]));
     const rows = this.allocations().filter(
@@ -2198,49 +2490,42 @@ export class DashboardPageComponent implements OnInit {
       : `Ensemble weights · ${n} active strateg${n === 1 ? 'y' : 'ies'}`;
   });
 
-  readonly allocationChart = computed<EChartsOption>(() => {
+  /**
+   * Allocation rows for the part-to-whole bar and its list. A strategy's colour follows its id
+   * (ascending), not its rank, so a rebalance that reorders weights does not repaint it; past
+   * six strategies the smallest fold into one grey "Other" row.
+   */
+  readonly allocationRows = computed(() => {
     const rows = this.currentAllocations();
-    if (rows.length === 0) return emptyChart('No active strategy holds an allocation');
-    // ECharts keys legend entries by name; two strategies can share one, so a
-    // repeated name carries its id.
-    const seen = new Map<string, number>();
-    for (const r of rows) seen.set(r.name, (seen.get(r.name) ?? 0) + 1);
-    const data = rows.map((r, i) => ({
-      name: (seen.get(r.name) ?? 0) > 1 ? `${r.name} #${r.strategyId}` : r.name,
-      value: +r.share.toFixed(2),
-      itemStyle: { color: PALETTE[i % PALETTE.length] },
+    const shown = rows.slice(
+      0,
+      rows.length > ALLOC_PALETTE.length ? ALLOC_PALETTE.length - 1 : rows.length,
+    );
+    const rest = rows.slice(shown.length);
+    const byId = [...shown].map((r) => r.strategyId).sort((a, b) => a - b);
+    const out: {
+      key: string;
+      strategyId: number | null;
+      name: string;
+      share: number;
+      color: string;
+    }[] = shown.map((r) => ({
+      key: `s${r.strategyId}`,
+      strategyId: r.strategyId,
+      name: r.name,
+      share: r.share,
+      color: ALLOC_PALETTE[byId.indexOf(r.strategyId)],
     }));
-    const pct = new Map(data.map((d) => [d.name, d.value]));
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
-      // Ring on the left half, vertical legend on the right half. The ring
-      // used to be centred at 30% with a 72% radius (wider than its half) and
-      // the legend pinned to the right edge at a fixed 118px — the two
-      // overlapped and the ring's left edge was clipped.
-      legend: {
-        orient: 'vertical',
-        left: '54%',
-        top: 'middle',
-        type: 'scroll',
-        icon: 'circle',
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 8,
-        textStyle: { fontSize: 11, width: 96, overflow: 'truncate' },
-        formatter: (name: string) => `${name}  ${(pct.get(name) ?? 0).toFixed(1)}%`,
-        // The full name when the 96px label truncates it.
-        tooltip: { show: true },
-      },
-      series: [
-        {
-          type: 'pie',
-          radius: ['34%', '52%'],
-          center: ['26%', '50%'],
-          label: { show: false },
-          data,
-        },
-      ],
-    };
+    if (rest.length > 0) {
+      out.push({
+        key: 'other',
+        strategyId: null,
+        name: `Other (${rest.length})`,
+        share: rest.reduce((s, r) => s + r.share, 0),
+        color: ALLOC_OTHER,
+      });
+    }
+    return out;
   });
 
   ngOnInit(): void {
@@ -2647,6 +2932,21 @@ function workerBucket(w: WorkerHealthDto): 'Healthy' | 'Degraded' | 'Failed' | '
   if (w.isStale && !w.isCompleted) return 'Stale';
   if (w.status === 'Idle') return 'Idle';
   return 'Healthy';
+}
+
+/** A money value axis: compact dollar labels ("$1.2K") on solid hairline gridlines. */
+function valueAxis(): { type: 'value'; axisLabel: object; splitLine: object } {
+  const compact = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  });
+  return {
+    type: 'value',
+    axisLabel: { fontSize: 10, formatter: (v: number) => compact.format(v) },
+    splitLine: { show: true, lineStyle: { type: 'solid', opacity: 0.7 } },
+  };
 }
 
 function emptyChart(text: string): EChartsOption {
