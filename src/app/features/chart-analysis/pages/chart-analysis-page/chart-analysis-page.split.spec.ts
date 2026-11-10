@@ -52,13 +52,6 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     calendars: new Map(),
     chartScripts: { savedScripts: () => [], runOnChart: vi.fn(() => of({ title: 'run', error: null })) },
     destroyRef: { destroyed: false, onDestroy: () => () => undefined },
-    panelRuns: new Set(),
-    scriptCatalog: signal({
-      mine: [{ key: 'mine:7', source: 'mine', name: 'Trend', description: '', kind: 'indicator', pineSource: 'x' }],
-      examples: [],
-      strategies: [],
-      strategiesError: null,
-    }),
   });
   // US02: the split view lives in its controller; the page's split members are its signals.
   const split = new SplitPanelsController({
@@ -74,9 +67,9 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     calendarOf: () => null,
     calendarCodeOf: () => null,
     loadCalendar: () => Promise.resolve(null),
-    // As the page wires them: a panel's switch reaches its link group.
-    linkSymbol: (id: string, symbol: string) => p['linkSymbol'](id, symbol),
-    linkInterval: (id: string, r: string) => p['linkInterval'](id, r),
+    // A panel's switch reaches its link group through the page's ChartLinkedCharts (chart-linked-charts.spec).
+    linkSymbol: () => undefined,
+    linkInterval: () => undefined,
   });
   split.panels.set(comparePanels());
   Object.assign(p, {
@@ -84,9 +77,6 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     comparePanels: split.panels,
     splitLayout: split.layout,
     panelLegends: split.legends,
-  });
-  Object.defineProperty(p, 'panelScriptChoices', {
-    value: computed(() => [...p.scriptCatalog()!.mine, ...p.scriptCatalog()!.examples]),
   });
   // As the page derives the layout's other charts (v2 `charts`, CC-I5).
   Object.defineProperty(p, 'panelStates', {
@@ -209,110 +199,4 @@ describe('chart page — split panel states (US03)', () => {
   });
 });
 
-describe('chart page — the other charts’ studies and scripts (CC-I5)', () => {
-  const panel = (over = {}) => ({
-    id: 'a',
-    symbol: 'GBPUSD',
-    resolution: '60',
-    bars: hours(2, 3),
-    indicators: [],
-    link: 0,
-    scripts: [],
-    ...over,
-  });
-
-  it('adds a study and a script to one chart, and removes them', () => {
-    const { p } = setup();
-    p.comparePanels.set([panel()]);
-    p.panelAdd('a', 'study:rsi');
-    p.panelAdd('a', 'script:mine:7');
-    p.panelAdd('a', 'script:mine:7'); // once
-    const [a] = p.comparePanels();
-    expect(a.indicators.map((i: { defId: string }) => i.defId)).toEqual(['rsi']);
-    expect(a.scripts.map((s: { item: { key: string } }) => s.item.key)).toEqual(['mine:7']);
-    p.removePanelStudy('a', a.indicators[0].uid);
-    p.removePanelScript('a', 'mine:7');
-    expect(p.comparePanels()[0]).toMatchObject({ indicators: [], scripts: [] });
-  });
-
-  it('runs a chart’s script on its own series to its last bar, and keeps the run', () => {
-    const { p } = setup();
-    p.comparePanels.set([panel()]);
-    p.panelAdd('a', 'script:mine:7');
-    p['runPanelScript']('a', 'mine:7');
-    expect(p['chartScripts'].runOnChart).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'mine:7' }),
-      'GBPUSD',
-      '60',
-      {},
-      1500,
-      { chartType: 'standard' },
-    );
-    const s = p.comparePanels()[0].scripts[0];
-    expect(s.result).toMatchObject({ title: 'run' });
-    expect(s.ranTo).toBe(p.comparePanels()[0].bars.at(-1)!.time);
-  });
-});
-
-describe('chart page — linked charts (CC-I5)', () => {
-  const panel = (id: string, link: number, symbol = 'GBPUSD') => ({
-    id,
-    symbol,
-    resolution: '60',
-    bars: hours(2, 3),
-    indicators: [],
-    link,
-    scripts: [],
-  });
-  function linked(sync: Partial<Record<'symbol' | 'interval' | 'crosshair' | 'time', boolean>>) {
-    const { p } = setup();
-    const hosts = [
-      { syncCrosshair: vi.fn(), syncRange: vi.fn() },
-      { syncCrosshair: vi.fn(), syncRange: vi.fn() },
-    ];
-    const main = { syncCrosshair: vi.fn(), syncRange: vi.fn() };
-    Object.assign(p, {
-      mainLink: signal(1),
-      chartSync: signal({ symbol: false, interval: false, crosshair: true, time: true, ...sync }),
-      panelHosts: () => hosts,
-      host: () => main,
-    });
-    p.comparePanels.set([panel('a', 1), panel('b', 2, 'USDJPY')]);
-    return { p, hosts, main };
-  }
-
-  it('the crosshair and the time range move on the charts of the same group only', () => {
-    const { p, hosts, main } = linked({});
-    p.onChartCrosshair('main', 1234);
-    expect(hosts[0].syncCrosshair).toHaveBeenCalledWith(1234);
-    expect(hosts[1].syncCrosshair).not.toHaveBeenCalled();
-    p.onChartRange('a', { fromMs: 1, toMs: 2 });
-    expect(main.syncRange).toHaveBeenCalledWith(1, 2);
-    expect(hosts[1].syncRange).not.toHaveBeenCalled();
-  });
-
-  it('with crosshair sync off nothing follows', () => {
-    const { p, hosts } = linked({ crosshair: false });
-    p.onChartCrosshair('main', 1234);
-    expect(hosts[0].syncCrosshair).not.toHaveBeenCalled();
-  });
-
-  it('symbol and interval sync carry a switch across the group, once', () => {
-    const { p } = linked({ symbol: true, interval: true });
-    const selectSymbol = vi.fn();
-    const selectResolution = vi.fn();
-    Object.assign(p, { selectSymbol, selectResolution });
-    p.setPanelSymbol('a', 'audusd');
-    expect(selectSymbol).toHaveBeenCalledWith('AUDUSD', false);
-    expect(p.comparePanels()[1].symbol).toBe('USDJPY'); // another group
-    p.setPanelResolution('a', '240');
-    expect(selectResolution).toHaveBeenCalledWith('240', false);
-  });
-
-  it('a chart without a link follows nothing', () => {
-    const { p, main } = linked({ symbol: true });
-    p.setPanelLink('a', 0);
-    p.onChartCrosshair('a', 5);
-    expect(main.syncCrosshair).not.toHaveBeenCalled();
-  });
-});
+// The other charts' studies / scripts and the linked charts (CC-I5) are ChartLinkedCharts' — chart-linked-charts.spec.

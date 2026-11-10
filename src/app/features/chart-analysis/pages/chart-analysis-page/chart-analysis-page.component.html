@@ -534,18 +534,18 @@
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="undo()"
-      [disabled]="!canUndo()"
-      [title]="undoTitle()" [attr.aria-label]="undoTitle()"
+      (click)="chartUndo.undo()"
+      [disabled]="!chartUndo.canUndo()"
+      [title]="chartUndo.undoTitle()" [attr.aria-label]="chartUndo.undoTitle()"
     >
       <app-chart-icon name="undo" [size]="28" />
     </button>
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="redo()"
-      [disabled]="!canRedo()"
-      [title]="redoTitle()" [attr.aria-label]="redoTitle()"
+      (click)="chartUndo.redo()"
+      [disabled]="!chartUndo.canRedo()"
+      [title]="chartUndo.redoTitle()" [attr.aria-label]="chartUndo.redoTitle()"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
@@ -629,19 +629,19 @@
             <div class="tb-menu-sep"></div>
             <label class="tb-menu-field" title="Charts in one link group follow each other">
               Main chart link
-              <select [value]="mainLink()" (change)="setMainLink(+$any($event.target).value)">
+              <select [value]="mainLink()" (change)="linked.setMainLink(+$any($event.target).value)">
                 <option value="0">None</option>
                 <option value="1">Group 1</option>
                 <option value="2">Group 2</option>
                 <option value="3">Group 3</option>
               </select>
             </label>
-            @for (k of syncKeys; track k.key) {
+            @for (k of linked.syncKeys; track k.key) {
               <button
                 type="button"
                 class="tb-menu-item tb-check"
                 [class.on]="chartSync()[k.key]"
-                (click)="setSync(k.key, !chartSync()[k.key])"
+                (click)="linked.setSync(k.key, !chartSync()[k.key])"
                 [title]="k.title"
               >
                 Sync {{ k.label }}
@@ -795,8 +795,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="undo(); openMenu.set(null)"
-            [disabled]="!canUndo()"
+            (click)="chartUndo.undo(); openMenu.set(null)"
+            [disabled]="!chartUndo.canUndo()"
           >
             <app-chart-icon name="undo" [size]="28" /> Undo
           </button>
@@ -804,8 +804,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="redo(); openMenu.set(null)"
-            [disabled]="!canRedo()"
+            (click)="chartUndo.redo(); openMenu.set(null)"
+            [disabled]="!chartUndo.canRedo()"
           >
             <app-chart-icon name="redo" [size]="28" /> Redo
           </button>
@@ -938,8 +938,8 @@
           [showCountdown]="showCountdown()"
           [appearance]="appearance()"
           [legendBottom]="legendBottom()"
-          (crosshairSync)="onChartCrosshair('main', $event)"
-          (rangeSync)="onChartRange('main', $event)"
+          (crosshairSync)="linked.onChartCrosshair('main', $event)"
+          (rangeSync)="linked.onChartRange('main', $event)"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"
@@ -1181,7 +1181,7 @@
             <select
               class="panel-select"
               [ngModel]="panel.link"
-              (ngModelChange)="setPanelLink(panel.id, +$event)"
+              (ngModelChange)="linked.setPanelLink(panel.id, +$event)"
               [ngModelOptions]="{ standalone: true }"
               aria-label="Link group"
               title="Charts in one link group follow each other (the layout menu says what they follow)"
@@ -1231,19 +1231,19 @@
             <select
               class="panel-select"
               (change)="
-                panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''
+                linked.panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''
               "
               aria-label="Add a study or a script to this chart"
             >
               <option value="">+ Study</option>
               <optgroup label="Indicators">
-                @for (d of panelStudyDefs; track d.id) {
+                @for (d of linked.panelStudyDefs; track d.id) {
                   <option [value]="'study:' + d.id">{{ d.name }}</option>
                 }
               </optgroup>
-              @if (panelScriptChoices().length) {
+              @if (linked.panelScriptChoices().length) {
                 <optgroup label="Pine scripts">
-                  @for (it of panelScriptChoices(); track it.key) {
+                  @for (it of linked.panelScriptChoices(); track it.key) {
                     <option [value]="'script:' + it.key">{{ it.name }}</option>
                   }
                 </optgroup>
@@ -1253,7 +1253,7 @@
               <button
                 type="button"
                 class="panel-select"
-                (click)="removePanelStudy(panel.id, ind.uid)"
+                (click)="linked.removePanelStudy(panel.id, ind.uid)"
                 [title]="'Remove ' + labelFor(ind)"
               >
                 {{ labelFor(ind) }} ×
@@ -1263,7 +1263,7 @@
               <button
                 type="button"
                 class="panel-select"
-                (click)="removePanelScript(panel.id, s.item.key)"
+                (click)="linked.removePanelScript(panel.id, s.item.key)"
                 [title]="
                   s.error
                     ? s.item.name + ': ' + s.error + ' — click to remove'
@@ -1340,9 +1340,9 @@
             [style]="look.style"
             [showVolume]="look.showVolume"
             [indicators]="panel.indicators"
-            (crosshairSync)="onChartCrosshair(panel.id, $event)"
-            (rangeSync)="onChartRange(panel.id, $event)"
-            [scriptResults]="panelLayerMap().get(panel.id) ?? noLayers"
+            (crosshairSync)="linked.onChartCrosshair(panel.id, $event)"
+            (rangeSync)="linked.onChartRange(panel.id, $event)"
+            [scriptResults]="linked.panelLayerMap().get(panel.id) ?? linked.noLayers"
             [precision]="panelPrecision(panel.symbol)"
             [facts]="panelFacts(panel.symbol)"
             [session]="panelSession(panel.symbol)"

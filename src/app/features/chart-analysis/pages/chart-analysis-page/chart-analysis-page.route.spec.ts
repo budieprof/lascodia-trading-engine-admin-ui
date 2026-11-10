@@ -41,8 +41,8 @@ function setup(url: { tf?: string } = {}) {
     viewSnapshot: signal(null),
     pendingView: null,
     pendingViewFor: null,
-    // Linked charts (CC-I5): none.
-    chartSync: signal({ symbol: false, interval: false, crosshair: true, time: true }),
+    // Linked charts (CC-I5): none — a switch reaches ChartLinkedCharts (b10-ui; its sync is chart-linked-charts.spec).
+    linked: { linkSymbol: vi.fn(), linkInterval: vi.fn() },
     symbolMenuOpen: signal(false),
     symbolQuery: signal(''),
     loading: session.loading,

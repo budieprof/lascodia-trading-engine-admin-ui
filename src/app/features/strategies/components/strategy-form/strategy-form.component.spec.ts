@@ -198,7 +198,8 @@ describe('StrategyFormComponent (legacy rules, parameters, edit mode)', () => {
     });
 
     it('never offers a legacy JSON-rules template to load', () => {
-      expect(cmp.availableTemplates().map((t) => t.id)).toEqual([2]);
+      // b10-ui: the templates are StrategyTemplateActions (strategy-template-actions.spec); the form loads them on init.
+      expect(cmp.templates.availableTemplates().map((t) => t.id)).toEqual([2]);
     });
 
     it('submits Parameters JSON for a non-Pine type', () => {
