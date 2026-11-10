@@ -65,6 +65,12 @@ export interface ResolveApprovalOptions {
   clientData?: unknown;
   /** Text the page hands to one of the assistant's server-side buffers (`pine.toBuffer`). */
   clientBuffer?: { name: string; text: string } | null;
+  /**
+   * The operator ticked "I've checked this isn't based on misleading outside text" on a card the
+   * assistant proposed after reading outside text (`args.provenance.requiresAcknowledgement`).
+   * Without it the engine refuses such a confirm with -23. Only ever sent as `true`.
+   */
+  acknowledgeUntrusted?: boolean | null;
 }
 
 /** Engine-side caps for the client report (mirrored so the clip is visible here, not silent there). */
@@ -88,6 +94,7 @@ export function resolveApprovalBody(opts?: ResolveApprovalOptions | null): Recor
   const outcome = (opts?.clientOutcome ?? '').trim();
   if (outcome) body['clientOutcome'] = outcome.slice(0, MAX_REASON_LENGTH);
   if (typeof opts?.clientOk === 'boolean') body['clientOk'] = opts.clientOk;
+  if (opts?.acknowledgeUntrusted === true) body['acknowledgeUntrusted'] = true;
   if (opts?.clientData !== undefined && opts.clientData !== null) {
     let json: string;
     try {
@@ -102,7 +109,12 @@ export function resolveApprovalBody(opts?: ResolveApprovalOptions | null): Recor
           : json;
   }
   const buf = opts?.clientBuffer;
-  if (buf && typeof buf.name === 'string' && typeof buf.text === 'string' && buf.text.length <= MAX_CLIENT_BUFFER_LENGTH)
+  if (
+    buf &&
+    typeof buf.name === 'string' &&
+    typeof buf.text === 'string' &&
+    buf.text.length <= MAX_CLIENT_BUFFER_LENGTH
+  )
     body['clientBuffer'] = { name: buf.name, text: buf.text };
   return body;
 }

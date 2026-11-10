@@ -1,4 +1,5 @@
-// Write-blocked check of the Assistant page (/assistant: Health + Lessons) and the approval card's preflight badge,
+// Write-blocked check of the Assistant page (/assistant: Health + Evals + Quality + Lessons) and the approval cards
+// (preflight + script replay, outside-text provenance + acknowledgement, undo, "Review all", live progress line),
 // on a LOCAL production build with STUBBED engine answers: nothing reaches any engine — every /api, /health, /bff and
 // hub request is answered in the browser by the stubs below, and every non-GET except the read-POST alert/list is
 // ABORTED and recorded (so clicking a dialog's confirm shows the request was attempted, never sent).
@@ -142,6 +143,27 @@ const METRICS = {
     failedAfterConfirmRate: 0.1176,
   },
   truncated: false,
+  efficiency: {
+    questions: 100,
+    nativeRounds: 380,
+    sentinelRounds: 31,
+    nativeFallbackRounds: 9,
+    nativeShare: 0.905,
+    sentinelShare: 0.074,
+    nativeFallbackShare: 0.021,
+    prefixReusedQuestions: 64,
+    prefixReuseShare: 0.64,
+    cacheHitRatioPrefixReused: 0.82,
+    cacheHitRatioPrefixRendered: 0.41,
+    routed: 38,
+    routedShare: 0.38,
+    escalated: 7,
+    escalationRate: 0.184,
+    escalationReasons: { tool_heavy: 4, low_confidence: 3 },
+    questionsByModel: { 'claude-opus-4': 69, 'claude-sonnet-4': 31 },
+    avgNotionalCostRoutedUsd: 0.031,
+    avgNotionalCostMainUsd: 0.22,
+  },
   // Engine 3f04f4b1+: the window's own verdict and limits (OLD_ENGINE=1 drops them to exercise the alert/list fallback).
   ...(process.env.OLD_ENGINE
     ? {}
@@ -223,6 +245,26 @@ const LESSONS = [
     reviewNote: 'Shipped with the engine',
     injectedCount: 57,
     lastInjectedAtUtc: '2026-11-10T06:40:00Z',
+    evalRunId: 41,
+    evalStatus: 'Completed',
+    evalAtUtc: '2026-11-09T03:00:00Z',
+    evalImproved: 0,
+    evalWorsened: 0,
+    evalUnchanged: 3,
+    noMeasurableEffect: true,
+  }),
+  lesson(8, 'Approved', {
+    source: 'correction',
+    text: 'Quote the timeframe of every level you cite.',
+    reviewedBy: 'admin-user:1',
+    reviewedAtUtc: '2026-11-08T10:00:00Z',
+    injectedCount: 12,
+    evalRunId: 44,
+    evalStatus: 'Completed',
+    evalAtUtc: '2026-11-09T03:20:00Z',
+    evalImproved: 2,
+    evalWorsened: 0,
+    evalUnchanged: 1,
   }),
   lesson(4, 'Rejected', {
     source: 'gate_exhausted',
@@ -282,7 +324,360 @@ const THREAD = [
     },
   }),
   card(5, opArgs),
+  // Outside text + acknowledgement + script replay.
+  card(6, {
+    ...opArgs,
+    operationId: 'MarketData_CreateAnalysisMonitor',
+    summary: 'Watch EURUSD for a retest of 1.0850 and arm the long',
+    preflight: {
+      ...preflight('wouldSucceed', 'checked: would succeed'),
+      replay: {
+        outcome: 'passed',
+        legs: [
+          {
+            label: 'card #327',
+            outcome: 'passed',
+            summary: 'ready on the retest',
+            fromUtc: '2026-11-06T00:00:00Z',
+            toUtc: '2026-11-09T21:00:00Z',
+            bars: 312,
+          },
+        ],
+      },
+    },
+    provenance: {
+      untrusted: true,
+      sources: [
+        { kind: 'news', source: 'GET /news-intel/articles/88112' },
+        { kind: 'web', source: 'GET /wire/sessions/31/briefing' },
+      ],
+      kinds: ['news', 'web'],
+      highImpact: true,
+      requiresAcknowledgement: true,
+      note: 'Check that this change is what YOU want, not what the text asked for.',
+    },
+  }),
+  // Confirmed with an undo on offer (window still open), one undone, one with no undo.
+  card(
+    7,
+    {
+      ...opArgs,
+      summary: 'Create monitor #123',
+      undo: {
+        available: true,
+        status: 'available',
+        label: 'Cancel monitor #123',
+        recordedAtUtc: new Date(Date.now() - 5 * 60_000).toISOString(),
+        expiresAtUtc: new Date(Date.now() + 10 * 60_000).toISOString(),
+      },
+    },
+    'Confirmed',
+  ),
+  card(
+    8,
+    {
+      ...opArgs,
+      summary: 'Pause monitor #120',
+      undo: {
+        available: true,
+        status: 'done',
+        label: 'Resume monitor #120',
+        undoneAtUtc: '2026-11-10T07:09:00Z',
+        undoneBy: 'admin-user:1',
+        undoReason: 'paused the wrong one',
+      },
+    },
+    'Confirmed',
+  ),
+  card(
+    9,
+    {
+      ...opArgs,
+      summary: 'Set Llm:AssistantEvalEnabled = true',
+      undo: {
+        available: false,
+        reason: 'No undo: this setting change was not recorded before it ran.',
+      },
+    },
+    'Confirmed',
+  ),
 ];
+
+const evalRun = (id, over = {}) => ({
+  id,
+  kind: 'suite',
+  trigger: 'nightly',
+  status: 'Completed',
+  lessonId: null,
+  model: 'opus',
+  resolvedModel: 'claude-opus-4',
+  promptHash: 'a1b2',
+  caseIds: [],
+  requestedBy: null,
+  queuedAtUtc: `2026-11-0${(id % 9) + 1}T02:00:00Z`,
+  startedAtUtc: `2026-11-0${(id % 9) + 1}T02:01:00Z`,
+  completedAtUtc: `2026-11-0${(id % 9) + 1}T02:14:00Z`,
+  casesTotal: 20,
+  casesPassed: 15 + (id % 4),
+  casesFailed: 5 - (id % 4),
+  casesSkipped: 0,
+  passRate: (15 + (id % 4)) / 20,
+  meanScore: 0.8 + (id % 4) * 0.04,
+  modelCalls: 140,
+  tokensInput: 2_400_000,
+  tokensOutput: 120_000,
+  tokensCacheRead: 1_600_000,
+  wallMs: 780_000,
+  improved: null,
+  worsened: null,
+  unchanged: null,
+  summary: null,
+  error: null,
+  ...over,
+});
+const EVAL_RUNS = {
+  runs: [
+    evalRun(48, {
+      status: 'Running',
+      completedAtUtc: null,
+      passRate: null,
+      meanScore: null,
+      trigger: 'manual',
+      queuedAtUtc: '2026-11-10T06:50:00Z',
+    }),
+    evalRun(7),
+    evalRun(6, {
+      status: 'BudgetStopped',
+      casesSkipped: 4,
+      summary: 'Stopped at the daily token ceiling after 16 cases.',
+    }),
+    evalRun(5),
+    evalRun(4, {
+      status: 'Failed',
+      passRate: null,
+      meanScore: null,
+      error: 'The model provider refused the request (quota).',
+    }),
+    evalRun(3),
+    evalRun(2),
+    evalRun(1),
+  ],
+  live: null,
+  settings: {
+    evalEnabled: true,
+    evalHourUtc: 2,
+    evalModel: 'opus',
+    evalMaxCases: 20,
+    dailyTokenCeiling: 6_000_000,
+    tokensSpentToday: 4_900_000,
+    regressionPoints: 10,
+    judgeEnabled: true,
+    judgeIntervalDays: 3,
+    judgeHourUtc: 4,
+    judgeSampleSize: 12,
+    judgeModel: 'opus',
+    lessonReplayEnabled: true,
+    lessonReplayMaxCases: 6,
+    cases: [
+      {
+        id: '45861-oco-preflight-four-cycles',
+        title: 'OCO preflight',
+        kind: 'operator',
+        skip: null,
+        recordedTokens: 90_000,
+      },
+    ],
+  },
+};
+EVAL_RUNS.live = EVAL_RUNS.runs[0];
+const EVAL_DETAIL = {
+  run: evalRun(7),
+  lessonId: null,
+  lessonText: null,
+  lessonScope: null,
+  cases: [
+    {
+      id: 1,
+      caseId: '45861-oco-preflight-four-cycles',
+      caseTitle: 'Arm an OCO that the preflight refuses four times',
+      arm: '',
+      passed: false,
+      skipped: null,
+      score: 0.6,
+      checksTotal: 5,
+      checksFailed: 2,
+      checks: [
+        { name: 'expect:toolsCalled:live_price', passed: true, detail: null },
+        {
+          name: 'expect:noWriteAfterRefusal',
+          passed: false,
+          detail: 'proposed the same OCO a fifth time',
+        },
+        {
+          name: 'expect:answerMentions:refused',
+          passed: false,
+          detail: 'the answer never said the engine refused it',
+        },
+      ],
+      rounds: 9,
+      modelCalls: 11,
+      tokensInput: 180_000,
+      tokensOutput: 6_000,
+      tokensCacheRead: 120_000,
+      protocol: 'native',
+      modelLatencyMs: 41_000,
+      wallMs: 52_000,
+      heldForRevision: 1,
+      unverified: false,
+      failureReason: 'It kept re-proposing a write the engine had refused.',
+      answer: 'I armed the OCO on #12 with a buy stop at 1.0912 …',
+    },
+    {
+      id: 2,
+      caseId: '36422-buy-and-hold-return',
+      caseTitle: 'Buy-and-hold return of EURUSD',
+      arm: '',
+      passed: true,
+      skipped: null,
+      score: 1,
+      checksTotal: 3,
+      checksFailed: 0,
+      checks: [{ name: 'expect:toolsCalled:get_candles', passed: true, detail: null }],
+      rounds: 3,
+      modelCalls: 3,
+      tokensInput: 40_000,
+      tokensOutput: 1_200,
+      tokensCacheRead: 30_000,
+      protocol: 'sentinel',
+      modelLatencyMs: 9_000,
+      wallMs: 12_000,
+      heldForRevision: 0,
+      unverified: false,
+      failureReason: null,
+      answer: 'EURUSD returned +2.1 % over the period …',
+    },
+  ],
+};
+const QUALITY = {
+  fromUtc: '2026-08-12T00:00:00Z',
+  answers: 48,
+  correctness: 3.9,
+  completeness: 3.6,
+  clarity: 4.3,
+  honesty: 4.1,
+  overall: 4.0,
+  trend: [1, 2, 3, 4].map((i) => ({
+    runId: 60 + i,
+    gradedAtUtc: `2026-11-0${i * 2}T04:10:00Z`,
+    answers: 12,
+    correctness: 3.5 + i * 0.15,
+    completeness: 3.3 + i * 0.1,
+    clarity: 4.1 + i * 0.05,
+    honesty: 3.8 + i * 0.1,
+    overall: 3.8 + i * 0.1,
+    lowCorrectness: 4 - i,
+    judgeModel: 'opus',
+  })),
+  lowest: [
+    {
+      id: 1,
+      runId: 64,
+      conversationId: 55618,
+      conversationLink: '/conversations?conversation=55618',
+      answerTurnId: 9001,
+      questionTurnId: 9000,
+      answeredAtUtc: '2026-11-07T14:22:00Z',
+      question: 'What is my exposure to USD right now?',
+      answerExcerpt: 'You are net long USD by 3.2 lots across EURUSD and GBPUSD …',
+      correctness: 1,
+      completeness: 3,
+      clarity: 4,
+      honesty: 2,
+      correctnessReason: 'Short EURUSD is LONG USD; it added the GBPUSD leg with the wrong sign.',
+      completenessReason: 'It left out XAUUSD.',
+      clarityReason: null,
+      honestyReason: 'It did not say it had not checked the open positions.',
+      overall: 2.4,
+      judgeModel: 'opus',
+      lessonCandidateId: 13,
+      gradedAtUtc: '2026-11-08T04:10:00Z',
+    },
+  ],
+};
+const hist = (over = {}) => ({
+  questions: 312,
+  answerAttempts: 290,
+  heldRate: 0.34,
+  held: 99,
+  unverifiedRate: 0.12,
+  unverified: 35,
+  avgRounds: 5.1,
+  avgToolCalls: 8.2,
+  toolErrorRate: 0.07,
+  avgTokensInput: 52_000,
+  avgTokensOutput: 2_300,
+  cacheHitRatio: 0.48,
+  wallP50Seconds: 210,
+  wallP95Seconds: 780,
+  truncated: false,
+  exactness: {
+    questions: 'exact',
+    heldRate: 'exact',
+    unverifiedRate: 'exact',
+    avgRounds: 'approx',
+    toolErrorRate: 'approx',
+    avgTokensInput: 'approx',
+    avgTokensOutput: 'approx',
+    cacheHitRatio: 'approx',
+    wallP50Seconds: 'approx',
+    wallP95Seconds: 'approx',
+  },
+  ...over,
+});
+const COMPARE = {
+  baseline: {
+    fromUtc: '2026-10-11T00:00:00Z',
+    toUtc: '2026-11-10T00:00:00Z',
+    history: hist(),
+    telemetry: null,
+    telemetryFromUtc: null,
+  },
+  current: {
+    fromUtc: '2026-11-10T00:00:00Z',
+    toUtc: '2026-11-11T00:00:00Z',
+    history: hist({
+      questions: 41,
+      heldRate: 0.22,
+      unverifiedRate: 0.15,
+      avgRounds: 4.2,
+      cacheHitRatio: 0.71,
+      wallP50Seconds: 150,
+      wallP95Seconds: 820,
+    }),
+    telemetry: null,
+    telemetryFromUtc: '2026-11-10T09:00:00Z',
+  },
+  historyDeltas: {},
+  telemetryDeltas: null,
+  notes: [
+    "Questions, held rate and unverified rate are EXACT: every question starts with the operator's User turn.",
+    'Rounds are APPROXIMATE: the distinct admin_assistant.turn calls that left a turn behind.',
+  ],
+};
+const PROGRESS = {
+  llmInvocationId: 1,
+  questionTurnId: 1,
+  phase: 'reading',
+  round: 3,
+  tools: [
+    { name: 'live_price', label: 'Live price' },
+    { name: 'get_candles', label: 'Candles EURUSD H1' },
+  ],
+  message: 'Reading the EURUSD candles around the retest',
+  model: 'sonnet',
+  escalated: false,
+  atUtc: new Date(Date.now() - 4000).toISOString(),
+};
 
 /** Stub answer for a GET (or an allowed read-POST) by path. */
 function stub(method, p, search) {
@@ -298,6 +693,11 @@ function stub(method, p, search) {
       permissions: PERMS,
     });
   if (p.endsWith('/assistant/metrics')) return ok(METRICS);
+  if (p.endsWith('/assistant/metrics/compare')) return ok(COMPARE);
+  if (p.endsWith('/assistant/evals/runs')) return ok(EVAL_RUNS);
+  if (/\/assistant\/evals\/runs\/\d+$/.test(p)) return ok(EVAL_DETAIL);
+  if (p.endsWith('/assistant/quality')) return ok(QUALITY);
+  if (p.endsWith('/market-data/analyze/1/progress')) return ok(PROGRESS);
   if (p.endsWith('/assistant/lessons')) {
     const status = new URLSearchParams(search).get('status');
     return ok(LESSONS.filter((l) => !status || l.status === status));
@@ -471,6 +871,125 @@ function stub(method, p, search) {
     .scrollIntoViewIfNeeded()
     .catch(() => {});
   await page.screenshot({ path: path.join(OUT, 'chat-badges.png'), fullPage: false });
+
+  // ── Approval-card safety, Review all, progress line ──
+  const card = (id) => page.locator('.action-card').nth(id - 2);
+  results.chat.provenance = await page.locator('app-card-safety .pill').allInnerTexts();
+  results.chat.replayLine = await text('app-preflight-badge .replay summary')();
+  results.chat.progressLine = await text('app-assistant-progress .prog')();
+  const ackConfirm = card(6).locator('button.confirm');
+  results.chat.confirmDisabledBeforeAck = await ackConfirm.isDisabled();
+  await card(6).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'chat-provenance-ack.png'), fullPage: false });
+  await card(6).locator('.ack input').check();
+  results.chat.confirmDisabledAfterAck = await ackConfirm.isDisabled();
+  await ackConfirm.click(); // aborted: POST resolve
+  await page.waitForTimeout(500);
+  results.chat.ackRefusal = await card(6)
+    .locator('app-card-safety .refusal')
+    .innerText()
+    .catch(() => 'none');
+  await page.screenshot({ path: path.join(OUT, 'chat-provenance-ack-sent.png'), fullPage: false });
+  results.chat.undoTexts = await page.locator('app-card-safety .undo').allInnerTexts();
+  await card(7).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'chat-undo.png'), fullPage: false });
+  await card(7).locator('.undo-btn').click();
+  await page.waitForTimeout(300);
+  await page.locator('[role=dialog] textarea').fill('wrong pair');
+  await page.screenshot({ path: path.join(OUT, 'chat-undo-dialog.png'), fullPage: false });
+  await page.locator('[role=dialog] button', { hasText: 'Undo it' }).click(); // aborted: POST undo
+  await page.waitForTimeout(500);
+  results.chat.undoError = await card(7)
+    .locator('app-card-safety .undo .bad')
+    .innerText()
+    .catch(() => 'none');
+  await page.locator('app-batch-review').scrollIntoViewIfNeeded();
+  results.chat.batchHead = await text('app-batch-review header')();
+  await page.locator('app-batch-review button', { hasText: 'Review all' }).click();
+  await page.waitForTimeout(200);
+  results.chat.batchRows = await count('app-batch-review .list li')();
+  results.chat.approveAllDisabledBeforeAck = await page
+    .locator('app-batch-review .confirm')
+    .isDisabled();
+  await page.locator('app-batch-review .ack input').check();
+  await page.locator('app-batch-review').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'chat-review-all.png'), fullPage: false });
+  await page.locator('app-batch-review .confirm').click(); // aborted: POST resolve-batch
+  await page.waitForTimeout(500);
+  results.chat.batchError = await text('app-batch-review .bad')().catch(() => 'none');
+  await page.screenshot({ path: path.join(OUT, 'chat-review-all-sent.png'), fullPage: false });
+  await page.locator('app-assistant-progress').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'chat-progress.png'), fullPage: false });
+
+  // ── /assistant: Health additions, Evals, Quality, Lessons additions ──
+  await visit('/assistant', 'health-wave2', {
+    efficiency: text('app-assistant-efficiency-section h4'),
+    compareRows: count('app-assistant-compare-section tbody tr'),
+    approx: count('app-assistant-compare-section .approx'),
+  });
+  await page.locator('app-assistant-efficiency-section').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'health-efficiency.png'), fullPage: false });
+  await page.locator('app-assistant-compare-section').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'health-compare.png'), fullPage: false });
+  results['health-wave2'].compareCall = answered
+    .filter((a) => a.includes('/metrics/compare'))
+    .pop();
+
+  await visit('/assistant?tab=evals', 'evals', {
+    rows: count('app-assistant-evals-panel tbody tr'),
+    budget: text('.budget'),
+    live: text('.live'),
+    chart: count('app-chart-card canvas'),
+  });
+  await page.locator('app-assistant-evals-panel tbody tr').nth(1).click();
+  await page.waitForTimeout(500);
+  await page
+    .locator('app-assistant-eval-run-detail details')
+    .first()
+    .locator('summary')
+    .first()
+    .click();
+  await page.waitForTimeout(200);
+  results.evals.detailCases = await count('app-assistant-eval-run-detail .cases > li')();
+  await page.locator('app-assistant-eval-run-detail').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'evals-run-detail.png'), fullPage: true });
+  results.evals.runNowDisabledWhileLive = await page
+    .locator('button', { hasText: 'Run now' })
+    .isDisabled();
+
+  await visit('/assistant?tab=quality', 'quality', {
+    tiles: count('.tiles .tile'),
+    lowest: count('.grades > li'),
+    link: text('.grades .links a'),
+  });
+
+  await visit('/assistant?tab=lessons', 'lessons-wave2', {
+    evalLines: () => page.locator('app-lesson-eval-status').allInnerTexts(),
+  });
+  await page.locator('.seg button', { hasText: 'All' }).click();
+  await page.waitForTimeout(400);
+  results['lessons-wave2'].evalLinesAll = await page
+    .locator('app-lesson-eval-status')
+    .allInnerTexts();
+  await page.locator('app-lesson-eval-status button', { hasText: 'Evaluate' }).first().click(); // aborted
+  await page.waitForTimeout(400);
+  results['lessons-wave2'].evaluateMsg = await text('app-lesson-eval-status .msg')().catch(
+    () => 'none',
+  );
+  await page
+    .locator('app-lesson-eval-status .badge')
+    .first()
+    .scrollIntoViewIfNeeded()
+    .catch(() => {});
+  await page.screenshot({ path: path.join(OUT, 'lessons-eval.png'), fullPage: false });
+
+  for (const theme of ['dark']) {
+    await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+    await visit('/assistant?tab=evals', `evals-${theme}`, {});
+    await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(OUT, `evals-${theme}.png`), fullPage: true });
+  }
 
   console.log(
     JSON.stringify(

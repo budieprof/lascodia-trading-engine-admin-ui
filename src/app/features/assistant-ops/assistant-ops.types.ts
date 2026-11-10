@@ -94,6 +94,8 @@ export interface AssistantMetrics {
   breaches?: AssistantHealthBreachDto[];
   /** The `Llm:AssistantAlert*` thresholds in force (0 = rule off); null when unavailable. */
   thresholds?: AssistantHealthThresholds | null;
+  /** Loop efficiency (engine harness wave 2); undefined on an older engine. */
+  efficiency?: AssistantLoopEfficiency;
 }
 
 export interface AssistantHealthBreachDto {
@@ -142,6 +144,16 @@ export interface AssistantLesson {
   reviewedAtUtc: string | null;
   injectedCount: number;
   lastInjectedAtUtc: string | null;
+  /** The latest with/without replay of this lesson (engine harness wave 2; absent on older engines). */
+  evalRunId?: number | null;
+  /** Queued / Running / Completed / BudgetStopped / Failed — the replay run's status. */
+  evalStatus?: string | null;
+  evalAtUtc?: string | null;
+  evalImproved?: number | null;
+  evalWorsened?: number | null;
+  evalUnchanged?: number | null;
+  /** Approved 30+ days, used, and its replay changed nothing. */
+  noMeasurableEffect?: boolean;
 }
 
 /** The engine's `AssistantLessonReviewBody` (approve takes all four; reject / retire only `note`). */
@@ -163,4 +175,230 @@ export interface AssistantHealthAlertRow {
   deduplicationKey: string | null;
   isActive: boolean;
   lastTriggeredAt: string | null;
+}
+
+// ── Loop efficiency (AssistantMetrics.efficiency, engine harness wave 2) ────────────────────
+
+/** How the assistant's loop ran: tool-call protocol, prompt reuse, quick-model routing. */
+export interface AssistantLoopEfficiency {
+  questions: number;
+  nativeRounds: number;
+  sentinelRounds: number;
+  nativeFallbackRounds: number;
+  nativeShare: number;
+  sentinelShare: number;
+  nativeFallbackShare: number;
+  prefixReusedQuestions: number;
+  prefixReuseShare: number;
+  cacheHitRatioPrefixReused: number;
+  cacheHitRatioPrefixRendered: number;
+  routed: number;
+  routedShare: number;
+  escalated: number;
+  escalationRate: number;
+  escalationReasons: Record<string, number>;
+  questionsByModel: Record<string, number>;
+  avgNotionalCostRoutedUsd: number;
+  avgNotionalCostMainUsd: number;
+}
+
+// ── Before / after (GET assistant/metrics/compare) ───────────────────────────────────────────
+
+/** One window re-derived from the conversations (engine `AssistantHistoryStatsDto`). */
+export interface AssistantHistoryStats {
+  questions: number;
+  answerAttempts: number;
+  heldRate: number;
+  held: number;
+  unverifiedRate: number;
+  unverified: number;
+  avgRounds: number;
+  avgToolCalls: number;
+  toolErrorRate: number;
+  avgTokensInput: number;
+  avgTokensOutput: number;
+  cacheHitRatio: number;
+  wallP50Seconds: number;
+  wallP95Seconds: number;
+  truncated: boolean;
+  /** Per figure: `exact` | `approx`. */
+  exactness: Record<string, string>;
+}
+
+export interface AssistantMetricsWindow {
+  fromUtc: string;
+  toUtc: string;
+  history: AssistantHistoryStats;
+  telemetry: AssistantTurnStats | null;
+  telemetryFromUtc: string | null;
+}
+
+export interface AssistantMetricsCompare {
+  baseline: AssistantMetricsWindow;
+  current: AssistantMetricsWindow;
+  historyDeltas: Record<string, number>;
+  telemetryDeltas: Record<string, number> | null;
+  notes: string[];
+}
+
+// ── Evals (GET assistant/evals/runs, /runs/{id}; POST evals/run) ─────────────────────────────
+
+/** Engine `AssistantEvalRunDto`. kind suite|lesson|judge; status Queued|Running|Completed|BudgetStopped|Failed. */
+export interface AssistantEvalRun {
+  id: number;
+  kind: string;
+  trigger: string;
+  status: string;
+  lessonId: number | null;
+  model: string | null;
+  resolvedModel: string | null;
+  promptHash: string | null;
+  caseIds: string[];
+  requestedBy: string | null;
+  queuedAtUtc: string;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+  casesTotal: number;
+  casesPassed: number;
+  casesFailed: number;
+  casesSkipped: number;
+  /** 0..1, null until scored. */
+  passRate: number | null;
+  /** 0..1, null until scored. */
+  meanScore: number | null;
+  modelCalls: number;
+  tokensInput: number;
+  tokensOutput: number;
+  tokensCacheRead: number;
+  wallMs: number;
+  improved: number | null;
+  worsened: number | null;
+  unchanged: number | null;
+  summary: string | null;
+  error: string | null;
+}
+
+export interface AssistantEvalCheck {
+  name: string;
+  passed: boolean;
+  detail: string | null;
+}
+
+export interface AssistantEvalCaseResult {
+  id: number;
+  caseId: string;
+  caseTitle: string | null;
+  /** Lesson replay: `with` / `without`; empty for a suite. */
+  arm: string;
+  passed: boolean;
+  skipped: string | null;
+  score: number;
+  checksTotal: number;
+  checksFailed: number;
+  checks: AssistantEvalCheck[];
+  rounds: number;
+  modelCalls: number;
+  tokensInput: number;
+  tokensOutput: number;
+  tokensCacheRead: number;
+  protocol: string | null;
+  modelLatencyMs: number;
+  wallMs: number;
+  heldForRevision: number;
+  unverified: boolean;
+  failureReason: string | null;
+  answer: string | null;
+}
+
+export interface AssistantEvalRunDetail {
+  run: AssistantEvalRun;
+  cases: AssistantEvalCaseResult[];
+  lessonId: number | null;
+  lessonText: string | null;
+  lessonScope: string | null;
+}
+
+export interface AssistantEvalCaseInfo {
+  id: string;
+  title: string;
+  kind: string;
+  skip: string | null;
+  recordedTokens: number;
+}
+
+export interface AssistantEvalSettings {
+  evalEnabled: boolean;
+  evalHourUtc: number;
+  evalModel: string | null;
+  evalMaxCases: number;
+  dailyTokenCeiling: number;
+  tokensSpentToday: number;
+  regressionPoints: number;
+  judgeEnabled: boolean;
+  judgeIntervalDays: number;
+  judgeHourUtc: number;
+  judgeSampleSize: number;
+  judgeModel: string | null;
+  lessonReplayEnabled: boolean;
+  lessonReplayMaxCases: number;
+  cases: AssistantEvalCaseInfo[];
+}
+
+export interface AssistantEvalRuns {
+  runs: AssistantEvalRun[];
+  live: AssistantEvalRun | null;
+  settings: AssistantEvalSettings;
+}
+
+export type AssistantEvalKind = 'suite' | 'lesson' | 'judge' | 'all';
+
+// ── Quality (GET assistant/quality) ──────────────────────────────────────────────────────────
+
+export interface AssistantQualityPoint {
+  runId: number;
+  gradedAtUtc: string;
+  answers: number;
+  correctness: number;
+  completeness: number;
+  clarity: number;
+  honesty: number;
+  overall: number;
+  lowCorrectness: number;
+  judgeModel: string | null;
+}
+
+export interface AssistantAnswerGrade {
+  id: number;
+  runId: number;
+  conversationId: number;
+  conversationLink: string;
+  answerTurnId: number;
+  questionTurnId: number | null;
+  answeredAtUtc: string;
+  question: string | null;
+  answerExcerpt: string | null;
+  correctness: number;
+  completeness: number;
+  clarity: number;
+  honesty: number;
+  correctnessReason: string | null;
+  completenessReason: string | null;
+  clarityReason: string | null;
+  honestyReason: string | null;
+  overall: number;
+  judgeModel: string | null;
+  lessonCandidateId: number | null;
+  gradedAtUtc: string;
+}
+
+export interface AssistantQuality {
+  fromUtc: string;
+  answers: number;
+  correctness: number;
+  completeness: number;
+  clarity: number;
+  honesty: number;
+  overall: number;
+  trend: AssistantQualityPoint[];
+  lowest: AssistantAnswerGrade[];
 }

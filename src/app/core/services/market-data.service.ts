@@ -25,6 +25,8 @@ import {
   UpdateSignalExposureConfigRequest,
 } from '@core/api/api.types';
 import type { RecFileOverrides } from '@shared/components/rec-file-editor/rec-file-editor.component';
+import type { AssistantProgressEvent } from '@shared/components/analysis-chat/assistant-progress';
+import type { FollowUpBatchResult } from '@shared/components/analysis-chat/card-safety';
 import {
   resolveApprovalBody,
   type ResolveApprovalOptions,
@@ -333,6 +335,55 @@ export class MarketDataService {
   }
 
   /**
+   * POST /market-data/analyze/follow-up/{turnId}/undo — undo an approved assistant change inside
+   * its window (`args.undo`). Returns the refreshed thread; -24 = not possible any more, -25 =
+   * the undo partly failed (the card records what ran).
+   */
+  undoFollowUpAction(
+    turnId: number,
+    reason?: string | null,
+  ): Observable<ResponseData<SpotAnalysisFollowUpTurnDto[]>> {
+    const r = (reason ?? '').trim();
+    return this.api.post(
+      `/market-data/analyze/follow-up/${turnId}/undo`,
+      r ? { reason: r.slice(0, 2000) } : {},
+      { silent: true },
+    );
+  }
+
+  /**
+   * POST /market-data/analyze/follow-up/resolve-batch — approve or dismiss several cards of one
+   * thread in one go. Stops at the first failure (`stopOnFailure`); every card gets a result.
+   */
+  resolveFollowUpBatch(body: {
+    turnIds: number[];
+    confirm: boolean;
+    acknowledgeUntrusted?: boolean;
+    stopOnFailure?: boolean;
+    reason?: string | null;
+  }): Observable<ResponseData<FollowUpBatchResult>> {
+    const payload: Record<string, unknown> = {
+      turnIds: body.turnIds,
+      confirm: body.confirm,
+      stopOnFailure: body.stopOnFailure ?? true,
+    };
+    if (body.acknowledgeUntrusted) payload['acknowledgeUntrusted'] = true;
+    const reason = (body.reason ?? '').trim();
+    if (reason) payload['reason'] = reason.slice(0, 2000);
+    return this.api.post('/market-data/analyze/follow-up/resolve-batch', payload, { silent: true });
+  }
+
+  /**
+   * GET /market-data/analyze/{llmInvocationId}/progress — the live progress of a question still
+   * running in this conversation (null when none is), for a thread opened mid-question.
+   */
+  analysisProgress(
+    llmInvocationId: number,
+  ): Observable<ResponseData<AssistantProgressEvent | null>> {
+    return this.api.get(`/market-data/analyze/${llmInvocationId}/progress`, { silent: true });
+  }
+
+  /**
    * POST /market-data/analyze/conversation/{id}/fork — branch a conversation at a turn.
    *
    * A thread is otherwise strictly linear, so exploring "what if I had asked that differently"
@@ -525,10 +576,9 @@ export class MarketDataService {
    */
   getAssistantBuffer(sessionId: number | string, name: string): Observable<string | null> {
     return this.api
-      .get<ResponseData<{ text?: string | null } | null>>(
-        `/market-data/assistant/session/${encodeURIComponent(String(sessionId))}/buffer/${encodeURIComponent(name)}`,
-        { silent: true },
-      )
+      .get<
+        ResponseData<{ text?: string | null } | null>
+      >(`/market-data/assistant/session/${encodeURIComponent(String(sessionId))}/buffer/${encodeURIComponent(name)}`, { silent: true })
       .pipe(
         map((res) => (res?.status === false ? null : (res?.data?.text ?? null))),
         catchError((err: unknown) =>

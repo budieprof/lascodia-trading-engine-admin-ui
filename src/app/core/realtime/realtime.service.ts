@@ -67,6 +67,9 @@ export const REALTIME_EVENTS = [
   //    conversation is created or its thread changes — see
   //    AnalysisChatRealtimeBroadcaster). Drives live left-rail + chat thread. ──
   'analysisConversationChanged',
+  // ── Live progress of a long assistant question ({ llmInvocationId, questionTurnId, phase,
+  //    round, tools, message, model, escalated, atUtc }) — the chat's status line while it works. ──
+  'assistantProgress',
   // ── Analysis-monitor lifecycle (AnalysisMonitorWorker). `Fired` carries the
   //    verdict + any generated signal ids and is what the chat strip renders as a
   //    turn; `Changed` is the broader tickle covering EVERY transition — expiry,

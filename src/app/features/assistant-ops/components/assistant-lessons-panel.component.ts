@@ -15,6 +15,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { errorText } from '@features/iam/iam.logic';
 
 import { AssistantOpsApiService } from '../assistant-ops-api.service';
+import { LessonEvalStatusComponent } from './lesson-eval-status.component';
 import {
   LESSON_SCOPES,
   LESSON_SOURCES,
@@ -68,6 +69,7 @@ interface Review {
     FeatureStateComponent,
     RefreshButtonComponent,
     RelativeTimePipe,
+    LessonEvalStatusComponent,
   ],
   template: `
     <div class="panel">
@@ -148,6 +150,9 @@ interface Review {
               </header>
 
               <p class="text">{{ l.text }}</p>
+
+              <!-- Its measured effect: replay with / without it, and Evaluate. -->
+              <app-lesson-eval-status [lesson]="l" />
 
               @if (l.evidence) {
                 <details class="evidence">

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
-import { preflightBadgeOf } from './preflight-badge';
+import { preflightBadgeOf, replayLineOf } from './preflight-badge';
 
 const ICON = { pass: '✓', warn: '!', fail: '✕', neutral: '–' } as const;
 
@@ -25,6 +25,31 @@ const ICON = { pass: '✓', warn: '!', fail: '✕', neutral: '–' } as const;
               <li>{{ d }}</li>
             }
           </ul>
+        }
+        @if (replay(); as rp) {
+          <details class="replay" [attr.data-tone]="rp.tone">
+            <summary
+              [title]="'The engine replayed the watch script this change arms over the candles it was written for.'"
+            >
+              {{ rp.text }}
+            </summary>
+            <ul>
+              @for (l of rp.legs; track $index) {
+                <li>
+                  <strong>{{ l.label }}</strong> — {{ outcomeWord(l.outcome) }}
+                  @if (l.window) {
+                    <span class="muted"> · {{ l.window }}</span>
+                  }
+                  @if (l.bars > 0) {
+                    <span class="muted"> · {{ l.bars }} candles</span>
+                  }
+                  @if (l.summary) {
+                    <div>{{ l.summary }}</div>
+                  }
+                </li>
+              }
+            </ul>
+          </details>
         }
       </div>
     }
@@ -59,6 +84,25 @@ const ICON = { pass: '✓', warn: '!', fail: '✕', neutral: '–' } as const;
         margin: 4px 0 0;
         padding-left: 18px;
       }
+      .replay {
+        margin-top: 4px;
+      }
+      .replay summary {
+        cursor: pointer;
+        color: var(--pf);
+      }
+      .replay[data-tone='pass'] summary {
+        color: var(--profit);
+      }
+      .replay[data-tone='fail'] summary {
+        color: var(--loss);
+      }
+      .replay[data-tone='neutral'] summary {
+        color: var(--text-secondary);
+      }
+      .muted {
+        color: var(--text-tertiary);
+      }
     `,
   ],
 })
@@ -67,6 +111,15 @@ export class PreflightBadgeComponent {
   readonly toolArgsJson = input<string | null | undefined>(null);
 
   protected readonly badge = computed(() => preflightBadgeOf(this.toolName(), this.toolArgsJson()));
+  protected readonly replay = computed(() => replayLineOf(this.toolArgsJson()));
+
+  protected outcomeWord(o: string): string {
+    return o === 'passed'
+      ? 'would have caught the setup'
+      : o === 'blocked'
+        ? 'would have missed the setup'
+        : 'could not be replayed';
+  }
 
   protected icon(tone: keyof typeof ICON): string {
     return ICON[tone];

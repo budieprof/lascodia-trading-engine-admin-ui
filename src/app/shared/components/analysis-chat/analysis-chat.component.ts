@@ -68,6 +68,10 @@ import {
 } from './chat-live';
 import { UI_ACTION_TOOL, parseUiAction } from './ui-action';
 import { PreflightBadgeComponent } from './preflight-badge.component';
+import { CardSafetyComponent } from './card-safety.component';
+import { BatchReviewComponent } from './batch-review.component';
+import { AssistantProgressComponent } from './assistant-progress.component';
+import { ACK_LABEL, ACK_REQUIRED_CODE, approveBlockedByAck, errorEnvelope } from './card-safety';
 import {
   ACCEPT_ATTR,
   formatBytes,
@@ -250,6 +254,9 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
     EngineerThinkingComponent,
     TurnScreenshotComponent,
     PreflightBadgeComponent,
+    CardSafetyComponent,
+    BatchReviewComponent,
+    AssistantProgressComponent,
   ],
   template: `
     <section
@@ -808,6 +815,16 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
                     <!-- The engine's dry run of this write (display only — approve / dismiss
                          below are unchanged). Absent on page commands and literal http calls. -->
                     <app-preflight-badge [toolName]="m.toolName" [toolArgsJson]="m.toolArgsJson" />
+                    <!-- Outside-text provenance (+ the acknowledgement tick) and, once confirmed,
+                         the undo. The tick gates "Confirm & run" below. -->
+                    <app-card-safety
+                      [turn]="m"
+                      [acknowledged]="acked().has(m.id)"
+                      [refusal]="resolveError()?.turnId === m.id ? resolveError()!.message : null"
+                      (ackChange)="setAck(m.id, $event)"
+                      (threadChanged)="messages.set($event)"
+                      (reload)="reloadThread()"
+                    />
                     <!--
                       A page command is not an engine call, so the http_action rendering below
                       cannot describe it: it has no method and no path, and the generic
@@ -873,7 +890,8 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
                         <button
                           type="button"
                           class="confirm"
-                          [disabled]="resolvingId() !== null"
+                          [disabled]="resolvingId() !== null || ackBlocked(m)"
+                          [title]="ackBlocked(m) ? ackHint : ''"
                           (click)="resolve(m, true)"
                         >
                           {{ resolvingId() === m.id ? 'Running…' : 'Confirm & run' }}
@@ -916,11 +934,23 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
           does the rest of the work inside the resolve, so reading sending() alone left the thread
           looking idle for the longest stretch of the turn.
         -->
-        @if (narrationLive()) {
-          <div class="msg">
-            <div class="bubble thinking"><span class="spinner"></span> Thinking…</div>
-          </div>
-        }
+        <!-- Two or more cards waiting: decide them together. -->
+        <app-batch-review
+          [turns]="messages()"
+          [disabled]="resolvingId() !== null || sending()"
+          (threadChanged)="messages.set($event)"
+        />
+
+        <!-- The live status line: the engine's progress events while a question runs (also
+             after reopening the thread mid-question), "Thinking…" when there are none. -->
+        <div class="msg" [hidden]="!narrationLive() && !progressShown()">
+          <app-assistant-progress
+            [llmInvocationId]="llmInvocationId()"
+            [live]="narrationLive()"
+            [startedAtUtc]="lastQuestionAt()"
+            (shown)="progressShown.set($event)"
+          />
+        </div>
 
         @if (error()) {
           <div class="chat-state error">{{ error() }}</div>
@@ -2095,6 +2125,17 @@ export class AnalysisChatComponent {
   protected readonly resolvingId = signal<number | null>(null);
   /** The last resolve failure, with the card it belongs to, so that card can render it itself. */
   protected readonly resolveError = signal<{ turnId: number; message: string } | null>(null);
+  /** Cards whose outside-text acknowledgement the operator ticked (gates their Confirm). */
+  protected readonly acked = signal<ReadonlySet<number>>(new Set());
+  protected readonly ackHint = `Tick “${ACK_LABEL}” first`;
+  /** The progress line has something to show while the host itself is idle (reopened mid-question). */
+  protected readonly progressShown = signal(false);
+  /** When the newest question was asked — the progress line's elapsed time. */
+  protected readonly lastQuestionAt = computed(() => {
+    const t = this.messages();
+    for (let i = t.length - 1; i >= 0; i--) if (t[i].role === 'User') return t[i].createdAtUtc;
+    return null;
+  });
   /** Active monitors created from this analysis (refetched on every tickle — hence structural). */
   protected readonly monitors = signal<AnalysisMonitorDto[]>([], { equal: structuralEqual });
   /** Monitor id currently being cancelled, or null. */
@@ -2184,6 +2225,25 @@ export class AnalysisChatComponent {
   /** A strip or a thinking block is stamped with its latest turn; every other item with its own. */
   protected itemTime(item: ChatItem): string {
     return item.type === 'turn' ? item.turn.createdAtUtc : item.last.createdAtUtc;
+  }
+
+  protected setAck(turnId: number, on: boolean): void {
+    this.acked.update((s) => {
+      const next = new Set(s);
+      if (on) next.add(turnId);
+      else next.delete(turnId);
+      return next;
+    });
+  }
+
+  protected ackBlocked(m: SpotAnalysisFollowUpTurnDto): boolean {
+    return approveBlockedByAck(m.toolArgsJson, this.acked().has(m.id));
+  }
+
+  /** Re-read the open thread (an undo that partly ran changed its card). */
+  protected reloadThread(): void {
+    const id = this.llmInvocationId();
+    if (id) this.refreshThreadSilently(id);
   }
 
   /** Case-insensitive: the confirm buttons must not vanish because a writer spelled it `pending`. */
@@ -2730,7 +2790,11 @@ export class AnalysisChatComponent {
       return;
     }
 
-    this.postResolve(m, confirm, opts);
+    this.postResolve(
+      m,
+      confirm,
+      confirm && this.acked().has(m.id) ? { ...opts, acknowledgeUntrusted: true } : opts,
+    );
   }
 
   /** The plain resolve round-trip, once any client-side work is done. */
@@ -2752,15 +2816,17 @@ export class AnalysisChatComponent {
           // The resolve may have resumed the question, and that resume may itself have paused.
           const tail = res.data[res.data.length - 1];
           if (isCheckpointTurn(tail)) this.resumePaused(id, 1);
-        } else this.failResolve(m, res?.message || 'Could not resolve the action.');
+        } else
+          this.failResolve(m, res?.message || 'Could not resolve the action.', res?.responseCode);
         // A confirmed action may have created a monitor — refresh the strip.
         this.loadMonitors(id);
         // An approval wakes the agent's run — pick up its new status.
         if (this.isAgent()) this.loadRunState(id);
       },
-      error: (err) => {
+      error: (err: unknown) => {
         this.resolvingId.set(null);
-        this.failResolve(m, err?.message ?? 'Action failed. Is the engine reachable?');
+        const e = errorEnvelope(err);
+        this.failResolve(m, e.message ?? 'Action failed. Is the engine reachable?', e.code);
       },
     });
   }
@@ -2937,9 +3003,15 @@ export class AnalysisChatComponent {
    * same sentence in two places reads as two problems. Every other proposal has no card of its own
    * to show it on, so those keep the line.
    */
-  private failResolve(m: SpotAnalysisFollowUpTurnDto, message: string): void {
+  private failResolve(m: SpotAnalysisFollowUpTurnDto, message: string, code?: string | null): void {
+    if (code === ACK_REQUIRED_CODE) {
+      // The engine wants the outside-text check (the card stays pending): untick and say so on the card.
+      this.setAck(m.id, false);
+      message = `Not run — ${message.replace(/\.?$/, '.')} Tick “${ACK_LABEL}” and approve again.`;
+    }
     this.resolveError.set({ turnId: m.id, message });
-    if (m.toolName !== 'approval') this.error.set(message);
+    // Approval cards (and every engine-write card, via its safety strip) show it themselves.
+    if (m.toolName !== 'approval' && m.role !== 'ActionProposal') this.error.set(message);
   }
 
   /**

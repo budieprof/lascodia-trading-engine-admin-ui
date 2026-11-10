@@ -11,6 +11,8 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { AssistantOpsApiService } from '../assistant-ops-api.service';
+import { AssistantCompareSectionComponent } from './assistant-compare-section.component';
+import { AssistantEfficiencySectionComponent } from './assistant-efficiency-section.component';
 import {
   SPLITS,
   WINDOWS,
@@ -56,6 +58,8 @@ const INFO = '#0071E3';
     FeatureStateComponent,
     RefreshButtonComponent,
     RelativeTimePipe,
+    AssistantEfficiencySectionComponent,
+    AssistantCompareSectionComponent,
   ],
   template: `
     <div class="panel">
@@ -294,6 +298,8 @@ const INFO = '#0071E3';
           </div>
         }
 
+        <app-assistant-efficiency-section [efficiency]="m.efficiency" />
+
         <section class="card">
           <header class="card-head">
             <h3>Tools</h3>
@@ -361,6 +367,9 @@ const INFO = '#0071E3';
           not counted.
         </p>
       }
+
+      <!-- Its own windows (dates), so it is not tied to the window picked above. -->
+      <app-assistant-compare-section />
     </div>
   `,
   styles: [

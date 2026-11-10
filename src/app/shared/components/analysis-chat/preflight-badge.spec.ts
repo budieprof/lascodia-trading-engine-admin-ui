@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { preflightBadgeOf } from './preflight-badge';
+import { preflightBadgeOf, replayLineOf, replayWindow } from './preflight-badge';
 
 /** Card args as the engine stores them (AssistantProposalPreflight.AttachToArgs). */
 function card(preflight?: Record<string, unknown>, extra: Record<string, unknown> = {}): string {
@@ -106,5 +106,55 @@ describe('preflightBadgeOf', () => {
       'Checked: would succeed',
     );
     expect(preflightBadgeOf('call_endpoint', card({ verdict: 'mystery' }))!.tone).toBe('neutral');
+  });
+});
+
+describe('replayLineOf', () => {
+  const withReplay = (replay: unknown) =>
+    JSON.stringify({ operationId: 'X', preflight: { verdict: 'wouldSucceed', replay } });
+
+  it('summarises a passed replay over its window', () => {
+    const r = replayLineOf(
+      withReplay({
+        outcome: 'passed',
+        legs: [
+          {
+            label: 'card #327',
+            outcome: 'passed',
+            summary: 'ready on the retest',
+            fromUtc: '2026-11-06T00:00:00Z',
+            toUtc: '2026-11-09T12:00:00Z',
+            bars: 300,
+          },
+        ],
+      }),
+    )!;
+    expect(r.text).toBe('Watch script replayed over 2026-11-06..09: ready on the retest ✓');
+    expect(r.tone).toBe('pass');
+    expect(r.legs[0].bars).toBe(300);
+  });
+
+  it('marks a not-checked replay neutrally and counts extra legs', () => {
+    const r = replayLineOf(
+      withReplay({
+        outcome: 'notChecked',
+        legs: [
+          { label: 'a', outcome: 'notChecked', summary: 'no candles' },
+          { label: 'b', outcome: 'passed', summary: 'ok' },
+        ],
+      }),
+    )!;
+    expect(r.outcome).toBe('notChecked');
+    expect(r.text).toBe('Watch script could not be replayed: no candles (+1 more)');
+  });
+
+  it('is null without a replay block', () => {
+    expect(replayLineOf(withReplay(undefined))).toBeNull();
+    expect(replayLineOf(null)).toBeNull();
+  });
+
+  it('shortens windows', () => {
+    expect(replayWindow('2026-10-30T00:00Z', '2026-11-02T00:00Z')).toBe('2026-10-30..11-02');
+    expect(replayWindow('2026-11-06T00:00Z', '2026-11-06T09:00Z')).toBe('2026-11-06');
   });
 });

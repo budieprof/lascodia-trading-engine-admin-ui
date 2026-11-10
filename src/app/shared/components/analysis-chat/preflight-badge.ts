@@ -128,3 +128,78 @@ function strings(v: unknown): string[] {
 function capitalise(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
+
+// ── Watch-script replay (`preflight.replay`, engine ScriptReplayPreflight) ──────────────────────
+
+export type ReplayOutcome = 'passed' | 'blocked' | 'notChecked';
+
+export interface ReplayLeg {
+  label: string;
+  outcome: ReplayOutcome | string;
+  summary: string;
+  window: string;
+  bars: number;
+}
+
+export interface ReplayLine {
+  outcome: ReplayOutcome;
+  tone: PreflightTone;
+  /** "Watch script replayed over 2026-11-06..09: ready on the retest ✓". */
+  text: string;
+  legs: ReplayLeg[];
+}
+
+/**
+ * The automatic replay of the watch scripts a card would arm, over the setup they were written
+ * for. Null when the card arms no script (no `preflight.replay`).
+ */
+export function replayLineOf(toolArgsJson: string | null | undefined): ReplayLine | null {
+  if (!toolArgsJson) return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(toolArgsJson);
+  } catch {
+    return null;
+  }
+  if (!isObject(args) || !isObject(args['preflight'])) return null;
+  const r = args['preflight']['replay'];
+  if (!isObject(r)) return null;
+  const legs: ReplayLeg[] = (Array.isArray(r['legs']) ? r['legs'] : [])
+    .filter(isObject)
+    .map((l) => ({
+      label: typeof l['label'] === 'string' ? l['label'] : 'script',
+      outcome: typeof l['outcome'] === 'string' ? l['outcome'] : 'notChecked',
+      summary: typeof l['summary'] === 'string' ? l['summary'].trim() : '',
+      window: replayWindow(l['fromUtc'], l['toUtc']),
+      bars: typeof l['bars'] === 'number' ? l['bars'] : 0,
+    }));
+  const raw = typeof r['outcome'] === 'string' ? r['outcome'] : '';
+  const outcome: ReplayOutcome = raw === 'passed' || raw === 'blocked' ? raw : 'notChecked';
+  const windows = [...new Set(legs.map((l) => l.window).filter(Boolean))];
+  const over = windows.length === 1 ? ` over ${windows[0]}` : '';
+  const first =
+    legs.find((l) => l.outcome === outcome && l.summary)?.summary ?? legs[0]?.summary ?? '';
+  const mark = outcome === 'passed' ? ' ✓' : outcome === 'blocked' ? ' ✕' : '';
+  const head =
+    outcome === 'notChecked'
+      ? `Watch script could not be replayed${over}`
+      : `Watch script replayed${over}`;
+  const more = legs.length > 1 ? ` (+${legs.length - 1} more)` : '';
+  return {
+    outcome,
+    tone: outcome === 'passed' ? 'pass' : outcome === 'blocked' ? 'fail' : 'neutral',
+    text: `${head}${first ? `: ${first}` : ''}${mark}${more}`,
+    legs,
+  };
+}
+
+/** "2026-11-06..09" (same month), "2026-10-30..11-02", or one day. */
+export function replayWindow(from: unknown, to: unknown): string {
+  const f = typeof from === 'string' ? from.slice(0, 10) : '';
+  const t = typeof to === 'string' ? to.slice(0, 10) : '';
+  if (!f || !t) return f || t;
+  if (f === t) return f;
+  if (f.slice(0, 7) === t.slice(0, 7)) return `${f}..${t.slice(8)}`;
+  if (f.slice(0, 4) === t.slice(0, 4)) return `${f}..${t.slice(5)}`;
+  return `${f}..${t}`;
+}
