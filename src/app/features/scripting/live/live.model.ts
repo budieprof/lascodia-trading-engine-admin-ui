@@ -147,6 +147,19 @@ export function normalizeLiveStatus(raw: unknown): ScriptLiveStatus | null {
       }),
     ),
     orphanedPositions: rows(o['orphanedPositions']).map(orphanedPosition),
+    portfolio: portfolioRecord(o['portfolio']),
+  };
+}
+
+/** b11-portfolio-hardening: the portfolio live record, or null (an ordinary strategy, an older engine). */
+function portfolioRecord(raw: unknown): ScriptLiveStatus['portfolio'] {
+  if (!isObject(raw)) return null;
+  const p = camelShallow(raw);
+  return {
+    windowDays: num(p['windowDays']) ?? 0,
+    holdTimeouts: num(p['holdTimeouts']) ?? 0,
+    barRevised: num(p['barRevised']) ?? 0,
+    outOfOrderBars: num(p['outOfOrderBars']) ?? 0,
   };
 }
 

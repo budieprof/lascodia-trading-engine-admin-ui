@@ -230,6 +230,20 @@ const STALE_MINUTES = 240;
             }}</span>
             <span class="fact-note">emulator vs bound accounts</span>
           </div>
+          @if (l.portfolio; as p) {
+            <div class="fact" data-testid="live-portfolio-record">
+              <span class="fact-label">Portfolio bars ({{ p.windowDays }} d)</span>
+              <span
+                class="fact-value"
+                [class.loss]="p.holdTimeouts + p.barRevised + p.outOfOrderBars > 0"
+                >{{ p.holdTimeouts + p.barRevised + p.outOfOrderBars }}</span
+              >
+              <span class="fact-note"
+                >{{ p.holdTimeouts }} hold timeout(s) · {{ p.barRevised }} late candle(s) ·
+                {{ p.outOfOrderBars }} out of order</span
+              >
+            </div>
+          }
         </section>
 
         @if (positionFields().length > 0) {

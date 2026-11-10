@@ -46,6 +46,7 @@ import { SubmitForApprovalDialogComponent } from '../../components/submit-for-ap
 import { failureMessage } from '../../util/api-failure';
 import { activationRefusalMessage, isDraftActivationRefusal } from '../../util/activation';
 import { PromotionReadinessCardComponent } from '../../components/promotion-readiness-card/promotion-readiness-card.component';
+import { PortfolioReadinessCardComponent } from '../../components/portfolio-readiness-card/portfolio-readiness-card.component';
 import { PromotionGateHistoryCardComponent } from '../../components/promotion-gate-history-card/promotion-gate-history-card.component';
 import { StrategyVariantsTabComponent } from '../../components/strategy-variants-tab/strategy-variants-tab.component';
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
@@ -59,7 +60,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
 import { StrategyExecutionPanelComponent } from '@features/scripting/execution/strategy-execution-panel.component';
 import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-panel.component';
 import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
-import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
+import { isPortfolioStrategy, isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { StrategyExecutionCardComponent } from '@features/execution/components/strategy-execution-card.component';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 import { OptimizationWorkbenchComponent } from '@features/scripting/research/optimization-workbench.component';
@@ -98,6 +99,7 @@ import {
     CloneStrategyDialogComponent,
     SubmitForApprovalDialogComponent,
     PromotionReadinessCardComponent,
+    PortfolioReadinessCardComponent,
     PromotionGateHistoryCardComponent,
     StrategyVariantsTabComponent,
     StrategyCapacityCardComponent,
@@ -352,6 +354,13 @@ import {
           @if (activeTab() === 'promotion' && strategy()) {
             @if (!isSentinel()) {
               <div class="promotion-stack">
+                <!-- b11-portfolio-hardening: a //@lascodia-portfolio strategy's readiness to leave Paper / be activated. -->
+                @if (isPortfolio()) {
+                  <app-portfolio-readiness-card
+                    [strategyId]="strategy()!.id"
+                    [portfolioWalkForwardRunId]="portfolioWalkForwardRunId()"
+                  />
+                }
                 <app-promotion-readiness-card
                   [strategyId]="strategy()!.id"
                   (activated)="onPromotionActivated()"
@@ -1091,6 +1100,13 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   // ── ADR-0027 script strategies ─────────────────────────────────────────
   /** Pine-script strategy (authoringMode Script): shows the Live and Alerts tabs. */
   readonly isScript = computed(() => isScriptStrategy(this.strategy()));
+  /** b11-portfolio-hardening: a `//@lascodia-portfolio` script listing more than one symbol. */
+  readonly isPortfolio = computed(() => isPortfolioStrategy(this.strategy()));
+  /** `portfolioWalkForwardRunId` as the engine sent it: undefined when this build does not send the field. */
+  readonly portfolioWalkForwardRunId = computed<number | null | undefined>(() => {
+    const s = this.strategy();
+    return s && 'portfolioWalkForwardRunId' in s ? (s.portfolioWalkForwardRunId ?? null) : undefined;
+  });
   /** A script strategy holding the audited news-blackout exemption: badged in the header. */
   readonly newsBlackoutExempt = computed(() => isNewsBlackoutExempt(this.strategy()));
   private static readonly SCRIPT_ONLY_TABS: readonly string[] = ['live', 'alerts'];

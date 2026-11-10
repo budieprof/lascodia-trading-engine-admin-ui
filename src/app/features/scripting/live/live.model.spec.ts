@@ -340,3 +340,14 @@ describe('PE-I2 (part) — paper and live statistics leave the warm-up out', () 
     expect(s.maxDrawdown).toBe(15);
   });
 });
+
+describe('normalizeLiveStatus — portfolio record (b11-portfolio-hardening)', () => {
+  it('reads the record of a portfolio strategy and leaves it null for every other one', () => {
+    const portfolio = normalizeLiveStatus({
+      status: 'running',
+      Portfolio: { WindowDays: 30, HoldTimeouts: 1, BarRevised: 2, OutOfOrderBars: 3 },
+    });
+    expect(portfolio?.portfolio).toEqual({ windowDays: 30, holdTimeouts: 1, barRevised: 2, outOfOrderBars: 3 });
+    expect(normalizeLiveStatus({ status: 'running' })?.portfolio).toBeNull();
+  });
+});

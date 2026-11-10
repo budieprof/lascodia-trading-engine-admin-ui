@@ -19,6 +19,7 @@ import type {
   ScriptParitySession,
   ScriptParitySummary,
   ScriptParityTimeline,
+  PortfolioReadiness,
 } from './scripting-api.types';
 import { describeFailure } from '../shared/api-error';
 import { fileNameFromContentDisposition } from '../shared/download';
@@ -63,6 +64,14 @@ export class ScriptStrategyService {
   ): Observable<ResponseData<ScriptLiveOutputs>> {
     const q = member ? `?member=${encodeURIComponent(member)}` : '';
     return this.api.get(`/strategy/${strategyId}/script/live/outputs${q}`, { silent: true });
+  }
+
+  /**
+   * b11-portfolio-hardening — a `//@lascodia-portfolio` strategy's readiness to leave Paper / be activated (feeds, bar grids,
+   * evidence, paper, mode, per-member capacity, the live record, drills). `-11` for an ordinary strategy.
+   */
+  getPortfolioReadiness(strategyId: number): Observable<ResponseData<PortfolioReadiness>> {
+    return this.api.get(`/strategy/${strategyId}/script/portfolio/readiness`, { silent: true });
   }
 
   /** §8f — the rolling parity summary (live fills vs the emulator, paper R, drift). */

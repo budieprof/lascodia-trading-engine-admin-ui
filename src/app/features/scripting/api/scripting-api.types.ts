@@ -204,6 +204,83 @@ export interface ScriptLiveStatus {
   divergences: ScriptDivergence[];
   /** Account positions a previous script version opened, left to the operator (engine D90). */
   orphanedPositions: ScriptOrphanedPosition[];
+  /**
+   * b11-portfolio-hardening: a `//@lascodia-portfolio` strategy's live record — member bars the live session did not run as the
+   * portfolio backtest did, over the last `windowDays`. Absent for every other strategy and on older engines.
+   */
+  portfolio?: ScriptLivePortfolioRecord | null;
+}
+
+/** `GET strategy/{id}/script/live` → `portfolio` (b11-portfolio-hardening). */
+export interface ScriptLivePortfolioRecord {
+  windowDays: number;
+  /** Rounds a shared-account session ran without a late member (`PortfolioHoldTimeout` divergences). */
+  holdTimeouts: number;
+  /** Late candles that revised a bar a member had run from ticks or skipped (`BarRevised`). */
+  barRevised: number;
+  /** Member bars walked from their candle after another member's later events (`PortfolioBarOutOfOrder`). */
+  outOfOrderBars: number;
+}
+
+/** One line of a portfolio strategy's readiness checklist (`GET strategy/{id}/script/portfolio/readiness`). */
+export interface PortfolioReadinessItem {
+  key: string;
+  title: string;
+  /** `pass` | `fail` | `pending` | `manual` (an operator drill) | `info`. */
+  status: 'pass' | 'fail' | 'pending' | 'manual' | 'info' | string;
+  detail: string;
+}
+
+export interface PortfolioMemberFeed {
+  symbol: string;
+  serving: boolean;
+  instances: number;
+  newestHeartbeatUtc: string | null;
+  detail: string;
+}
+
+export interface PortfolioMemberCapacity {
+  symbol: string;
+  capacityCeilingLots: number | null;
+  estimatedAtUtc: string | null;
+}
+
+export interface PortfolioGridState {
+  closeAligned: boolean;
+  straddles: number;
+  example: string | null;
+  /** A `PS9401` message when a shared account cannot run these grids live as backtested. */
+  refusal: string | null;
+  detail: string;
+}
+
+/**
+ * b11-portfolio-hardening — `GET strategy/{id}/script/portfolio/readiness`: a portfolio strategy's readiness to leave Paper / be
+ * activated. `-11` for an ordinary strategy.
+ */
+export interface PortfolioReadiness {
+  strategyId: number;
+  lifecycleStage: string;
+  members: string[];
+  /** `ScriptLive:Portfolio:MemberAccount`: `Split` | `Shared`. */
+  accountModel: string;
+  /** `ScriptLive:Portfolio:Mode`: `Off` | `Paper` | `Live`. */
+  mode: string;
+  feeds: PortfolioMemberFeed[];
+  grid: PortfolioGridState | null;
+  evidencePortfolioBacktestRunId: number | null;
+  evidenceDetail: string | null;
+  capacity: PortfolioMemberCapacity[];
+  /** The strategy's capacity — the smallest member's. */
+  estimatedCapacityLots: number | null;
+  paperFills: number;
+  paperClosedTrades: number;
+  paperFirstFillUtc: string | null;
+  holdTimeouts: number;
+  barRevised: number;
+  outOfOrderBars: number;
+  checklist: PortfolioReadinessItem[];
+  ready: boolean;
 }
 
 /** What a live session does (`GET strategy/{id}/script/live` → `mode`). */

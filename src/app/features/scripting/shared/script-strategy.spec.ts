@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   executionPolicyOf,
+  isPortfolioStrategy,
   isScriptStrategy,
+  portfolioMembersOf,
   scriptInputsOf,
   scriptSourceOf,
 } from './script-strategy';
@@ -45,5 +47,22 @@ describe('script fields', () => {
     expect(executionPolicyOf({ ...base, executionPolicy: 1 })).toBe('Direct');
     expect(executionPolicyOf({ ...base, executionPolicy: 'Other' })).toBeNull();
     expect(executionPolicyOf(base)).toBeNull();
+  });
+});
+
+describe('portfolioMembersOf (b11-portfolio-hardening)', () => {
+  const src = (header: string) => ({ ...base, scriptSource: `//@version=6\n${header}\nstrategy("P")\n` });
+
+  it('reads the directive\'s symbols in order, with or without symbols=', () => {
+    expect(portfolioMembersOf(src('//@lascodia-portfolio EURUSD, us500'))).toEqual(['EURUSD', 'US500']);
+    expect(portfolioMembersOf(src('//@lascodia-portfolio symbols=EURUSD,GBPUSD, USDJPY'))).toEqual(['EURUSD', 'GBPUSD', 'USDJPY']);
+    expect(isPortfolioStrategy(src('//@lascodia-portfolio EURUSD, US500'))).toBe(true);
+  });
+
+  it('is not a portfolio with one symbol, no directive or no script', () => {
+    expect(isPortfolioStrategy(src('//@lascodia-portfolio EURUSD'))).toBe(false);
+    expect(portfolioMembersOf(src('// a comment'))).toEqual([]);
+    expect(portfolioMembersOf(base)).toEqual([]);
+    expect(portfolioMembersOf(null)).toEqual([]);
   });
 });

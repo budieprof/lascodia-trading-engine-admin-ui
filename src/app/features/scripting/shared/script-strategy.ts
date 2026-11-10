@@ -55,3 +55,25 @@ export function executionPolicyOf(s: AnyStrategy | null | undefined): ExecutionP
   }
   return null;
 }
+
+/**
+ * b11-portfolio-hardening: the symbols a `//@lascodia-portfolio EURUSD, GBPUSD` line lists (engine P13; `symbols=` optional), in
+ * order — empty for every other script. The engine judges a strategy as a PORTFOLIO only when it lists more than one symbol
+ * (`isPortfolioStrategy`); a malformed line is the engine's PS9009, so this reads leniently.
+ */
+export function portfolioMembersOf(s: AnyStrategy | null | undefined): string[] {
+  const source = scriptSourceOf(s);
+  if (!source) return [];
+  const line = /^[ \t]*\/\/@lascodia-portfolio\b(.*)$/m.exec(source);
+  if (!line) return [];
+  return line[1]
+    .replace(/^\s*symbols\s*=\s*/i, '')
+    .split(/[\s,]+/)
+    .map((t) => t.trim().toUpperCase())
+    .filter((t) => /^[A-Z0-9._]+$/.test(t));
+}
+
+/** A portfolio strategy: a `//@lascodia-portfolio` script listing more than one symbol (judged on its portfolio evidence). */
+export function isPortfolioStrategy(s: AnyStrategy | null | undefined): boolean {
+  return portfolioMembersOf(s).length > 1;
+}

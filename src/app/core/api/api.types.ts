@@ -667,6 +667,11 @@ export interface PositionLifecycleEventDto {
 }
 
 export interface StrategyDto {
+  /**
+   * b11-portfolio-research (engine): the newest portfolio walk-forward run of a `//@lascodia-portfolio` strategy. Absent on engine
+   * builds without it (the console then says so), null when none was run.
+   */
+  portfolioWalkForwardRunId?: number | null;
   id: number;
   name: string | null;
   description: string | null;
