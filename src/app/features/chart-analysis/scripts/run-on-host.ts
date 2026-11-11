@@ -29,24 +29,68 @@ const MARGIN_PAD_BARS = 2;
 const MARGIN_SHRINK_SLACK = 2;
 
 /**
+ * The most bars a run may be ahead of the host's newest bar and still be placed (anchored on the
+ * host's newest bar, {@link runLeadOnHost}). A new period opens on the engine first — a warm
+ * session's frame carries the forming bar from the period's first quote — while the chart opens it
+ * on its own next tick or M1 resync; until then the run's last bar is not on the chart, and with
+ * nothing to anchor on, every output of the script vanished. Kept small: a run further ahead is
+ * another sequence (Bar Replay's future is kept off separately, by `chartScriptLayers`).
+ */
+export const MAX_RUN_LEAD_BARS = 2;
+
+/**
  * Host index of the run's bar 0: where the run's last bar sits on the host axis, minus its own
- * index. Null when the host has no bar at `lastTime` (its window ends earlier, or a different
- * sequence): nothing of the run can be placed then, as `script-renderer` hides its drawings.
+ * index. When the host has no bar at `lastTime` because the run is a bar or two ahead of it
+ * ({@link MAX_RUN_LEAD_BARS}; `runTimeAt` gives the run's bar times in the host's units), the run
+ * is anchored on the host's newest bar instead and its newer bars sit right of it. Null otherwise
+ * (the host's window ends earlier, or a different sequence): nothing of the run can be placed then,
+ * as `script-renderer` hides its drawings.
  */
 export function runOffsetOnHost(
   hostTimes: ArrayLike<number>,
   lastTime: number,
   lastIndex: number,
+  runTimeAt?: (index: number) => number,
 ): number | null {
-  // Lower bound, as the library's timeToIndex: the first of equal times.
+  const at = lowerBound(hostTimes, lastTime);
+  if (at < hostTimes.length && hostTimes[at] === lastTime) return at - lastIndex;
+  if (!runTimeAt) return null;
+  const n = hostTimes.length;
+  const lead = n ? runLeadOnHost(hostTimes[n - 1], lastTime, lastIndex, runTimeAt) : null;
+  return lead === null ? null : n - 1 - (lastIndex - lead);
+}
+
+/**
+ * How many bars the run's last bar is past the host's newest bar (`hostLast`, the host's units),
+ * when the run's bar that many bars before its last IS the host's newest bar (1 …
+ * {@link MAX_RUN_LEAD_BARS}); null when the run is not just ahead of the host (its last bar is not
+ * past the host's end, or the two sequences do not meet at the host's newest bar).
+ */
+export function runLeadOnHost(
+  hostLast: number,
+  lastTime: number,
+  lastIndex: number,
+  runTimeAt: (index: number) => number,
+): number | null {
+  if (!(lastTime > hostLast)) return null;
+  for (let lead = 1; lead <= MAX_RUN_LEAD_BARS && lastIndex - lead >= 0; lead++) {
+    const t = runTimeAt(lastIndex - lead);
+    if (t === hostLast) return lead;
+    if (t < hostLast) return null;
+  }
+  return null;
+}
+
+/** Lower bound, as the library's timeToIndex: the first of equal times. */
+function lowerBound(times: ArrayLike<number>, t: number): number {
   let lo = 0;
-  let hi = hostTimes.length;
+  let hi = times.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
-    if (hostTimes[mid] < lastTime) lo = mid + 1;
+    if (times[mid] < t) lo = mid + 1;
     else hi = mid;
   }
-  return lo < hostTimes.length && hostTimes[lo] === lastTime ? lo - lastIndex : null;
+  return lo;
 }
 
 /**

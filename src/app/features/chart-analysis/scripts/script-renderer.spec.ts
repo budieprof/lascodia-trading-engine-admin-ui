@@ -499,6 +499,29 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.statusAt(20)).toBeNull();
   });
 
+  it("stays drawn while its run is a bar ahead of the host: anchored on the host's newest bar", () => {
+    const { times } = decorated();
+    const { s, rig: r } = drawn(times);
+    const lastRunBar = times.length - 1;
+    // The engine opened the new period (a warm frame's forming bar); the chart has not yet.
+    r.chart.times = times.slice(0, -1);
+    r.state.plotted = r.chart.times;
+    expect(s.aligned()).toBe(true);
+    expect(s.tables()).toHaveLength(1);
+    // At rest the status line reads the run's newest bar, one right of the host's.
+    expect(s.runLogical(null)).toBe(lastRunBar);
+    expect(s.statusAt(null)).not.toBeNull();
+    // Host bar k is still run bar k.
+    expect(s.runLogical(10)).toBe(10);
+    // Its barcolor() lands on the same host bars.
+    expect(s.barColors(r.chart.times)?.[1]).toBe(RED);
+    // Three bars ahead is not a moment's lag: hidden, as before.
+    r.chart.times = times.slice(0, -3);
+    r.state.plotted = r.chart.times;
+    expect(s.aligned()).toBe(false);
+    expect(s.tables()).toEqual([]);
+  });
+
   it('asks its pane’s scale for the room the top tables need (PC-I11)', () => {
     const { times } = decorated();
     const { s, rig: r } = drawn(times);
@@ -523,8 +546,14 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(longer.slice(0, 11)).toEqual(Array(11).fill(null));
     expect(longer[11]).toBe(RED);
 
-    // The run's last bar is not on the host axis: nothing is placed.
-    expect(s.barColors(times.slice(0, -1))).toBeNull();
+    // The run is a bar ahead of the host (a new period the engine opened first): anchored on the
+    // host's newest bar, the colours stay on their bars.
+    const behind = s.barColors(times.slice(0, -1))!;
+    expect(behind).toHaveLength(59);
+    expect(behind[1]).toBe(RED);
+    // The run's last bar is not on the host axis and the run is not just ahead: nothing is placed.
+    expect(s.barColors(times.slice(0, -3))).toBeNull();
+    expect(s.barColors(times.map((t) => t + 60))).toBeNull();
     s.dispose();
     expect(s.barColors(times)).toBeNull();
   });
@@ -547,7 +576,10 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.futureBars(times)).toBe(16);
     // A bar opened on the host since the run: the label is a bar closer.
     expect(s.futureBars([...times, times[times.length - 1] + H])).toBe(15);
-    expect(s.futureBars(times.slice(0, -1))).toBe(0);
+    // The run a bar ahead of the host: the label is a bar further right.
+    expect(s.futureBars(times.slice(0, -1))).toBe(17);
+    // Further ahead than a new period's moment: not on the axis, nothing reserved.
+    expect(s.futureBars(times.slice(0, -3))).toBe(0);
     s.dispose();
     expect(s.futureBars(times)).toBe(0);
   });

@@ -24,6 +24,7 @@ import {
   barColorsOnHost,
   futureBarsOnHost,
   labelRightPx,
+  runLeadOnHost,
   runOffsetOnHost,
   type LabelReach,
 } from './run-on-host';
@@ -266,7 +267,7 @@ export class ScriptRenderer {
     if (!m?.bars.colors || !this.drawn() || last === null) return null;
     return barColorsOnHost(
       m.bars.colors,
-      runOffsetOnHost(hostTimes, last, this.lastBar),
+      runOffsetOnHost(hostTimes, last, this.lastBar, this.runTimeAt),
       hostTimes.length,
     );
   }
@@ -281,7 +282,7 @@ export class ScriptRenderer {
     const last = this.lastTime;
     if (!m || !this.drawn() || last === null) return 0;
     return futureBarsOnHost(
-      runOffsetOnHost(hostTimes, last, this.lastBar),
+      runOffsetOnHost(hostTimes, last, this.lastBar, this.runTimeAt),
       this.lastBar,
       m.futureSlots,
       hostTimes.length,
@@ -359,13 +360,25 @@ export class ScriptRenderer {
     };
   }
 
-  /** Host logical index of run bar 0, or null when the run is not on the host axis. */
+  /**
+   * Host logical index of run bar 0, or null when the run is not on the host axis. A run a bar or
+   * two ahead of the host (a new period the engine opened first) is anchored on the host's newest
+   * bar ({@link runLeadOnHost}): its newer bars sit right of it until the host opens them.
+   */
   private offset(): number | null {
     const chart = this.host.chart();
     const last = this.lastTime;
     if (!chart || last === null) return null;
-    const idx = chart.timeScale().timeToIndex(last as Time, false);
-    return idx === null ? null : (idx as number) - this.lastBar;
+    const scale = chart.timeScale();
+    const idx = scale.timeToIndex(last as Time, false);
+    if (idx !== null) return (idx as number) - this.lastBar;
+    const host = this.host.hostTimes();
+    if (host.length === 0) return null;
+    const lead = runLeadOnHost(host.at(host.length - 1), last, this.lastBar, this.runTimeAt);
+    if (lead === null) return null;
+    const anchor = this.lastBar - lead;
+    const at = scale.timeToIndex(this.runTimeAt(anchor) as Time, false);
+    return at === null ? null : (at as number) - anchor;
   }
 
   /**
@@ -373,11 +386,15 @@ export class ScriptRenderer {
    * zone switch never leaves the run looking for its bar at the old clock's time.
    */
   private get lastTime(): number | null {
-    const m = this.model;
-    if (!m || this.lastBar < 0) return null;
-    const ms = m.bars.time[this.lastBar];
-    return Math.floor((ms + this.host.shiftMs(ms)) / 1000);
+    if (!this.model || this.lastBar < 0) return null;
+    return this.runTimeAt(this.lastBar);
   }
+
+  /** Run bar `index` on the host axis: plotted seconds, on the display clock as it is now. */
+  private readonly runTimeAt = (index: number): number => {
+    const ms = this.model!.bars.time[index];
+    return Math.floor((ms + this.host.shiftMs(ms)) / 1000);
+  };
 
   private measure(): void {
     const m = this.model;

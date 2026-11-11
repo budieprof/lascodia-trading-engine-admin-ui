@@ -13,6 +13,8 @@ import {
   mergeBarColors,
   placeRun,
   restoredRightOffset,
+  MAX_RUN_LEAD_BARS,
+  runLeadOnHost,
   runOffsetOnHost,
   sameBarColors,
   savedRightOffset,
@@ -40,6 +42,37 @@ describe('runOffsetOnHost', () => {
     expect(runOffsetOnHost(host, host[9] + 3600, 3)).toBeNull();
     expect(runOffsetOnHost(host, host[4] + 60, 3)).toBeNull();
     expect(runOffsetOnHost([], 5, 0)).toBeNull();
+  });
+
+  describe('a run ahead of the host (the engine opened a new period first)', () => {
+    /** A run whose bars are the host's, plus `extra` hourly bars past the host's newest. */
+    const run = (extra: number) => hours(host[0], host.length + extra);
+    const at = (times: number[]) => (i: number) => times[i];
+
+    it("is anchored on the host's newest bar, its newer bars right of it", () => {
+      const r = run(1);
+      // 11 run bars, the host's 10 + one: run bar 0 = host bar 0, its last bar sits at host index 10.
+      expect(runOffsetOnHost(host, r[10], 10, at(r))).toBe(0);
+      expect(runLeadOnHost(host[9], r[10], 10, at(r))).toBe(1);
+      const r2 = run(2);
+      expect(runOffsetOnHost(host, r2[11], 11, at(r2))).toBe(0);
+      // A run that starts later than the host keeps its place: 4 bars, the last one past the host.
+      const tail = r.slice(-4);
+      expect(runOffsetOnHost(host, tail[3], 3, at(tail))).toBe(7);
+    });
+
+    it(`stays off the axis more than ${MAX_RUN_LEAD_BARS} bars ahead, or when the sequences do not meet`, () => {
+      const r = run(MAX_RUN_LEAD_BARS + 1);
+      expect(runOffsetOnHost(host, r[r.length - 1], r.length - 1, at(r))).toBeNull();
+      // The run's bars skip the host's newest bar: another sequence.
+      const gap = [...host.slice(0, 9), host[9] + 60, host[9] + 3600];
+      expect(runOffsetOnHost(host, gap[10], 10, at(gap))).toBeNull();
+      // Not ahead: its last bar is inside the host's window but not on it.
+      expect(runLeadOnHost(host[9], host[4] + 60, 3, () => host[3])).toBeNull();
+      // Without the run's times nothing is guessed (the old contract).
+      expect(runOffsetOnHost(host, run(1)[10], 10)).toBeNull();
+      expect(runOffsetOnHost([], 5, 1, () => 4)).toBeNull();
+    });
   });
 });
 
