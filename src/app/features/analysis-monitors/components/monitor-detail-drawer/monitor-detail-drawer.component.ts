@@ -258,7 +258,7 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                     }
                   </dd>
                   <dt>Origin</dt>
-                  <dd>{{ m.origin || 'operator' }}{{ m.createdBy ? ' · ' + m.createdBy : '' }}</dd>
+                  <dd>{{ m.origin || 'operator' }}{{ m.createdBy && m.createdBy !== m.origin ? ' · ' + m.createdBy : '' }}</dd>
                   <dt>Fires</dt>
                   <dd>
                     {{ m.triggerCount }} / {{ m.maxTriggers }} · {{ m.recurring ? 'recurring' : 'one-shot' }}
@@ -963,7 +963,8 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
         height: 7px;
         border-radius: 50%;
         background: var(--text-tertiary);
-        align-self: center;
+        align-self: start;
+        margin-top: 5px;
       }
       .tl-when {
         color: var(--text-tertiary);
@@ -1172,7 +1173,7 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
 })
 export class MonitorDetailDrawerComponent {
   /** Template null-check: the lint rule forbids `!= null` in templates, and `!== null` alone misses undefined. */
-  protected has(v: unknown): boolean {
+  protected has<T>(v: T): v is NonNullable<T> {
     return v !== null && v !== undefined;
   }
 
@@ -1374,13 +1375,26 @@ export class MonitorDetailDrawerComponent {
       itemStyle: { color: ink, borderColor: surface, borderWidth: 2 },
       data: pts.filter((p) => p.e.kind === kind).map((p) => [p.t, p.e.observedMid, p.e.note ?? '']),
     }));
-    const levelLines = (m.levels ?? []).map((l) => {
+    // Each level is its own two-point series with an end label: markLines on one series drew only one
+    // line and stacked every label on it.
+    const t0 = pts[0].t;
+    const t1 = pts[pts.length - 1].t;
+    const levelSeries = (m.levels ?? []).map((l) => {
       const st = LEVEL_STYLE[l.kind] ?? LEVEL_STYLE['trigger'];
+      const color = dark ? st.dark : st.light;
       return {
-        yAxis: l.price,
         name: l.label,
-        lineStyle: { color: dark ? st.dark : st.light, type: st.dash, width: 1.5 },
-        label: { formatter: l.label, color: ink, fontSize: 10, position: 'insideEndTop' as const },
+        type: 'line' as const,
+        silent: true,
+        symbol: 'none',
+        z: 2,
+        lineStyle: { color, type: st.dash, width: 1.5 },
+        data: [
+          [t0, l.price, ''],
+          [t1, l.price, ''],
+        ],
+        endLabel: { show: true, formatter: `${l.label} ${l.price}`, color: ink, fontSize: 10, offset: [-6, -8], align: 'right' as const },
+        tooltip: { show: false },
       };
     });
     const all = [...pts.map((p) => p.e.observedMid as number), ...(m.levels ?? []).map((l) => l.price)];
@@ -1389,7 +1403,7 @@ export class MonitorDetailDrawerComponent {
     const pad = (hi - lo) * 0.08 || hi * 0.0005;
     return {
       animationDuration: 250,
-      grid: { top: 26, right: 12, bottom: 24, left: 62, containLabel: false },
+      grid: { top: 26, right: 14, bottom: 24, left: 62, containLabel: false },
       legend: {
         top: 0,
         right: 0,
@@ -1402,11 +1416,12 @@ export class MonitorDetailDrawerComponent {
         trigger: 'axis',
         axisPointer: { type: 'cross', label: { show: false } },
         formatter: (raw) => {
+          const levelNames = new Set((m.levels ?? []).map((l) => l.label));
           const arr = (Array.isArray(raw) ? raw : [raw]) as unknown as { seriesName?: string; data: [number, number, string] }[];
           const first = arr[0];
           if (!first) return '';
           const when = new Date(first.data[0]).toISOString().slice(5, 19).replace('T', ' ');
-          const lines = arr.map(
+          const lines = arr.filter((p) => p.data[2] !== undefined && !(levelNames.has(p.seriesName ?? ''))).map(
             (p) => `${p.seriesName === 'Mid' ? 'mid' : p.seriesName}: <b>${p.data[1]}</b>${p.data[2] && p.seriesName !== 'Mid' ? '<br/><span style="opacity:.75">' + String(p.data[2]).slice(0, 120) + '</span>' : ''}`,
           );
           return `${when}Z<br/>${lines.join('<br/>')}`;
@@ -1434,8 +1449,8 @@ export class MonitorDetailDrawerComponent {
           showSymbol: false,
           lineStyle: { width: 1.5, color: line },
           data: pts.map((p) => [p.t, p.e.observedMid, '']),
-          markLine: levelLines.length ? { symbol: 'none', silent: true, data: levelLines } : undefined,
         },
+        ...levelSeries,
         ...markers.filter((s) => s.data.length > 0),
       ],
     };

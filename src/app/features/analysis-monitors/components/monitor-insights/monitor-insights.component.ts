@@ -259,16 +259,16 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
               </div>
               <span class="f-arrow">→</span>
               <div class="funnel-step">
-                <span class="f-val">{{ ins.trades.executed }}</span><span class="f-key">executed</span>
+                <span class="f-val">{{ ins.trades.executed }}</span><span class="f-key">traded</span>
               </div>
               <span class="f-arrow">→</span>
               <div class="funnel-step">
-                <span class="f-val">{{ ins.trades.closedTrades }}</span><span class="f-key">closed</span>
+                <span class="f-val">{{ ins.trades.closedTrades }}</span><span class="f-key">closed positions</span>
               </div>
             </div>
             <p class="muted small">
               {{ ins.trades.rejected }} rejected · {{ ins.trades.expired }} expired ·
-              {{ ins.trades.pending }} pending · {{ ins.trades.openTrades }} still open
+              {{ ins.trades.pending }} pending · {{ ins.trades.openTrades }} position{{ ins.trades.openTrades === 1 ? '' : 's' }} still open · a signal can open several
             </p>
             <dl class="trade-facts">
               <dt>Net P&amp;L</dt>
@@ -588,7 +588,7 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
 })
 export class MonitorInsightsComponent {
   /** Template null-check: the lint rule forbids `!= null` in templates, and `!== null` alone misses undefined. */
-  protected has(v: unknown): boolean {
+  protected has<T>(v: T): v is NonNullable<T> {
     return v !== null && v !== undefined;
   }
 

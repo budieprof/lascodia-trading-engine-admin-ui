@@ -23,6 +23,7 @@ import { monitorsPageCommands, monitorsPageFacts } from './monitors-page-assista
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { appStorage } from '@core/storage/app-storage';
 import type { AnalysisMonitorDto } from '@core/api/api.types';
 import type {
   AnalysisMonitorBoardCounters,
@@ -82,7 +83,7 @@ interface Prefs {
   analyticsOpen: boolean;
   days: number;
 }
-const PREFS_KEY = 'lasc.monitors.prefs.v2';
+const PREFS_KEY = 'lascodia.monitors.prefs.v2';
 
 type PendingAction =
   | { kind: 'fire' | 'cancel'; monitor: AnalysisMonitorDto }
@@ -1262,8 +1263,8 @@ type PendingAction =
         flex: none;
       }
       .intent {
-        max-width: 520px;
-        min-width: 240px;
+        max-width: 440px;
+        min-width: 220px;
         color: var(--text-secondary);
       }
       .intent-text {
@@ -1288,7 +1289,7 @@ type PendingAction =
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 520px;
+        max-width: 440px;
       }
       .dist {
         min-width: 170px;
@@ -1691,7 +1692,7 @@ type PendingAction =
 })
 export class AnalysisMonitorsPageComponent {
   /** Template null-check: the lint rule forbids `!= null` in templates, and `!== null` alone misses undefined. */
-  protected has(v: unknown): boolean {
+  protected has<T>(v: T): v is NonNullable<T> {
     return v !== null && v !== undefined;
   }
 
@@ -1980,7 +1981,7 @@ export class AnalysisMonitorsPageComponent {
   private loadPrefs(): Prefs {
     const def: Prefs = { view: 'table', density: 'comfortable', analyticsOpen: true, days: 14 };
     try {
-      const raw = localStorage.getItem(PREFS_KEY);
+      const raw = appStorage.getItem(PREFS_KEY);
       if (!raw) return def;
       const p = { ...def, ...(JSON.parse(raw) as Partial<Prefs>) };
       if (!(RANGES as readonly number[]).includes(p.days)) p.days = 14;
@@ -1993,7 +1994,7 @@ export class AnalysisMonitorsPageComponent {
   protected setPref<K extends keyof Prefs>(k: K, v: Prefs[K]): void {
     this.prefs.update((p) => ({ ...p, [k]: v }));
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs()));
+      appStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs()));
     } catch {
       /* storage unavailable: preferences last for this visit only */
     }
