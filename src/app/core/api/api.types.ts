@@ -4478,6 +4478,29 @@ export interface AnalysisMonitorDto {
   invalidationExplanation?: string | null;
   /** Non-fatal warnings the spec produced at create time. */
   specWarnings?: string[];
+
+  // ── The plan and the prices the watch waits at ──
+  /** "close" when a touch waits for the bar close, "touch" (or null) when it acts at once. */
+  confirmOn?: string | null;
+  /** Set while a close-confirmed watch, already touched, waits for that bar to close. */
+  confirmPendingSinceUtc?: string | null;
+  planEntryPrice?: number | null;
+  planStopPrice?: number | null;
+  planTargetPrice?: number | null;
+  /** Who wrote the Structure Watch script: ai | synthesized | operator. */
+  scriptAuthor?: string | null;
+  /** OCO link: the watches sharing it cancel each other on a fire. */
+  ocoGroupId?: string | null;
+  /** Literal levels from trigger, invalidation and plan (filled by the cockpit board only). */
+  levels?: AnalysisMonitorLevel[];
+}
+
+/** One literal price a watch waits at or guards. */
+export interface AnalysisMonitorLevel {
+  price: number;
+  /** 'trigger' | 'invalidation' | 'entry' | 'stop' | 'target'. */
+  kind: string;
+  label: string;
 }
 
 /** Structured multi-week → multi-month posture parsed from the macro

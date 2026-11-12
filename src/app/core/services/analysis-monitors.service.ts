@@ -13,6 +13,7 @@ import {
   MonitorPreviewRequest,
   MonitorPreviewResult,
   MonitorTemplate,
+  MonitorInsights,
   UpdateAnalysisMonitorRequest,
 } from '@features/analysis-monitors/analysis-monitors.types';
 
@@ -47,6 +48,23 @@ export class AnalysisMonitorsService {
     p.set('page', String(filter?.page ?? 1));
     p.set('pageSize', String(filter?.pageSize ?? 50));
     return this.api.get(`/market-data/analysis-monitors/board?${p.toString()}`);
+  }
+
+  /**
+   * GET /market-data/analysis-monitors/insights — fleet analytics over the last `days` UTC days:
+   * daily trend, fire rate, time to fire, per-symbol + per-kind breakdowns, fire heatmap, terminal
+   * grades and what the signals filed by fires returned. Separate from the board so the board's
+   * push-driven refresh stays cheap.
+   */
+  getInsights(
+    days = 14,
+    symbol?: string | null,
+    origin?: string | null,
+  ): Observable<ResponseData<MonitorInsights>> {
+    const p = new URLSearchParams({ days: String(days) });
+    if (symbol) p.set('symbol', symbol.trim().toUpperCase());
+    if (origin) p.set('origin', origin);
+    return this.api.get(`/market-data/analysis-monitors/insights?${p.toString()}`);
   }
 
   /**

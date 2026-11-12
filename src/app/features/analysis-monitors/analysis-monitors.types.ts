@@ -38,6 +38,19 @@ export interface AnalysisMonitorBoardCounters {
    * is only actually armed if the worker is alive to evaluate it.
    */
   workerLooksStalled: boolean;
+  /** Script-vs-plain share of watches created in the last 30 days, by origin. */
+  watchKindsByOrigin?: WatchKindShare[];
+}
+
+export interface WatchKindShare {
+  origin: string;
+  total: number;
+  scriptAi: number;
+  scriptSynthesized: number;
+  scriptOther: number;
+  plain: number;
+  /** 0..1 */
+  scriptShare: number;
 }
 
 /** One row on a monitor's timeline / the fleet activity feed. */
@@ -339,4 +352,104 @@ export interface MonitorInstantiationResult {
   created: import('@core/api/api.types').AnalysisMonitorDto[];
   /** Subjects that could not be armed, and why. */
   failures: string[];
+}
+
+// ── Fleet analytics (GET analysis-monitors/insights) ────────────────────────
+
+export interface MonitorInsightTotals {
+  /** Watches armed in the window — the cohort every rate is measured on. */
+  created: number;
+  /** Fire events in the window (a recurring watch can fire many times). */
+  fires: number;
+  invalidated: number;
+  expired: number;
+  cancelled: number;
+  evalErrors: number;
+  /** Cohort watches that have finished. */
+  ended: number;
+  firedAtLeastOnce: number;
+  /** Share of FINISHED cohort watches that fired at least once; null when none finished. */
+  fireRate?: number | null;
+  medianHoursToFire?: number | null;
+  p75HoursToFire?: number | null;
+  medianLifeHours?: number | null;
+  llmSpendUsd: number;
+}
+
+export interface MonitorInsightDaily {
+  dateUtc: string;
+  created: number;
+  fired: number;
+  invalidated: number;
+  expired: number;
+  cancelled: number;
+  evalErrors: number;
+}
+
+export interface MonitorSymbolInsight {
+  symbol: string;
+  live: number;
+  created: number;
+  fires: number;
+  invalidated: number;
+  expired: number;
+  cancelled: number;
+  ended: number;
+  firedAtLeastOnce: number;
+  fireRate?: number | null;
+  medianHoursToFire?: number | null;
+  signalsFiled: number;
+  closedTrades: number;
+  netPnl: number;
+  lastFiredAtUtc?: string | null;
+}
+
+export interface MonitorSegmentInsight {
+  /** 'origin' | 'mode' | 'kind'. */
+  dimension: string;
+  key: string;
+  created: number;
+  ended: number;
+  firedAtLeastOnce: number;
+  invalidated: number;
+  fireRate?: number | null;
+  medianHoursToFire?: number | null;
+}
+
+export interface MonitorCount {
+  key: string;
+  count: number;
+}
+
+export interface MonitorTradeInsight {
+  signalsFiled: number;
+  executed: number;
+  rejected: number;
+  expired: number;
+  pending: number;
+  openTrades: number;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  winRate?: number | null;
+  netPnl: number;
+  avgWin?: number | null;
+  avgLoss?: number | null;
+  profitFactor?: number | null;
+}
+
+export interface MonitorInsights {
+  days: number;
+  fromUtc: string;
+  asOfUtc: string;
+  totals: MonitorInsightTotals;
+  daily: MonitorInsightDaily[];
+  bySymbol: MonitorSymbolInsight[];
+  segments: MonitorSegmentInsight[];
+  /** fireHeatmap[weekday 0=Mon][hour UTC]. */
+  fireHeatmap: number[][];
+  timeToFire: MonitorCount[];
+  verdicts: MonitorCount[];
+  eventKinds: MonitorCount[];
+  trades: MonitorTradeInsight;
 }
