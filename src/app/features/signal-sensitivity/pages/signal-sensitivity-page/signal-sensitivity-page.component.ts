@@ -38,12 +38,32 @@ import {
   SignalSensitivityPerSymbolBestDto,
   Timeframe,
 } from '@core/api/api.types';
+import type { components } from '@core/api/_generated/schema';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { MartingaleSimulatorComponent } from '@shared/components/martingale-simulator/martingale-simulator.component';
 import { ladderTradesFromSensitivity } from '../../martingale-sensitivity';
 
-const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as const;
+type EngineSignalSource = components['schemas']['LascodiaTradingEngine_Domain_Enums_TradeSignalSource'];
+
+// Every TradeSignalSource the engine can write, keyed off the generated API
+// enum so a new engine source is a compile error here rather than a source the
+// page silently cannot select. Before this the list was hand-written with four
+// of the eight values: PatientTrader (21 of 23 EURUSD signals in a 30-day
+// window on 2026-11-13) could not be analysed at all, and the window looked
+// near-empty.
+// Key order is the chip order on the page.
+const SOURCE_SET: Record<EngineSignalSource, true> = {
+  SpotAnalysis: true,
+  PatientTrader: true,
+  Strategy: true,
+  Manual: true,
+  SyntheticAnalyser: true,
+  BaselineMomentum: true,
+  BaselineMaCross: true,
+  BaselineStrengthTilt: true,
+};
+const SOURCES = Object.keys(SOURCE_SET) as EngineSignalSource[];
 
 // The operator works in WAT (West Africa Time = UTC+1, no DST). The custom
 // From/To pickers are entered and displayed in WAT; the engine speaks UTC, so
