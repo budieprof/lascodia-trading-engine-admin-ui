@@ -33,7 +33,7 @@ type PermGroup = { category: string; keys: string[] };
             <a class="btn btn-secondary" routerLink="/account/tokens">Access tokens</a>
           }
           <a class="btn btn-primary" [href]="identityAccountUrl" target="_blank" rel="noopener">
-            Password &amp; second factor
+            Password, second factor &amp; passkeys
           </a>
         } @else {
           <a class="btn btn-primary" routerLink="/account/change-password">Change password</a>
