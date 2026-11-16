@@ -110,8 +110,8 @@ const RANGE_MS: Record<Range, number> = { '1d': 86_400_000, '7d': 7 * 86_400_000
                 <td>{{ a.accountName || a.accountId }} <span class="small muted">{{ a.accountId }}{{ a.isPaper ? ' · paper' : '' }}</span></td>
                 <td class="num">{{ money(a.latest?.equity, a.currency) }}</td>
                 <td class="num">{{ money(a.latest?.vaR95, a.currency) }}</td>
-                <td class="num" [class.neg]="(a.latest?.vaR95Pct ?? 0) > (a.maxVaR95Pct ?? 1e9)">{{ a.latest?.vaR95Pct != null ? num(a.latest!.vaR95Pct) + ' %' : '—' }}</td>
-                <td class="num">{{ a.maxVaR95Pct != null ? a.maxVaR95Pct + ' %' : '—' }}</td>
+                <td class="num" [class.neg]="(a.latest?.vaR95Pct ?? 0) > (a.maxVaR95Pct ?? 1e9)">{{ (a.latest?.vaR95Pct ?? null) !== null ? num(a.latest!.vaR95Pct) + ' %' : '—' }}</td>
+                <td class="num">{{ (a.maxVaR95Pct ?? null) !== null ? a.maxVaR95Pct + ' %' : '—' }}</td>
                 <td class="num">{{ money(a.latest?.stressedVaR, a.currency) }}</td>
                 <td class="num">{{ num(a.latest?.stopOutSigma1d, 1) }}</td>
                 <td class="num">{{ a.latest?.openPositionCount ?? '—' }}</td>

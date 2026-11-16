@@ -29,6 +29,8 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -53,7 +55,9 @@ import {
   template: `
     <div class="page">
       <app-page-header title="Currency Pairs" subtitle="Tradeable symbols and their contract specs">
-        <button type="button" class="btn btn-primary" (click)="openCreate()">+ Add Pair</button>
+        @if (canManage()) {
+          <button type="button" class="btn btn-primary" (click)="openCreate()">+ Add Pair</button>
+        }
       </app-page-header>
 
       @if (editing()) {
@@ -230,7 +234,7 @@ import {
           <app-empty-state
             title="No currency pairs yet"
             description="Charts and the exposure matrix appear once the first pair is added."
-            actionLabel="+ Add Pair"
+            [actionLabel]="canManage() ? '+ Add Pair' : null"
             (actionClick)="openCreate()"
           />
         </section>
@@ -350,6 +354,12 @@ import {
 })
 export class CurrencyPairsPageComponent implements OnInit {
   private readonly service = inject(CurrencyPairsService);
+  private readonly auth = inject(AuthService);
+  /**
+   * Creating, editing and deleting a pair is platform.data.manage (engine CurrencyPairController);
+   * reading is marketdata.read. Without the key the page is a read-only list (review O7).
+   */
+  protected readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformDataManage));
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
 
@@ -754,6 +764,7 @@ export class CurrencyPairsPageComponent implements OnInit {
     this.service.list(params).pipe(map((r) => r.data ?? { pager: emptyPager(), data: [] }));
 
   openCreate(): void {
+    if (!this.canManage()) return;
     this.form.reset({
       symbol: '',
       baseCurrency: '',
@@ -769,6 +780,7 @@ export class CurrencyPairsPageComponent implements OnInit {
   }
 
   openEdit(row: CurrencyPairDto): void {
+    if (!this.canManage()) return;
     this.form.reset({
       symbol: row.symbol ?? '',
       baseCurrency: row.baseCurrency ?? '',
@@ -788,6 +800,7 @@ export class CurrencyPairsPageComponent implements OnInit {
   }
 
   submit(): void {
+    if (!this.canManage()) return;
     const v = this.form.getRawValue();
     const editing = this.editing();
     this.busy.set(true);
@@ -823,6 +836,7 @@ export class CurrencyPairsPageComponent implements OnInit {
   }
 
   onDelete(): void {
+    if (!this.canManage()) return;
     const editing = this.editing();
     if (!editing || !('id' in editing) || editing.id == null) return;
     this.busy.set(true);

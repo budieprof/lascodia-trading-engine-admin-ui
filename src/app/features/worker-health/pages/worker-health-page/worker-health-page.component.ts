@@ -5,9 +5,10 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
+import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { map } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
@@ -59,6 +60,7 @@ const CARD_GRID_CAP = 12;
     RelativeTimePipe,
     RefreshButtonComponent,
     NgTemplateOutlet,
+    DatePipe,
   ],
   template: `
     <div class="page">
@@ -78,6 +80,14 @@ const CARD_GRID_CAP = 12;
           (retry)="refresh()"
         />
       } @else if (workers().length > 0) {
+        <!-- Review O8: a failed refresh keeps the last snapshot on screen — say so, or it reads as current. -->
+        @if (resource.error() !== null && lastFailedAt() !== null) {
+          <p class="stale-banner" role="status">
+            Last update failed at {{ lastFailedAt() | date: 'HH:mm:ss' }} — showing the snapshot from
+            {{ resource.lastUpdated() ? (resource.lastUpdated()! | date: 'HH:mm:ss') : 'earlier' }}.
+            Retrying every 30 s.
+          </p>
+        }
         <!-- Verdict first: the operator comes here to learn whether any worker is unhealthy. -->
         <section
           class="verdict"
@@ -840,6 +850,8 @@ export class WorkerHealthPageComponent {
   );
 
   readonly workers = computed(() => this.resource.value() ?? []);
+  /** When the newest failed refresh happened; null once a refresh succeeds again. */
+  protected readonly lastFailedAt = signal<number | null>(null);
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);
   readonly topCategoryLimit = TOP_CATEGORIES;
   readonly cardGridCap = CARD_GRID_CAP;
@@ -858,6 +870,14 @@ export class WorkerHealthPageComponent {
   private readonly userToggled = signal(false);
 
   constructor() {
+    // Stamp each failure (the resource keeps the previous error object across failures, so the
+    // refreshing → settled edge is what marks a new attempt).
+    effect(() => {
+      const failed = this.resource.error() !== null;
+      const busy = this.resource.refreshing();
+      if (busy) return;
+      untracked(() => this.lastFailedAt.set(failed ? Date.now() : null));
+    });
     // Seed default-expanded categories from the first non-empty group set.
     // After the user interacts, this stops applying.
     effect(() => {

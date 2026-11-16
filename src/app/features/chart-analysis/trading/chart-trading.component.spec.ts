@@ -339,6 +339,40 @@ describe('ChartTradingComponent (SP-I3)', () => {
     close.flush(ok('PartialClose'));
   });
 
+  it('an invalid or below-step close quantity turns Apply off until a valid one is re-checked', () => {
+    fixture.componentRef.setInput(
+      'facts',
+      instrumentFacts('EURUSD', { pair: { ...EURUSD_PAIR, lotStep: 0.01, minLotSize: 0.01 } }),
+    );
+    fixture.detectChanges();
+    click({ kind: 'positionEntry', refId: 501, price: 1.1 });
+    fixture.detectChanges();
+    http.expectOne(`${BASE}/position/501/change-preview`).flush(ok(preview({ closeLots: 0.5, closePnl: 0 })));
+    fixture.detectChanges();
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(false);
+    const lots = byId<HTMLInputElement>('close-lots');
+    // Below one step: no preview, and the full-close answer no longer enables Apply.
+    lots.value = '0.001';
+    lots.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    http.expectNone(`${BASE}/position/501/change-preview`);
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(true);
+    // Not a number at all: the same.
+    lots.value = '';
+    lots.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    http.expectNone(`${BASE}/position/501/change-preview`);
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(true);
+    // A valid quantity is checked again; Apply returns only with its answer.
+    lots.value = '0.2';
+    lots.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(true);
+    http.expectOne(`${BASE}/position/501/change-preview`).flush(ok(preview({ closeLots: 0.2, closePnl: 0 })));
+    fixture.detectChanges();
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(false);
+  });
+
   it('closes part of a position from its entry line at the live price', () => {
     click({ kind: 'positionEntry', refId: 501, price: 1.1 });
     fixture.detectChanges();

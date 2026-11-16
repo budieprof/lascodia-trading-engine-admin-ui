@@ -39,6 +39,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { StrategyActivityContextComponent } from '../../components/strategy-activity-context/strategy-activity-context.component';
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
+import { PromoteVariantDialogComponent } from '../../components/promote-variant-dialog/promote-variant-dialog.component';
 
 /**
  * Strategy analytics deep-dive — the seven-tab page sketched in the dashboard
@@ -65,6 +66,7 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
     RelativeTimePipe,
     StrategyActivityContextComponent,
     StrategyCapacityCardComponent,
+    PromoteVariantDialogComponent,
   ],
   template: `
     <div class="page">
@@ -175,10 +177,10 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
                           <button
                             type="button"
                             class="promote-btn"
-                            [disabled]="promotingVariantId() !== null"
-                            (click)="promoteVariant(v.id)"
+                            [disabled]="promotingVariant() !== null"
+                            (click)="promoteVariant(v)"
                           >
-                            {{ promotingVariantId() === v.id ? 'Promoting…' : 'Promote' }}
+                            {{ promotingVariant()?.id === v.id ? 'Promoting…' : 'Promote' }}
                           </button>
                         }
                       </td>
@@ -284,6 +286,10 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
           }
         }
       </ui-tabs>
+
+      @if (promotingVariant(); as pv) {
+        <app-promote-variant-dialog [variant]="pv" (closed)="onPromoteDialogClosed()" />
+      }
     </div>
   `,
   styles: [
@@ -452,7 +458,8 @@ export class StrategyAnalyticsPageComponent {
   private readonly notify = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly relativeTime = new RelativeTimePipe();
-  protected readonly promotingVariantId = signal<number | null>(null);
+  /** The variant whose promote confirm is open. */
+  protected readonly promotingVariant = signal<StrategyVariantDto | null>(null);
 
   protected readonly strategyId = +this.route.snapshot.paramMap.get('id')!;
   private readonly optimizationsTable =
@@ -801,24 +808,18 @@ export class StrategyAnalyticsPageComponent {
       });
   }
 
-  protected promoteVariant(variantId: number): void {
-    if (this.promotingVariantId() !== null) return;
-    this.promotingVariantId.set(variantId);
-    this.strategiesService.promoteVariant(variantId).subscribe({
-      next: (res) => {
-        this.promotingVariantId.set(null);
-        if (res?.status) {
-          this.notify.success(`Variant #${variantId} promoted`);
-          this.loadVariants();
-        } else {
-          this.notify.error(res?.message ?? 'Promote failed');
-        }
-      },
-      error: () => {
-        this.promotingVariantId.set(null);
-        this.notify.error('Promote failed');
-      },
-    });
+  /**
+   * Promotion rewrites the LIVE base strategy's parameters, so it goes through the same confirm
+   * (with an audit reason) as the variants tab — never one click.
+   */
+  protected promoteVariant(v: StrategyVariantDto): void {
+    if (this.promotingVariant() !== null) return;
+    this.promotingVariant.set(v);
+  }
+
+  protected onPromoteDialogClosed(): void {
+    this.promotingVariant.set(null);
+    this.loadVariants();
   }
 
   /**

@@ -707,7 +707,7 @@ const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
       <app-confirm-dialog
         [open]="showApprove()"
         title="Approve Optimization"
-        message="Apply the best parameters to the strategy. A 25/50/75/100% gradual rollout will be scheduled."
+        message="Starts a gradual rollout of the best parameters (25% of signals, then 50/75/100% by default — Optimization:RolloutTier1Pct/2Pct/3Pct). If the strategy already has a rollout in progress, this one is deferred until it settles."
         confirmLabel="Approve"
         confirmVariant="primary"
         [loading]="detailBusy()"
@@ -1981,8 +1981,10 @@ export class OptimizationsPageComponent implements OnInit {
         this.detailBusy.set(false);
         this.showApprove.set(false);
         if (res.status) {
-          this.notifications.success(`Run #${run.id} approved — gradual rollout scheduled`);
-          if (res.data) this.selected.set(res.data);
+          // The engine answers a sentence (rollout started vs deferred), not the run: say what it
+          // said, then re-read the run so the detail panel never renders a string as a run.
+          this.notifications.success(`Run #${run.id} approved — ${approvalOutcome(res)}`);
+          this.refreshSelected(run.id);
           this.table?.loadData();
         } else {
           this.notifications.error(res.message ?? 'Approve failed');
@@ -2005,7 +2007,7 @@ export class OptimizationsPageComponent implements OnInit {
         this.showReject.set(false);
         if (res.status) {
           this.notifications.success(`Run #${run.id} rejected`);
-          if (res.data) this.selected.set(res.data);
+          this.refreshSelected(run.id);
           this.table?.loadData();
         } else {
           this.notifications.error(res.message ?? 'Reject failed');
@@ -2018,6 +2020,19 @@ export class OptimizationsPageComponent implements OnInit {
     });
   }
 
+  /**
+   * Re-read one run after approve/reject and show it — only if the operator is still looking at
+   * that run, and only when the read returns a run (a failed read keeps the current panel).
+   */
+  refreshSelected(id: number): void {
+    this.service
+      .getOptimizationRun(id)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        if (res?.status && res.data && this.selected()?.id === id) this.selected.set(res.data);
+      });
+  }
+
   formatJson(value: string): string {
     try {
       return JSON.stringify(JSON.parse(value), null, 2);
@@ -2025,6 +2040,16 @@ export class OptimizationsPageComponent implements OnInit {
       return value;
     }
   }
+}
+
+/**
+ * What the engine said an approval did (rollout started vs deferred). The engine puts the sentence in
+ * `message`; older builds left `message` at "Successful" and put it in `data`.
+ */
+export function approvalOutcome(res: { message?: string | null; data?: string | null }): string {
+  const message = res.message?.trim();
+  if (message && !/^successful\.?$/i.test(message)) return message;
+  return res.data?.trim() || 'rollout scheduled';
 }
 
 function emptyPager() {

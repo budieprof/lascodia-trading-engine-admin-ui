@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ApiCallOptions, ApiService } from '@core/api/api.service';
-import { ResponseData } from '@core/api/api.types';
+import { ApiError, ResponseData } from '@core/api/api.types';
 import {
   NEWS_CONFIG_SECTIONS,
   NewsArticleView,
@@ -384,14 +384,14 @@ export class NewsIntelService {
         reason: opts?.reason ?? null,
         immediate: opts?.immediate ?? false,
       })
-      .pipe(map((r) => r.data ?? []));
+      .pipe(map((r) => refusedAsError(r, r.data ?? [])));
   }
 
   /** Sends one article back to the classification queue, clearing its labels and attempts. */
   reclassify(articleId: number): Observable<string> {
     return this.api
       .post<ResponseData<string>>(`/news-intel/articles/${articleId}/reclassify`)
-      .pipe(map((r) => r.data ?? r.message ?? 'requeued'));
+      .pipe(map((r) => refusedAsError(r, r.data ?? r.message ?? 'requeued')));
   }
 
   /**
@@ -438,4 +438,19 @@ export class NewsIntelService {
     // "HalfLifeIntradayMinutes" → "Half life intraday minutes"
     return seg.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
   }
+}
+
+/**
+ * HTTP 200/202 with `status: false` is a refusal (or a write parked for a second approver,
+ * `-202-approval`), never a success: throw it as an {@link ApiError} so the caller shows the
+ * engine's message — mapping it to an empty result made callers report "Saved." for a change
+ * that was never written. Callers check `isApprovalPending` to show "sent for approval".
+ */
+function refusedAsError<T>(res: ResponseData<unknown>, value: T): T {
+  if (res?.status) return value;
+  throw new ApiError(
+    res?.responseCode ?? 'UNKNOWN',
+    res?.message || 'The engine refused the change.',
+    res,
+  );
 }

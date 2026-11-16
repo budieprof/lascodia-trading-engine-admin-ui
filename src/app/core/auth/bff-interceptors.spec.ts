@@ -161,7 +161,7 @@ describe('error interceptor — BFF', () => {
     );
     await expect(done).rejects.toMatchObject({ status: 401 });
     expect(t.browser.assign).toHaveBeenCalledWith(
-      `${API}/bff/login?returnUrl=%2Fiam%2Fsecurity&acr=mfa`,
+      `${API}/bff/login?returnUrl=%2Fiam%2Fsecurity&tenant=3&acr=mfa`,
     );
     const pending = JSON.parse(sessionStorage.getItem(STEP_UP_PENDING_KEY)!);
     expect(pending).toMatchObject({

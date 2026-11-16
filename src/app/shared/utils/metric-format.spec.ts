@@ -15,6 +15,12 @@ import {
   profitFactorTitle,
 } from './metric-format';
 
+/**
+ * .NET decimal.MaxValue (79228162514264337593543950335) as the JSON parser delivers it. Parsed
+ * from text: the literal itself cannot be represented exactly as a double (no-loss-of-precision).
+ */
+const DECIMAL_MAX_VALUE = Number('79228162514264337593543950335');
+
 describe('metric-format', () => {
   it('prints a fraction as a percent', () => {
     expect(fmtFraction(0.523)).toBe('52.3%');
@@ -58,7 +64,7 @@ describe('metric-format', () => {
     expect(fmtProfitFactor(3.21, 2, true, PF_SENSITIVITY_NO_LOSS)).toBe('3.21');
     expect(isNoLossProfitFactor(999, PF_SENSITIVITY_NO_LOSS)).toBe(true);
     // CME experiments send decimal.MaxValue
-    expect(fmtProfitFactor(79228162514264337593543950335)).toBe('∞');
+    expect(fmtProfitFactor(DECIMAL_MAX_VALUE)).toBe('∞');
   });
 
   it('explains ∞ in a title and blanks a meaningless delta', () => {
@@ -66,7 +72,7 @@ describe('metric-format', () => {
     expect(profitFactorTitle(1.2)).toBe('');
     expect(profitFactorTitle(999, PF_SENSITIVITY_NO_LOSS)).toBe(PF_NO_LOSS_TITLE);
     expect(fmtProfitFactorDelta(-0.234)).toBe('-0.23');
-    expect(fmtProfitFactorDelta(79228162514264337593543950335)).toBe('—');
+    expect(fmtProfitFactorDelta(DECIMAL_MAX_VALUE)).toBe('—');
     expect(fmtProfitFactorDelta(null)).toBe('—');
   });
 });

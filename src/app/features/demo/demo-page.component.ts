@@ -265,7 +265,24 @@ export class DemoPageComponent {
   }
 
   pick(symbol: string): void {
+    if (symbol === this.symbol()) return;
+    this.switchTo(symbol);
+  }
+
+  /**
+   * Review O12: a new symbol starts from nothing. The previous symbol's bars and tick cursor used
+   * to survive the pick, so its ticks (by timestamp) folded into the new symbol's bars until the
+   * candles arrived — and a late answer for the old symbol could still land on the new chart.
+   */
+  private switchTo(symbol: string): void {
     this.symbol.set(symbol);
+    this.bars = [];
+    this.lastTickMs = null;
+    this.series?.setData([]);
+    this.markers?.setMarkers([]);
+    this.quote.set(null);
+    this.book.set(null);
+    this.source.set(null);
     this.loadCandles();
     this.loadBook();
   }
@@ -310,9 +327,7 @@ export class DemoPageComponent {
         }
         this.problem.set(null);
         if (first || !s.symbols.includes(this.symbol())) {
-          this.symbol.set(s.symbols[0] ?? 'EURUSD');
-          this.loadCandles();
-          this.loadBook();
+          this.switchTo(s.symbols[0] ?? 'EURUSD');
         }
       },
       error: (e) =>
@@ -326,8 +341,11 @@ export class DemoPageComponent {
 
   private loadCandles(): void {
     if (this.destroyed) return;
-    this.api.candles(this.symbol(), 180).subscribe({
+    const symbol = this.symbol();
+    this.api.candles(symbol, 180).subscribe({
       next: (c) => {
+        // Answered for a symbol the operator has since left: drop it.
+        if (this.destroyed || symbol !== this.symbol()) return;
         this.source.set(c.sourceName || c.sourceId);
         this.bars = [...c.bars];
         this.lastTickMs = c.nowMs;
@@ -346,8 +364,12 @@ export class DemoPageComponent {
       document.visibilityState === 'hidden'
     )
       return;
-    this.api.ticks(this.symbol(), this.lastTickMs).subscribe({
+    const symbol = this.symbol();
+    // No bars yet (just switched): ticks have nothing to fold into until the candles land.
+    if (this.bars.length === 0) return;
+    this.api.ticks(symbol, this.lastTickMs).subscribe({
       next: (t) => {
+        if (this.destroyed || symbol !== this.symbol()) return;
         if (t.t.length === 0) return;
         this.lastTickMs = t.t[t.t.length - 1];
         const touched = foldTicks(this.bars, t);
@@ -370,9 +392,13 @@ export class DemoPageComponent {
       document.visibilityState === 'hidden'
     )
       return;
-    this.api
-      .book(this.symbol())
-      .subscribe({ next: (b) => this.book.set(b), error: () => undefined });
+    const symbol = this.symbol();
+    this.api.book(symbol).subscribe({
+      next: (b) => {
+        if (!this.destroyed && symbol === this.symbol()) this.book.set(b);
+      },
+      error: () => undefined,
+    });
   }
 
   /** Marks every loop restart: the price jumps back to the recording's start there. */

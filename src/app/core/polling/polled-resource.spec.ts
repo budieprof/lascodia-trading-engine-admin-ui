@@ -147,4 +147,63 @@ describe('createPolledResource', () => {
     vi.advanceTimersByTime(60_000);
     expect(calls).toBe(1);
   });
+
+  // ── Review A12 (2026-11-16) ──
+
+  it('drops the previous scope’s value when the key changes and the new fetch fails', () => {
+    let scope = 1;
+    let fail = false;
+    const r = make(() => (fail ? throwError(() => new Error('x')) : of([`acct-${scope}`])), {
+      key: () => scope,
+    });
+    expect(r.value()).toEqual(['acct-1']);
+
+    scope = 2;
+    fail = true;
+    r.refresh();
+    // Never another scope's numbers as if they were this one's.
+    expect(r.value()).toBeNull();
+    expect(r.error()).toBeTruthy();
+    expect(r.loading()).toBe(false);
+  });
+
+  it('keeps the value across a failed refresh while the key is unchanged', () => {
+    let fail = false;
+    const r = make(() => (fail ? throwError(() => new Error('x')) : of([1])), { key: () => ({ a: [1] }) });
+    fail = true;
+    r.refresh();
+    expect(r.value()).toEqual([1]);
+  });
+
+  it('shows the new scope’s value once it arrives', () => {
+    let scope = 1;
+    const r = make(() => of([scope]), { key: () => scope });
+    scope = 2;
+    r.refresh();
+    expect(r.value()).toEqual([2]);
+  });
+
+  it('stays stopped when the tab becomes visible again, and on realtime events', () => {
+    let calls = 0;
+    const r = make(
+      () => {
+        calls++;
+        return of([calls]);
+      },
+      { refreshOn: ['positionOpened'] as RealtimeEventName[] },
+    );
+    expect(calls).toBe(1);
+    r.stop();
+    document.dispatchEvent(new Event('visibilitychange'));
+    vi.advanceTimersByTime(5_000);
+    realtime.emit('positionOpened');
+    vi.advanceTimersByTime(5_000);
+    expect(calls).toBe(1);
+
+    // An explicit refresh still fetches once, and restarts nothing.
+    r.refresh();
+    expect(calls).toBe(2);
+    vi.advanceTimersByTime(5_000);
+    expect(calls).toBe(2);
+  });
 });

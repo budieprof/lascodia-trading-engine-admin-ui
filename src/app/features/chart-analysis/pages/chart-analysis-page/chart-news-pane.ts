@@ -131,8 +131,14 @@ export class ChartNewsPane {
       .getFocus(d.symbol().toUpperCase())
       .pipe(takeUntilDestroyed(d.destroyRef))
       .subscribe({
-        next: (r) => this.newsFocus.set(r ?? null),
-        error: () => this.newsFocus.set(null),
+        // The same rule as the headlines: a slower reply for the previous symbol is dropped,
+        // or EURUSD's bias would sit under the GBPUSD chart.
+        next: (r) => {
+          if (n === this.newsSeq) this.newsFocus.set(r ?? null);
+        },
+        error: () => {
+          if (n === this.newsSeq) this.newsFocus.set(null);
+        },
       });
   }
 }

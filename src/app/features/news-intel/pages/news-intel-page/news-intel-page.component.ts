@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
+import { ApiError } from '@core/api/api.types';
 import { NewsIntelService } from '@core/services/news-intel.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -2245,9 +2246,10 @@ export class NewsIntelPageComponent {
         this.notice.set(msg);
         this.articles.refresh();
       },
-      error: () => {
+      error: (e: unknown) => {
         this.busyArticle.set(null);
-        this.error.set(`Could not re-queue article ${a.id}.`);
+        const why = e instanceof Error && e.message ? ` ${e.message}` : '';
+        this.error.set(`Could not re-queue article ${a.id}.${why}`);
       },
     });
   }
@@ -2402,10 +2404,19 @@ export class NewsIntelPageComponent {
           this.loadConfig();
           this.focus.refresh();
         },
-        error: () => {
+        error: (e: unknown) => {
           this.saving.set(false);
           this.pendingSwitch.set(null);
-          this.error.set('Save failed — the configuration was not changed.');
+          if (e instanceof ApiError && e.isApprovalPending) {
+            // Parked for a second approver: pending, not failed — and the edits are cleared so
+            // a second Save does not file a duplicate request.
+            this.saveMessages.set([e.message || 'Sent for approval — a second person must approve it.']);
+            if (opts?.clearEdits) this.resetConfig();
+            this.loadConfig();
+            return;
+          }
+          const why = e instanceof Error && e.message ? ` ${e.message}` : '';
+          this.error.set(`Save failed — the configuration was not changed.${why}`);
         },
       });
   }

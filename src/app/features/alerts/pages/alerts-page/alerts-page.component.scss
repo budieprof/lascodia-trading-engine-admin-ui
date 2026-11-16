@@ -683,3 +683,34 @@ textarea.input {
   padding-top: var(--space-3);
   border-top: 1px solid var(--border);
 }
+
+// Write-only secret inputs (engine-masked keys): an empty input + a set / not set badge.
+.secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+.secret-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+
+  &[data-set='true'] {
+    color: var(--profit, var(--success));
+    border-color: currentColor;
+  }
+}
+
+.ch-readonly {
+  margin: 0 0 8px;
+  font-size: 12px;
+}

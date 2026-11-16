@@ -566,7 +566,12 @@ export class ChartTradingComponent {
   readonly canApply = computed(() => {
     const a = this.action();
     if (!a || this.sending()) return false;
-    if (a.type === 'move' || a.type === 'close') return !!this.changePreview()?.canApply;
+    if (a.type === 'move') return !!this.changePreview()?.canApply;
+    if (a.type === 'close') {
+      // Only a preview of THIS quantity counts: an edit (valid or not) voids the previous answer.
+      const p = this.changePreview();
+      return !!p?.canApply && (p.closeLots === null || Math.abs(p.closeLots - a.lots) < 1e-9);
+    }
     if (a.type === 'orderEntry') return !!this.entryPreview()?.canApply;
     return true;
   });
@@ -841,8 +846,16 @@ export class ChartTradingComponent {
   setCloseLots(raw: string): void {
     const a = this.action();
     if (a?.type !== 'close') return;
-    const lots = Number(raw);
-    if (!Number.isFinite(lots) || lots <= 0) return;
+    // Whatever was typed, the previous answer no longer describes the dialog: drop it (and any
+    // check still in flight) so Apply stays off until a valid quantity has been re-checked.
+    ++this.previewSeq;
+    this.previewLoading.set(false);
+    this.changePreview.set(null);
+    const lots = raw.trim() === '' ? NaN : Number(raw);
+    if (!Number.isFinite(lots) || lots <= 0) {
+      this.actionError.set(`Enter a positive ${this.qtyWordTitle().toLowerCase()} to close.`);
+      return;
+    }
     const qty = this.closeQuantity(a.positionId, lots);
     if (qty === null) {
       this.actionError.set(this.closeStepProblem(lots));

@@ -130,7 +130,7 @@ const fmt = (n: number): string => numberFmt.format(n);
               </select>
             </app-form-field>
             <app-form-field
-              label="Scheduled"
+              label="Scheduled (UTC)"
               [required]="true"
               [control]="createForm.controls.scheduledAt"
             >
@@ -1178,12 +1178,19 @@ export class EconomicEventsPageComponent {
 
   submitCreate(): void {
     const v = this.createForm.getRawValue();
+    if (!datetimeLocalAsUtcIso(v.scheduledAt)) {
+      this.notifications.error('Enter a valid scheduled time (UTC).');
+      return;
+    }
     this.busy.set(true);
     const request: CreateEconomicEventRequest = {
       title: v.title,
       currency: v.currency,
       impact: v.impact,
-      scheduledAt: new Date(v.scheduledAt).toISOString(),
+      // The page speaks UTC and the field is labelled UTC: read the zone-less datetime-local value
+      // as UTC. `new Date(raw)` read it as BROWSER-local time — an operator in WAT who typed the
+      // calendar's 13:30 UTC created the event at 12:30 UTC.
+      scheduledAt: datetimeLocalAsUtcIso(v.scheduledAt),
       source: v.source,
       forecast: v.forecast || null,
       previous: v.previous || null,
@@ -1256,4 +1263,14 @@ function escapeHtml(v: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * A `datetime-local` value ("2026-11-16T13:30" or with seconds) read as UTC, as an ISO string;
+ * '' when it does not parse.
+ */
+export function datetimeLocalAsUtcIso(raw: string): string {
+  if (!raw) return '';
+  const d = new Date(`${raw.length === 16 ? `${raw}:00` : raw}Z`);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }

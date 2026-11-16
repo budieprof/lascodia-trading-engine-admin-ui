@@ -59,8 +59,18 @@ export function renderMarkdown(value: string): string {
   return render(escapeHtml(value));
 }
 
+/**
+ * Quotes are escaped too: every fragment the inline rules emit is built from escaped text, so
+ * no model-supplied character can ever close an attribute — even if a rule bug let a stashed
+ * fragment land inside one (the 2026-11-16 code-span-in-href finding).
+ */
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -126,11 +136,21 @@ function alignAttr(align: string | null): string {
 /**
  * Links are the only rule that puts model text into an ATTRIBUTE rather than between
  * tags, so it is the only one that can escape the "escape everything first" guarantee.
- * Two independent limits: the scheme must be http/https (blocks `javascript:`, `data:`,
- * and protocol-relative `//host`), and the value is attribute-escaped on the way out —
- * escapeHtml deliberately leaves quotes alone, which would otherwise close the attribute.
+ * Three independent limits: the scheme must be http/https (blocks `javascript:`, `data:`,
+ * and protocol-relative `//host`), the value may not carry a stash sentinel (see
+ * {@link attrSafe}), and it is attribute-escaped on the way out.
  */
 const SAFE_URL = /^https?:\/\/[^\s]+$/i;
+
+/**
+ * A value bound for an attribute (href, src, alt) must not contain a stash sentinel: the
+ * sentinel is replaced by generated HTML AFTER attribute escaping, so a code span inside a
+ * URL (`[t](https://a/\`x"onclick=…\`)`) would otherwise put that markup — and whatever the
+ * code span carried — straight into the attribute. Such a construct is left as literal text.
+ */
+function attrSafe(value: string): boolean {
+  return !value.includes(SENTINEL);
+}
 
 function attrEscape(url: string): string {
   return url.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -200,7 +220,7 @@ function inline(s: string): string {
     })
     // Images before links: they share the bracket syntax and differ only by the leading !.
     .replace(/!\[([^\]]*)\]\(([^()\s]+)\)/g, (whole, alt: string, url: string) =>
-      SAFE_URL.test(url)
+      SAFE_URL.test(url) && attrSafe(url) && attrSafe(alt)
         ? stash(
             `<img src="${attrEscape(url)}" alt="${attrEscape(alt)}" loading="lazy" class="md-img">`,
           )
@@ -208,14 +228,15 @@ function inline(s: string): string {
     )
     // [text](url) — an unsafe or malformed URL is left as the literal text it was.
     .replace(/\[([^\]\n]+)\]\(([^()\s]+)\)/g, (whole, text: string, url: string) =>
-      SAFE_URL.test(url) ? stash(anchor(url, text)) : whole,
+      SAFE_URL.test(url) && attrSafe(url) ? stash(anchor(url, text)) : whole,
     )
-    // Bare URLs. Quotes and angle brackets are excluded from the match so a URL can never
-    // reach attrEscape carrying an attribute terminator.
-    .replace(/https?:\/\/[^\s<>"']+/gi, (url: string) => {
+    // Bare URLs. Quotes (raw or escaped) and angle brackets end the match so a URL can never
+    // reach attrEscape carrying an attribute terminator; a URL running into a stashed
+    // fragment stays literal (attrSafe).
+    .replace(/https?:\/\/(?:(?!&quot;|&#39;)[^\s<>"'])+/gi, (url: string) => {
       const tail = URL_TAIL.exec(url)?.[0] ?? '';
       const link = tail ? url.slice(0, -tail.length) : url;
-      return SAFE_URL.test(link) ? stash(anchor(link, link)) + tail : url;
+      return SAFE_URL.test(link) && attrSafe(link) ? stash(anchor(link, link)) + tail : url;
     })
     .replace(/~~(?=\S)((?:[^~]|~(?!~))+?)~~/g, '<del>$1</del>')
     // Triple markers first, else the bold rule below claims two of the three asterisks.

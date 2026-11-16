@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import type { Subscription } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
@@ -585,10 +586,19 @@ export class PlatformOpsPageComponent {
   });
 
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollSub: Subscription | null = null;
+  private destroyed = false;
+  /** Consecutive failed job reads before following stops (review O9). */
+  private static readonly MAX_POLL_ERRORS = 12;
 
   constructor() {
     this.ops.reload();
-    inject(DestroyRef).onDestroy(() => this.pollTimer && clearTimeout(this.pollTimer));
+    inject(DestroyRef).onDestroy(() => {
+      // A poll still in flight when the page goes must not re-arm the timer (review O9).
+      this.destroyed = true;
+      this.pollSub?.unsubscribe();
+      if (this.pollTimer) clearTimeout(this.pollTimer);
+    });
   }
 
   refreshAll(): void {
@@ -720,17 +730,38 @@ export class PlatformOpsPageComponent {
   /** Polls the job every 2 s until it finishes, showing its streamed progress; then reloads the page's state. */
   private follow(jobId: string): void {
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollSub?.unsubscribe();
+    let errors = 0;
+    const arm = (ms: number) => {
+      if (this.destroyed) return;
+      this.pollTimer = setTimeout(tick, ms);
+    };
     const tick = () => {
-      this.api.job(jobId).subscribe({
+      this.pollTimer = null;
+      if (this.destroyed) return;
+      this.pollSub = this.api.job(jobId).subscribe({
         next: (j) => {
+          errors = 0;
           this.followed.set(j);
           if (isFinished(j.status)) {
             this.ops.reload();
             return;
           }
-          this.pollTimer = setTimeout(tick, 2000);
+          arm(2000);
         },
-        error: () => (this.pollTimer = setTimeout(tick, 5000)),
+        error: () => {
+          // Bounded: an engine that stays unreachable must not be polled forever (one minute of
+          // retries at 5 s), and the operator is told following stopped rather than left waiting.
+          if (++errors >= PlatformOpsPageComponent.MAX_POLL_ERRORS) {
+            if (!this.destroyed) {
+              this.notice.set(
+                `Stopped following job ${jobId}: its progress could not be read. Reload the page to check on it.`,
+              );
+            }
+            return;
+          }
+          arm(5000);
+        },
       });
     };
     tick();

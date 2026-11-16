@@ -130,7 +130,12 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
                 Audited at {{ at | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC ·
               }
               {{ cleanCount() }} all passed · {{ partialCount() }} passed with skips ·
-              {{ failedPairs() }} failed — click a row for its details
+              {{ failedPairs() }} failed
+              @if (sweepErrors().length) {
+                ·
+                <span class="errored">{{ sweepErrors().length }} errored (audit did not run)</span>
+              }
+              — click a row for its details
             </span>
           </header>
           <div class="table-wrap">
@@ -168,6 +173,19 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
                       }}</span>
                     </td>
                     <td class="num">{{ r.durationMs | number }} ms</td>
+                  </tr>
+                }
+                <!-- A pair whose audit call failed is NOT a pass: it is listed, never dropped. -->
+                @for (e of sweepErrors(); track e.symbol + e.timeframe) {
+                  <tr class="row errored-row">
+                    <td class="pair">{{ e.symbol }} · {{ e.timeframe }}</td>
+                    <td [attr.colspan]="tests.length">
+                      <span class="errored">Audit did not run — {{ e.message }}</span>
+                    </td>
+                    <td>
+                      <span class="verdict" data-verdict="errored">Errored</span>
+                    </td>
+                    <td class="num">—</td>
                   </tr>
                 }
                 @if (sweeping()) {
@@ -475,6 +493,10 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
         color: var(--profit);
       }
       .cell[data-status='Failed'],
+      .errored,
+      .verdict[data-verdict='errored'] {
+        color: var(--warning, #b7791f);
+      }
       .verdict[data-verdict='failed'] {
         color: var(--loss);
       }
@@ -567,7 +589,9 @@ export class LookAheadAuditPageComponent {
   readonly sweeping = signal(false);
   readonly sweepRows = signal<LookAheadAuditReport[]>([]);
   readonly sweepAt = signal<string | null>(null);
-  readonly sweepDone = computed(() => this.sweepRows().length);
+  /** Pairs whose audit call failed or was refused — counted, never silently dropped. */
+  readonly sweepErrors = signal<{ symbol: string; timeframe: string; message: string }[]>([]);
+  readonly sweepDone = computed(() => this.sweepRows().length + this.sweepErrors().length);
   readonly cleanCount = computed(
     () => this.sweepRows().filter((r) => verdictOf(r) === 'clean').length,
   );
@@ -616,19 +640,36 @@ export class LookAheadAuditPageComponent {
     if (this.sweeping() || pairs.length === 0) return;
     this.sweeping.set(true);
     this.sweepRows.set([]);
+    this.sweepErrors.set([]);
     this.sweepAt.set(new Date().toISOString());
     from(pairs)
       .pipe(
         concatMap((p) =>
-          this.svc.runAudit({ symbol: p.symbol, timeframe: p.timeframe }).pipe(
-            map((r) => (r.status && r.data ? r.data : null)),
-            catchError(() => of(null)),
+          this.svc.runAudit({ symbol: p.symbol, timeframe: p.timeframe }, { silent: true }).pipe(
+            map((r) =>
+              r.status && r.data
+                ? { pair: p, report: r.data, error: null }
+                : { pair: p, report: null, error: r.message || 'the engine refused the audit' },
+            ),
+            catchError((err: unknown) =>
+              of({
+                pair: p,
+                report: null,
+                error: err instanceof Error && err.message ? err.message : 'the audit call failed',
+              }),
+            ),
           ),
         ),
       )
       .subscribe({
-        next: (r) => {
-          if (!r) return;
+        next: ({ pair, report: r, error }) => {
+          if (!r) {
+            this.sweepErrors.update((rows) => [
+              ...rows,
+              { symbol: pair.symbol, timeframe: pair.timeframe, message: error ?? 'unknown error' },
+            ]);
+            return;
+          }
           this.sweepRows.update((rows) => [...rows, r]);
           if (!this.report()) this.report.set(r);
         },

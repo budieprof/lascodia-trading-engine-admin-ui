@@ -191,10 +191,15 @@ type PendingAction =
       } @else if (board.error() && !data()) {
         <app-error-state
           title="Could not load monitors"
-          message="The engine did not answer. Watches may be armed that are not shown here."
+          [message]="boardErrorText()"
           (retry)="board.refresh()"
         />
       } @else if (data(); as d) {
+        @if (board.error()) {
+          <div class="panel-loading" role="alert">
+            Refresh failed — showing the last board loaded for these filters. {{ boardErrorText() }}
+          </div>
+        }
         <!-- ── KPI band ───────────────────────────────────────────────────── -->
         <div class="kpis">
           <button type="button" class="kpi" (click)="setStatus('Active')" [class.on]="statusFilter() === 'Active'">
@@ -291,7 +296,10 @@ type PendingAction =
             @if (insightsRes.loading() && !ins()) {
               <div class="panel-loading">Loading analytics…</div>
             } @else if (!ins()) {
-              <div class="panel-loading">Analytics are unavailable — the engine did not answer.</div>
+              <div class="panel-loading">
+                Analytics are unavailable —
+                {{ insightsRes.error() ? errorText(insightsRes.error()) : 'the engine did not answer.' }}
+              </div>
             } @else {
               <app-monitor-insights [insights]="ins()" [activeSymbol]="symbol()" (symbolPicked)="setSymbol($event)" />
             }
@@ -1756,27 +1764,44 @@ export class AnalysisMonitorsPageComponent {
           pageSize: 100,
           activityLimit: 80,
         })
-        .pipe(
-          map((r) => (r?.status && r.data ? r.data : null)),
-          catchError(() => of(null)),
-        ),
+        // A refusal or a failed read is an ERROR, not "no board": mapping it to null left the
+        // previous filter's rows on screen (or nothing) with no error state at all.
+        .pipe(map((r) => envelopeData(r, 'The engine refused the monitor board read.'))),
     {
       // Push-driven; the interval only covers a missed push. 30 s keeps "last check" ages honest.
       intervalMs: 30_000,
+      // A filter change drops the rows of the previous filter at once, so a failed read for the
+      // new filter can never present them as its answer.
+      key: () => [
+        this.statusFilter(),
+        this.search(),
+        this.symbol(),
+        this.origin(),
+        this.mode(),
+        this.page(),
+      ],
       refreshOn: ['analysisMonitorFired', 'analysisMonitorInvalidated', 'analysisMonitorChanged', 'analysisMonitorEscalated'],
     },
   );
 
   protected readonly insightsRes = createPolledResource(
     () =>
-      this.svc.getInsights(this.days(), this.symbol() || null, this.origin() || null).pipe(
-        map((r) => (r?.status && r.data ? r.data : null)),
-        catchError(() => of(null)),
-      ),
-    { intervalMs: 300_000, refreshOn: ['analysisMonitorFired', 'analysisMonitorInvalidated'] },
+      this.svc
+        .getInsights(this.days(), this.symbol() || null, this.origin() || null)
+        .pipe(map((r) => envelopeData(r, 'The engine refused the monitor analytics read.'))),
+    {
+      intervalMs: 300_000,
+      refreshOn: ['analysisMonitorFired', 'analysisMonitorInvalidated'],
+      key: () => [this.days(), this.symbol(), this.origin()],
+    },
   );
 
   protected readonly data = this.board.value;
+  protected readonly boardErrorText = computed(
+    () =>
+      `${errorText(this.board.error())} Watches may be armed that are not shown here.`,
+  );
+  protected readonly errorText = errorText;
   protected readonly ins = this.insightsRes.value;
   protected readonly counters = computed(() => this.data()?.counters ?? null);
 
@@ -2475,4 +2500,17 @@ export class AnalysisMonitorsPageComponent {
     if (h < 48) return `${h.toFixed(h < 10 ? 1 : 0)}h`;
     return `${(h / 24).toFixed(1)}d`;
   }
+}
+
+/** `data` of a successful envelope; anything else throws so the polled resource records an error. */
+function envelopeData<T>(r: { status?: boolean; data?: T | null; message?: string | null } | null, refused: string): T {
+  if (r?.status && r.data) return r.data;
+  throw new Error(r?.message || refused);
+}
+
+/** One sentence for a load failure. */
+function errorText(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  const msg = (err as { error?: { message?: string }; message?: string } | null)?.error?.message;
+  return msg || 'The engine did not answer.';
 }

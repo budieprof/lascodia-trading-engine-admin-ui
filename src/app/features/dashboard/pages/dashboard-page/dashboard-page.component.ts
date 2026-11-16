@@ -462,6 +462,7 @@ interface ActivityEntry {
           }
         </section>
 
+        @if (canSeeWorkers()) {
         <section class="card ops-workers">
           <header class="card-head row">
             <h3>Worker Health</h3>
@@ -517,6 +518,7 @@ interface ActivityEntry {
             <div class="empty">No worker data yet</div>
           }
         </section>
+        }
 
         <section class="card flush ops-alerts">
           <header class="card-head row">
@@ -1867,6 +1869,14 @@ export class DashboardPageComponent implements OnInit {
   // tile at 0 no matter how many EAs were attached.
   readonly eaInstances = this.accountScope.eaInstances;
   readonly workers = signal<WorkerHealthDto[]>([]);
+  /** `GET health/workers` is platform staff / House only (platform.infrastructure.manage). */
+  protected readonly canSeeWorkers = computed(() =>
+    this.auth.hasPermission(Permission.PlatformInfrastructureManage),
+  );
+  /** `GET ea/instances` needs access.operator. */
+  protected readonly canSeeEaInstances = computed(() =>
+    this.auth.hasPermission(Permission.AccessOperator),
+  );
   // Models flagged because in-sample CV Sharpe is materially higher than rolling
   // 7d live Sharpe — surfaced as a dashboard pin so operators see overfit before
   // drift workers get to it on lagging metrics.
@@ -2053,20 +2063,26 @@ export class DashboardPageComponent implements OnInit {
         value: this.pendingSignalCount() == null ? '—' : String(this.pendingSignalCount()),
         tone: (this.pendingSignalCount() ?? 0) > 0 ? 'warn' : '',
       },
-      {
-        label: 'EA connections',
-        value: String(this.activeEaCount()),
-        tone: this.activeEaCount() === 0 && this.liveAccounts().length > 0 ? 'bad' : '',
-      },
-      {
-        label: 'Workers OK',
-        value: `${this.healthyWorkerCount()} / ${this.totalWorkerCount()}`,
-        tone: failed > 0 ? 'bad' : degraded > 0 || stale > 0 ? 'warn' : '',
-        hint:
-          this.totalWorkerCount() === 0
-            ? undefined
-            : `${this.healthyWorkerCount()} healthy · ${degraded} degraded · ${failed} failed · ${idle} idle · ${stale} stale`,
-      },
+      // Review O5: `GET ea/instances` needs access.operator — without it the figure is unknown, not 0.
+      this.canSeeEaInstances()
+        ? {
+            label: 'EA connections',
+            value: String(this.activeEaCount()),
+            tone: this.activeEaCount() === 0 && this.liveAccounts().length > 0 ? 'bad' : '',
+          }
+        : { label: 'EA connections', value: '—', tone: '', hint: 'Not available to your role' },
+      // Review O2: `GET health/workers` needs platform.infrastructure.manage.
+      this.canSeeWorkers()
+        ? {
+            label: 'Workers OK',
+            value: `${this.healthyWorkerCount()} / ${this.totalWorkerCount()}`,
+            tone: failed > 0 ? 'bad' : degraded > 0 || stale > 0 ? 'warn' : '',
+            hint:
+              this.totalWorkerCount() === 0
+                ? undefined
+                : `${this.healthyWorkerCount()} healthy · ${degraded} degraded · ${failed} failed · ${idle} idle · ${stale} stale`,
+          }
+        : { label: 'Workers OK', value: '—', tone: '', hint: 'Not available to your role' },
     ];
   });
 
@@ -2703,11 +2719,19 @@ export class DashboardPageComponent implements OnInit {
         map((r) => r.data ?? []),
         catchError(() => of([] as StrategyAllocationDto[])),
       ),
-      eaInstances: this.eaService.list().pipe(
-        map((r) => r.data ?? []),
-        catchError(() => of([] as EAInstanceDto[])),
-      ),
-      workers: this.workersService.list().pipe(catchError(() => of([] as WorkerHealthDto[]))),
+      // null = not read (no permission, or the read failed): the previous value stays. Writing []
+      // on a failure emptied the account scope's live set and widened every scoped query.
+      eaInstances: this.canSeeEaInstances()
+        ? this.eaService.list().pipe(
+            map((r) => (r?.status === false || !Array.isArray(r?.data) ? null : r.data)),
+            catchError(() => of(null as EAInstanceDto[] | null)),
+          )
+        : of(null as EAInstanceDto[] | null),
+      workers: this.canSeeWorkers()
+        ? this.workersService
+            .list({ silent: true })
+            .pipe(catchError(() => of(null as WorkerHealthDto[] | null)))
+        : of(null as WorkerHealthDto[] | null),
       // Active models only, newest first: one row (the "latest") plus the
       // pager total (the count).
       mlModels: this.mlService
@@ -2792,7 +2816,7 @@ export class DashboardPageComponent implements OnInit {
         // tiles light up immediately on first paint instead of waiting
         // for the global scope service's 30s tick.
         if (accounts.length > 0) this.accountScope.accounts.set(accounts);
-        this.accountScope.eaInstances.set(eaInstances);
+        if (eaInstances !== null) this.accountScope.eaInstances.set(eaInstances);
         // Selection-staleness fallback is owned by AccountScopeService —
         // it already snaps to the real-aggregate when the persisted
         // selection points at a no-longer-live account. Account Equity is a
@@ -2802,7 +2826,7 @@ export class DashboardPageComponent implements OnInit {
         this.allocations.set(allocations);
         // eaInstances was set above (before the account/equity derivations)
         // so liveAccounts() resolves correctly on the same tick.
-        this.workers.set(workers);
+        if (workers !== null) this.workers.set(workers);
         this.activeMlModelCount.set(mlModels?.total ?? null);
         this.mostRecentMlModel.set(mlModels?.latest ?? null);
 

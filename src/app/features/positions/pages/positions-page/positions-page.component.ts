@@ -12,7 +12,16 @@ import {
   effect,
   untracked,
 } from '@angular/core';
-import { catchError, forkJoin, map, merge, Observable, of, throttleTime } from 'rxjs';
+import {
+  catchError,
+  forkJoin,
+  map,
+  merge,
+  Observable,
+  of,
+  type OperatorFunction,
+  throttleTime,
+} from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import { configHashColumn } from '@features/strategies/util/config-hash-column';
 import type { EChartsOption } from 'echarts';
@@ -55,6 +64,18 @@ import {
   template: `
     <div class="page">
       <app-page-header title="Positions" subtitle="Monitor open and closed trading positions" />
+
+      @if (summaryError(); as se) {
+        <p class="summary-error" role="alert">
+          Could not refresh the position summary ({{ se }}).
+          {{
+            summaryEverLoaded()
+              ? 'KPIs and charts show the last good data.'
+              : 'KPIs and charts are not loaded — they are not zero.'
+          }}
+          <button type="button" class="summary-retry" (click)="retrySummary()">Retry</button>
+        </p>
+      }
 
       <!-- Account scope picker — operator wanted explicit per-account
            switching on this page (the global header dropdown also works,
@@ -644,6 +665,25 @@ import {
       .page {
         padding: var(--space-2) 0;
       }
+      .summary-error {
+        margin: 0 0 var(--space-3);
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        background: rgba(255, 59, 48, 0.08);
+        border-left: 3px solid var(--loss);
+        font-size: var(--text-sm);
+      }
+      .summary-retry {
+        margin-left: 6px;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--accent);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: underline;
+      }
 
       /* Tile rows wrap via auto-fit instead of forcing eight (or nine) fixed
          columns past the viewport; align-items:start stops short tiles from
@@ -1167,6 +1207,9 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   readonly openPositions = signal<PositionDto[]>([], { equal: structuralEqual });
   readonly closedPositions = signal<PositionDto[]>([], { equal: structuralEqual });
   readonly analyticsLoading = signal(true);
+  /** The summary window failed to refresh; the last good open/closed sets stay on screen. */
+  readonly summaryError = signal<string | null>(null);
+  readonly summaryEverLoaded = signal(false);
 
   // ── Tabs ──
   readonly tabs: TabItem[] = [
@@ -2767,14 +2810,28 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const scopedIds = this.accountScope.accountIds();
     const base = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : {};
 
+    // A failed half must NOT read as "no positions" (that zeroes every KPI and the open book):
+    // it resolves to null, the previous set is kept, and the error banner says so.
+    const failures: string[] = [];
+    const rows = (): OperatorFunction<
+      { status?: boolean; message?: string | null; data?: { data?: PositionDto[] } | null },
+      PositionDto[]
+    > =>
+      map((r) => {
+        if (r?.status === false) throw new Error(r.message || 'the engine refused the request');
+        return r?.data?.data ?? [];
+      });
+    const recover = (label: string): OperatorFunction<PositionDto[], PositionDto[] | null> =>
+      catchError((e: { error?: { message?: string }; message?: string }) => {
+        failures.push(`${label}: ${e?.error?.message ?? e?.message ?? 'request failed'}`);
+        return of(null);
+      });
+
     this.analyticsLoading.set(true);
     forkJoin({
       open: this.positionsService
         .list({ currentPage: 1, itemCountPerPage: 500, filter: { ...base, status: 'Open' } })
-        .pipe(
-          map((r) => r.data?.data ?? []),
-          catchError(() => of([] as PositionDto[])),
-        ),
+        .pipe(rows(), recover('open')),
       closed: this.positionsService
         .list({
           currentPage: 1,
@@ -2783,19 +2840,23 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           sortBy: 'closedAt',
           sortDirection: 'desc',
         })
-        .pipe(
-          map((r) => r.data?.data ?? []),
-          catchError(() => of([] as PositionDto[])),
-        ),
+        .pipe(rows(), recover('closed')),
     })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(({ open, closed }) => {
         // Defensive status re-filter: the status query filter may be a no-op on
         // older engine builds, so we still partition client-side.
-        this.openPositions.set(open.filter((p) => p.status === 'Open' || p.status === 'Closing'));
-        this.closedPositions.set(closed.filter((p) => p.status === 'Closed'));
+        if (open)
+          this.openPositions.set(open.filter((p) => p.status === 'Open' || p.status === 'Closing'));
+        if (closed) this.closedPositions.set(closed.filter((p) => p.status === 'Closed'));
+        if (open && closed) this.summaryEverLoaded.set(true);
+        this.summaryError.set(failures.length ? failures.join('; ') : null);
         this.analyticsLoading.set(false);
       });
+  }
+
+  retrySummary(): void {
+    this.loadSummaryData();
   }
 
   private emptyChartOption(text: string): EChartsOption {

@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
-import { DeadLetterDto, PagedData, PagerRequest, ResponseData } from '@core/api/api.types';
+import { ApiService, type ApiCallOptions } from '@core/api/api.service';
+import { ApiError, DeadLetterDto, PagedData, PagerRequest, ResponseData } from '@core/api/api.types';
 
 /**
  * What `/dead-letter/list` actually puts on the wire (DeadLetterEventDto.cs).
@@ -51,14 +51,28 @@ function toDeadLetterDto(row: DeadLetterWireRow): DeadLetterDto {
 export class DeadLetterService {
   private readonly api = inject(ApiService);
 
-  list(params: PagerRequest): Observable<ResponseData<PagedData<DeadLetterDto>>> {
+  /**
+   * Throws {@link ApiError} on an envelope refusal (`status: false`): it used to come back as
+   * `data: null`, which every page read as "queue clean" (review O11). ApiError is not toasted by
+   * the interceptors — callers show it (the list page's error state, the overview's panels).
+   */
+  list(params: PagerRequest, opts?: ApiCallOptions): Observable<ResponseData<PagedData<DeadLetterDto>>> {
     return this.api
-      .post<ResponseData<PagedData<DeadLetterWireRow>>>(`/dead-letter/list`, params)
+      .post<ResponseData<PagedData<DeadLetterWireRow>>>(`/dead-letter/list`, params, opts)
       .pipe(
-        map((res) => ({
-          ...res,
-          data: res.data ? { ...res.data, data: (res.data.data ?? []).map(toDeadLetterDto) } : null,
-        })),
+        map((res) => {
+          if (!res || res.status === false) {
+            throw new ApiError(
+              res?.responseCode ?? 'UNKNOWN',
+              res?.message || 'The dead-letter queue could not be read.',
+              res as ResponseData<unknown>,
+            );
+          }
+          return {
+            ...res,
+            data: res.data ? { ...res.data, data: (res.data.data ?? []).map(toDeadLetterDto) } : null,
+          };
+        }),
       );
   }
 

@@ -39,3 +39,49 @@ export function readTextFile(file: File): Promise<string> {
     reader.readAsText(file);
   });
 }
+
+/**
+ * Raster image types a same-origin blob URL may be OPENED as (review A11, 2026-11-16). Anything
+ * else — SVG (scriptable), HTML, XML, PDF, unknown — opened from a blob: URL runs as a document of
+ * the console's own origin, with its session. Those are downloaded instead.
+ */
+const INLINE_SAFE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+/** The bare media type when a blob of `type` is safe to open inline, else null. */
+export function inlineSafeType(type: string | null | undefined): string | null {
+  const bare = (type ?? '').split(';')[0].trim().toLowerCase();
+  return INLINE_SAFE_IMAGE_TYPES.has(bare) ? bare : null;
+}
+
+/** Saves a blob through a transient `<a download>`, as opaque bytes. */
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const opaque = new Blob([blob], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(opaque);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = sanitiseFileName(fileName);
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * Opens a server-supplied blob in a new tab only when it is a raster image (re-wrapped with
+ * exactly that type, so no parameter rides along); everything else is downloaded as
+ * `application/octet-stream`. Never trust the server's content type to decide what runs.
+ */
+export function openOrDownloadBlob(blob: Blob, fileName: string): 'opened' | 'downloaded' {
+  const type = inlineSafeType(blob.type);
+  if (!type) {
+    downloadBlob(blob, fileName);
+    return 'downloaded';
+  }
+  const url = URL.createObjectURL(new Blob([blob], { type }));
+  window.open(url, '_blank', 'noopener');
+  // The tab has the bytes by now; holding the object URL would pin the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return 'opened';
+}

@@ -8,6 +8,7 @@ import { SUPPRESS_ERROR_TOAST } from '../api/api.service';
 import { AuthResponseCode, CSRF_HEADER } from './bff.types';
 import { CSRF_RETRIED, SKIP_SESSION_HANDLING } from './http-context';
 import { StepUpService } from './step-up.service';
+import { isTenantChangedError } from './expected-tenant.interceptor';
 import { quotaRefusalLink, quotaRefusalMessage } from '../plans/quota-refusal';
 import { entitlementRefusalMessage } from '../market-data/entitlement-refusal';
 
@@ -105,6 +106,9 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
   const run = (req: HttpRequest<unknown>): Observable<HttpEvent<unknown>> =>
     next(req).pipe(
       catchError((error: HttpErrorResponse) => {
+        // Another tab moved the shared session to a different organisation: the expected-tenant
+        // interceptor already said so and is reloading the console — no second toast.
+        if (isTenantChangedError(error)) return throwError(() => error);
         if (stepUp) {
           const handled = handleBffAuthError(
             req,

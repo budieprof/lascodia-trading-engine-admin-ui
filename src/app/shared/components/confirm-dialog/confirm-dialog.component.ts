@@ -1,4 +1,4 @@
-import { Component, input, output, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ChangeDetectionStrategy, effect, input, output, signal, untracked } from '@angular/core';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 @Component({
@@ -50,7 +50,7 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
               [class.btn-destructive]="confirmVariant() === 'destructive'"
               [class.btn-primary]="confirmVariant() === 'primary'"
               (click)="onConfirm()"
-              [disabled]="loading()"
+              [disabled]="loading() || latched()"
             >
               @if (loading()) {
                 <span class="spinner" aria-label="Loading"></span>
@@ -216,9 +216,60 @@ export class ConfirmDialogComponent {
   confirm = output<void>();
   cancelled = output<void>();
 
+  /**
+   * Set by the first confirm and held until the dialog closes or reopens, or the caller's action
+   * settles (`loading` true → false, so a failed action can be retried). A double click, or a
+   * click while `loading` is up, used to emit twice — two kill-switch toggles, two flattens.
+   * A caller that never raises `loading` gets the latch for {@link LATCH_FALLBACK_MS}.
+   */
+  protected readonly latched = signal(false);
+  static readonly LATCH_FALLBACK_MS = 1500;
+  private latchTimer: ReturnType<typeof setTimeout> | null = null;
+  private sawLoading = false;
+
+  constructor() {
+    // Opening or closing starts a fresh confirmation.
+    effect(() => {
+      this.open();
+      untracked(() => this.release());
+    });
+    // The caller's action settled: allow another attempt (e.g. after an error kept it open).
+    effect(() => {
+      const loading = this.loading();
+      untracked(() => {
+        if (loading) {
+          this.sawLoading = true;
+          this.clearTimer();
+        } else if (this.sawLoading) {
+          this.release();
+        }
+      });
+    });
+  }
+
   onConfirm() {
+    if (this.loading() || this.latched()) return;
+    this.latched.set(true);
+    this.latchTimer = setTimeout(() => {
+      // Only for callers that never raised `loading` for this confirmation.
+      if (!this.sawLoading) this.release();
+    }, ConfirmDialogComponent.LATCH_FALLBACK_MS);
     this.confirm.emit();
   }
+
+  private release(): void {
+    this.clearTimer();
+    this.sawLoading = false;
+    this.latched.set(false);
+  }
+
+  private clearTimer(): void {
+    if (this.latchTimer !== null) {
+      clearTimeout(this.latchTimer);
+      this.latchTimer = null;
+    }
+  }
+
   onCancel() {
     // Escape and the backdrop must not abandon an action that is already in flight — the
     // Cancel button is disabled for the same reason.

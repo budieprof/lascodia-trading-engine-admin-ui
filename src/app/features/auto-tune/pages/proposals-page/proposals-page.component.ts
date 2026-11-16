@@ -12,6 +12,8 @@ import { RouterLink } from '@angular/router';
 import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { AutoTuneProposalDto, AutoTuneProposalStatus } from '@core/api/api.types';
@@ -203,7 +205,7 @@ const SUMMARY_WINDOW = 200;
                       <button type="button" class="link" (click)="toggleExpand(p.id)">
                         {{ expandedId() === p.id ? 'Hide' : 'Inspect' }}
                       </button>
-                      @if (p.status === 'Pending') {
+                      @if (p.status === 'Pending' && canManage()) {
                         <button
                           type="button"
                           class="action ok"
@@ -652,6 +654,9 @@ const SUMMARY_WINDOW = 200;
 })
 export class AutoTuneProposalsPageComponent {
   private readonly autoTune = inject(AutoTuneService);
+  private readonly auth = inject(AuthService);
+  /** Apply/reject need platform.engine.manage on the engine; without it proposals are read-only. */
+  readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
   private readonly auditTrail = inject(AuditTrailService);
   private readonly notifications = inject(NotificationService);
 

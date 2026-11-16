@@ -20,7 +20,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, forkJoin, merge, of, throttleTime } from 'rxjs';
+import { catchError, forkJoin, merge, of, throttleTime, throwError } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import type { OrderDto, PagedData, PagerRequest } from '@core/api/api.types';
 
@@ -89,6 +89,16 @@ interface OrdersViewState {
           @case ('all') {
             <!-- Summary Metrics — 8 dense tiles (two even rows of four), recent-orders-scoped
                  (last 500). Zero counts stay neutral grey so colour only marks something to look at. -->
+            @if (recentError(); as re) {
+              <p class="load-error" role="alert">
+                Could not load the recent-orders window ({{ re }}).
+                {{
+                  recentEverLoaded()
+                    ? 'The tiles and charts show the last good data.'
+                    : 'The tiles and charts are not loaded — their zeros are not real.'
+                }}
+              </p>
+            }
             <div class="metrics-strip">
               <app-metric-card
                 label="Orders (recent window)"
@@ -172,6 +182,14 @@ interface OrdersViewState {
                     </button>
                   }
                 </div>
+                @if (statusTotalsFailed()) {
+                  <span
+                    class="chip-count-error"
+                    role="status"
+                    title="Some status counts could not be loaded from the engine; those chips show no number."
+                    >counts unavailable</span
+                  >
+                }
                 @if (hasActiveFilters()) {
                   <button type="button" class="chip-clear" (click)="clearFilters()">
                     Clear filters
@@ -263,6 +281,11 @@ interface OrdersViewState {
             </div>
 
             <!-- Data Table -->
+            @if (tableError(); as te) {
+              <p class="load-error" role="alert">
+                Could not load orders ({{ te }}) — the table shows the last rows it received.
+              </p>
+            }
             <app-data-table
               #ordersTable
               [columnDefs]="columns"
@@ -800,6 +823,20 @@ interface OrdersViewState {
       .chip.active .chip-count {
         color: var(--text-secondary);
       }
+      .load-error {
+        margin: 0 0 var(--space-3);
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        background: rgba(255, 59, 48, 0.08);
+        border-left: 3px solid var(--loss);
+        font-size: var(--text-sm);
+      }
+      .chip-count-error {
+        align-self: center;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--loss);
+      }
       .chip-clear {
         height: 28px;
         padding: 0 12px;
@@ -1212,6 +1249,13 @@ export class OrdersPageComponent {
    * one failed), and the chip then shows no number rather than a wrong one.
    */
   private readonly statusTotals = signal<Record<string, number | null>>({});
+  /** At least one chip count failed — one indicator, not a silent "—" per chip. */
+  readonly statusTotalsFailed = signal(false);
+  /** The recent-orders window (KPIs + charts) failed; the last good window stays. */
+  readonly recentError = signal<string | null>(null);
+  readonly recentEverLoaded = signal(false);
+  /** The paged table's last fetch failed (transport or status:false). */
+  readonly tableError = signal<string | null>(null);
 
   statusCount(s: string): number | null {
     return this.statusTotals()[s] ?? null;
@@ -1250,7 +1294,10 @@ export class OrdersPageComponent {
           ),
       ]),
     );
-    forkJoin(calls).subscribe((totals) => this.statusTotals.set(totals));
+    forkJoin(calls).subscribe((totals) => {
+      this.statusTotals.set(totals);
+      this.statusTotalsFailed.set(Object.values(totals).some((v) => v === null));
+    });
   }
 
   private loadRecent(): void {
@@ -1260,13 +1307,19 @@ export class OrdersPageComponent {
     // ONLY the operator's selected accounts — not fleet-wide.
     const scopedIds = this.accountScope.accountIds();
     const filter = scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : null;
-    this.ordersService
-      .list({ currentPage: 1, itemCountPerPage: 500, filter })
-      .pipe(catchError(() => of(null)))
-      .subscribe((res) => {
-        const rows = res?.data?.data ?? [];
-        this.recentOrders.set(rows);
-      });
+    this.ordersService.list({ currentPage: 1, itemCountPerPage: 500, filter }).subscribe({
+      next: (res) => {
+        // status:false is a failed read, not "no orders": keep the last good window.
+        if (res?.status === false) {
+          this.recentError.set(res.message || 'the engine refused the request');
+          return;
+        }
+        this.recentOrders.set(res?.data?.data ?? []);
+        this.recentEverLoaded.set(true);
+        this.recentError.set(null);
+      },
+      error: (e) => this.recentError.set(e?.error?.message ?? e?.message ?? 'request failed'),
+    });
     // Same triggers (scope change, order/position push) move the chip totals.
     this.loadStatusTotals();
   }
@@ -1502,7 +1555,13 @@ export class OrdersPageComponent {
 
     return this.ordersService.list(requestParams).pipe(
       map((response) => {
-        if (response.data) {
+        // status:false is a refusal, not "no orders": throw so the table keeps its last rows
+        // (its error path) and the banner says the read failed, instead of an empty pager.
+        if (response?.status === false) {
+          throw new Error(response.message || 'the engine refused the request');
+        }
+        this.tableError.set(null);
+        if (response?.data) {
           this.ordersList.set(response.data.data);
           return response.data;
         }
@@ -1517,6 +1576,10 @@ export class OrdersPageComponent {
             pageSize: 25,
           },
         } as PagedData<OrderDto>;
+      }),
+      catchError((e: { error?: { message?: string }; message?: string }) => {
+        this.tableError.set(e?.error?.message ?? e?.message ?? 'request failed');
+        return throwError(() => e);
       }),
     );
   };

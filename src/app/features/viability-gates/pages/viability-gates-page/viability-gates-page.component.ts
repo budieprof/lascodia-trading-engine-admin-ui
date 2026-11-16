@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { Subscription, catchError, of } from 'rxjs';
 
 import { ViabilityGatesService } from '@core/services/viability-gates.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
@@ -55,7 +57,7 @@ import {
           class="btn btn-ghost"
           type="button"
           (click)="runGhostCycle()"
-          [disabled]="ghostRunning()"
+          [disabled]="ghostRunning() || !canManage()"
           title="Replay rejected signals against subsequent candles to refresh per-gate ghost stats"
         >
           @if (ghostRunning()) {
@@ -70,174 +72,191 @@ import {
         <app-refresh-button label="Reload" [refreshing]="loading()" (refresh)="reload()" />
       </app-page-header>
 
+      @if (!canManage()) {
+        <div class="state-row muted">
+          Read-only — changing gates, the ghost-outcome parameters or running a ghost cycle needs
+          the platform.engine.manage permission.
+        </div>
+      }
+      @if (pendingUnavailable()) {
+        <div class="state-row error" role="status">
+          Pending queue unavailable — the cooling-off queue could not be read, so a queued (not yet
+          effective) gate change would not be shown here. The mode badges show what each gate is
+          now.
+        </div>
+      }
+
       @if (ghostResultMessage(); as msg) {
         <div class="state-row" [class.error]="ghostError()">{{ msg }}</div>
       }
 
       <!-- ── Ghost-outcome worker config panel ───────────────────────────── -->
       @if (ghostConfigDraft(); as gc) {
-        <section class="ghost-config">
-          <header class="ghost-head">
-            <div>
-              <h2>Ghost-outcome cycle parameters</h2>
-              <p class="muted">
-                Controls the cadence + scope of the rejected-signal replay. Worker reloads on every
-                cycle — saves take effect on the next iteration (no restart).
-              </p>
+        <fieldset class="ro-fieldset" [disabled]="!canManage()">
+          <section class="ghost-config">
+            <header class="ghost-head">
+              <div>
+                <h2>Ghost-outcome cycle parameters</h2>
+                <p class="muted">
+                  Controls the cadence + scope of the rejected-signal replay. Worker reloads on
+                  every cycle — saves take effect on the next iteration (no restart).
+                </p>
+              </div>
+              <label class="enabled-toggle">
+                <input
+                  type="checkbox"
+                  [checked]="gc.enabled"
+                  (change)="setGhostEnabled($any($event.target).checked)"
+                />
+                Enabled
+              </label>
+            </header>
+
+            <div class="ghost-grid">
+              <label class="field">
+                <span class="field-label">
+                  Poll interval
+                  <span class="kind-tag">seconds</span>
+                </span>
+                <input
+                  class="control"
+                  type="number"
+                  [ngModel]="gc.pollIntervalSeconds"
+                  (ngModelChange)="setGhostField('pollIntervalSeconds', $event)"
+                  [min]="5"
+                  [max]="3600"
+                  step="1"
+                />
+                <span class="field-default muted">
+                  default {{ gc.pollIntervalSecondsDefault }} · range [5, 3600]
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field-label">
+                  Walk window
+                  <span class="kind-tag">hours</span>
+                </span>
+                <input
+                  class="control"
+                  type="number"
+                  [ngModel]="gc.walkWindowHours"
+                  (ngModelChange)="setGhostField('walkWindowHours', $event)"
+                  [min]="1"
+                  [max]="168"
+                  step="1"
+                />
+                <span class="field-help muted">
+                  Forward-walk window used by the replay. Longer = signals get more room to hit
+                  TP/SL.
+                </span>
+                <span class="field-default muted">
+                  default {{ gc.walkWindowHoursDefault }}h · range [1, 168]
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field-label">
+                  Lookback
+                  <span class="kind-tag">hours</span>
+                </span>
+                <input
+                  class="control"
+                  type="number"
+                  [ngModel]="gc.lookbackHours"
+                  (ngModelChange)="setGhostField('lookbackHours', $event)"
+                  [min]="1"
+                  [max]="720"
+                  step="1"
+                />
+                <span class="field-help muted">
+                  Only resolve signals younger than this. Wider = older fires resolve.
+                </span>
+                <span class="field-default muted">
+                  default {{ gc.lookbackHoursDefault }}h · range [1, 720]
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field-label">
+                  Max per cycle
+                  <span class="kind-tag">int</span>
+                </span>
+                <input
+                  class="control"
+                  type="number"
+                  [ngModel]="gc.maxSignalsPerCycle"
+                  (ngModelChange)="setGhostField('maxSignalsPerCycle', $event)"
+                  [min]="1"
+                  [max]="5000"
+                  step="1"
+                />
+                <span class="field-default muted">
+                  default {{ gc.maxSignalsPerCycleDefault }} · range [1, 5000]
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field-label">
+                  Min signal age
+                  <span class="kind-tag">seconds</span>
+                </span>
+                <input
+                  class="control"
+                  type="number"
+                  [ngModel]="gc.minSignalAgeSeconds"
+                  (ngModelChange)="setGhostField('minSignalAgeSeconds', $event)"
+                  [min]="0"
+                  [max]="3600"
+                  step="1"
+                />
+                <span class="field-help muted">
+                  Skip signals younger than this — gives the chart a bar of room before the walk.
+                </span>
+                <span class="field-default muted">
+                  default {{ gc.minSignalAgeSecondsDefault }}s · range [0, 3600]
+                </span>
+              </label>
             </div>
-            <label class="enabled-toggle">
-              <input
-                type="checkbox"
-                [checked]="gc.enabled"
-                (change)="setGhostEnabled($any($event.target).checked)"
-              />
-              Enabled
-            </label>
-          </header>
 
-          <div class="ghost-grid">
-            <label class="field">
-              <span class="field-label">
-                Poll interval
-                <span class="kind-tag">seconds</span>
-              </span>
-              <input
-                class="control"
-                type="number"
-                [ngModel]="gc.pollIntervalSeconds"
-                (ngModelChange)="setGhostField('pollIntervalSeconds', $event)"
-                [min]="5"
-                [max]="3600"
-                step="1"
-              />
-              <span class="field-default muted">
-                default {{ gc.pollIntervalSecondsDefault }} · range [5, 3600]
-              </span>
-            </label>
-
-            <label class="field">
-              <span class="field-label">
-                Walk window
-                <span class="kind-tag">hours</span>
-              </span>
-              <input
-                class="control"
-                type="number"
-                [ngModel]="gc.walkWindowHours"
-                (ngModelChange)="setGhostField('walkWindowHours', $event)"
-                [min]="1"
-                [max]="168"
-                step="1"
-              />
-              <span class="field-help muted">
-                Forward-walk window used by the replay. Longer = signals get more room to hit TP/SL.
-              </span>
-              <span class="field-default muted">
-                default {{ gc.walkWindowHoursDefault }}h · range [1, 168]
-              </span>
-            </label>
-
-            <label class="field">
-              <span class="field-label">
-                Lookback
-                <span class="kind-tag">hours</span>
-              </span>
-              <input
-                class="control"
-                type="number"
-                [ngModel]="gc.lookbackHours"
-                (ngModelChange)="setGhostField('lookbackHours', $event)"
-                [min]="1"
-                [max]="720"
-                step="1"
-              />
-              <span class="field-help muted">
-                Only resolve signals younger than this. Wider = older fires resolve.
-              </span>
-              <span class="field-default muted">
-                default {{ gc.lookbackHoursDefault }}h · range [1, 720]
-              </span>
-            </label>
-
-            <label class="field">
-              <span class="field-label">
-                Max per cycle
-                <span class="kind-tag">int</span>
-              </span>
-              <input
-                class="control"
-                type="number"
-                [ngModel]="gc.maxSignalsPerCycle"
-                (ngModelChange)="setGhostField('maxSignalsPerCycle', $event)"
-                [min]="1"
-                [max]="5000"
-                step="1"
-              />
-              <span class="field-default muted">
-                default {{ gc.maxSignalsPerCycleDefault }} · range [1, 5000]
-              </span>
-            </label>
-
-            <label class="field">
-              <span class="field-label">
-                Min signal age
-                <span class="kind-tag">seconds</span>
-              </span>
-              <input
-                class="control"
-                type="number"
-                [ngModel]="gc.minSignalAgeSeconds"
-                (ngModelChange)="setGhostField('minSignalAgeSeconds', $event)"
-                [min]="0"
-                [max]="3600"
-                step="1"
-              />
-              <span class="field-help muted">
-                Skip signals younger than this — gives the chart a bar of room before the walk.
-              </span>
-              <span class="field-default muted">
-                default {{ gc.minSignalAgeSecondsDefault }}s · range [0, 3600]
-              </span>
-            </label>
-          </div>
-
-          <footer class="actions">
-            @if (savingGhostConfig()) {
-              <span class="muted">Saving…</span>
-            } @else if (ghostConfigSaved()) {
-              <span class="ok">Saved.</span>
-            } @else if (ghostConfigSaveError()) {
-              <span class="err">{{ ghostConfigSaveError() }}</span>
-            } @else if (ghostConfigDirty()) {
-              <span class="muted">Unsaved changes.</span>
-            }
-            <button
-              class="btn btn-ghost"
-              type="button"
-              (click)="resetGhostConfig()"
-              [disabled]="!ghostConfigDirty() || savingGhostConfig()"
-            >
-              Revert
-            </button>
-            <button
-              class="btn btn-ghost"
-              type="button"
-              (click)="resetGhostConfigToDefaults()"
-              [disabled]="savingGhostConfig()"
-              title="Set every knob to its compile-time default"
-            >
-              Reset to defaults
-            </button>
-            <button
-              class="btn btn-primary"
-              type="button"
-              (click)="saveGhostConfig()"
-              [disabled]="!ghostConfigDirty() || savingGhostConfig()"
-            >
-              Save parameters
-            </button>
-          </footer>
-        </section>
+            <footer class="actions">
+              @if (savingGhostConfig()) {
+                <span class="muted">Saving…</span>
+              } @else if (ghostConfigSaved()) {
+                <span class="ok">Saved.</span>
+              } @else if (ghostConfigSaveError()) {
+                <span class="err">{{ ghostConfigSaveError() }}</span>
+              } @else if (ghostConfigDirty()) {
+                <span class="muted">Unsaved changes.</span>
+              }
+              <button
+                class="btn btn-ghost"
+                type="button"
+                (click)="resetGhostConfig()"
+                [disabled]="!ghostConfigDirty() || savingGhostConfig()"
+              >
+                Revert
+              </button>
+              <button
+                class="btn btn-ghost"
+                type="button"
+                (click)="resetGhostConfigToDefaults()"
+                [disabled]="savingGhostConfig()"
+                title="Set every knob to its compile-time default"
+              >
+                Reset to defaults
+              </button>
+              <button
+                class="btn btn-primary"
+                type="button"
+                (click)="saveGhostConfig()"
+                [disabled]="!ghostConfigDirty() || savingGhostConfig()"
+              >
+                Save parameters
+              </button>
+            </footer>
+          </section>
+        </fieldset>
       }
 
       <!-- The grid stays up while a refresh runs (after every save, ghost cycle and
@@ -275,265 +294,275 @@ import {
           ghost-outcome worker has resolved for the gate, not just the last 24h.
         </p>
 
-        <div class="gate-grid">
-          @for (gate of gates(); track gate.name) {
-            <article class="gate-card">
-              <header class="gate-head">
-                <div>
-                  <h2>{{ gate.displayName }}</h2>
-                  <p class="muted gate-desc" [title]="gate.description">{{ gate.description }}</p>
-                </div>
-                <span class="mode-badge" [class]="'mode-' + gate.mode.toLowerCase()">{{
-                  gate.mode
-                }}</span>
-              </header>
+        <fieldset class="ro-fieldset" [disabled]="!canManage()">
+          <div class="gate-grid">
+            @for (gate of gates(); track gate.name) {
+              <article class="gate-card">
+                <header class="gate-head">
+                  <div>
+                    <h2>{{ gate.displayName }}</h2>
+                    <p class="muted gate-desc" [title]="gate.description">{{ gate.description }}</p>
+                  </div>
+                  <span class="mode-badge" [class]="'mode-' + gate.mode.toLowerCase()">{{
+                    gate.mode
+                  }}</span>
+                </header>
 
-              <!-- Queued loosening changes: the badge above is what the gate IS until
+                <!-- Queued loosening changes: the badge above is what the gate IS until
                    these take effect, so say they exist and when they land. -->
-              @for (p of pendingFor(gate); track p.id) {
-                <div class="pending-row" role="status">
-                  <strong>Queued (cooling-off):</strong>
-                  {{ pendingLabel(gate, p.key) }} {{ p.oldValue ?? '—' }} →
-                  {{ p.newValue ?? '—' }} · takes effect {{ formatUtc(p.effectiveAt) }} UTC
-                  @if (p.reason) {
-                    · <span class="muted">“{{ p.reason }}”</span>
-                  }
-                </div>
-              }
+                @for (p of pendingFor(gate); track p.id) {
+                  <div class="pending-row" role="status">
+                    <strong>Queued (cooling-off):</strong>
+                    {{ pendingLabel(gate, p.key) }} {{ p.oldValue ?? '—' }} →
+                    {{ p.newValue ?? '—' }} · takes effect {{ formatUtc(p.effectiveAt) }} UTC
+                    @if (p.reason) {
+                      · <span class="muted">“{{ p.reason }}”</span>
+                    }
+                  </div>
+                }
 
-              <!-- Stats strip ------------------------------------------------ -->
-              <!-- Fixed three-column strip so every label stays on one line
+                <!-- Stats strip ------------------------------------------------ -->
+                <!-- Fixed three-column strip so every label stays on one line
                    and the values share a baseline. Zero is neutral; green /
                    red only once a ghost outcome actually exists. -->
-              <div class="stats">
-                <div class="stat">
-                  <span class="stat-label" title="Signals this gate rejected in the trailing 24h">
-                    Rejected 24h
-                  </span>
-                  <span class="stat-value">{{ gate.stats.todayRejectionCount }}</span>
-                </div>
-                <div class="stat">
-                  <span
-                    class="stat-label"
-                    title="Signals flagged in Advisory mode in the trailing 24h"
-                  >
-                    Advisory 24h
-                  </span>
-                  <span class="stat-value">{{ gate.stats.todayAdvisoryCount }}</span>
-                </div>
-                <div class="stat">
-                  <span
-                    class="stat-label"
-                    title="Every ghost outcome resolved for this gate (all time), including unresolvable ones"
-                  >
-                    Ghosts resolved
-                  </span>
-                  <span class="stat-value">{{ gate.stats.ghostResolvedCount }}</span>
-                </div>
-                <div class="stat">
-                  <span
-                    class="stat-label"
-                    title="Rejected signals that went on to hit TP (all time)"
-                  >
-                    Ghost wins
-                  </span>
-                  <span class="stat-value" [class.pos]="gate.stats.ghostWouldHaveWon > 0">
-                    {{ gate.stats.ghostWouldHaveWon }}
-                  </span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label" title="Rejected signals that went on to hit SL">
-                    Ghost losses
-                  </span>
-                  <span class="stat-value" [class.neg]="gate.stats.ghostWouldHaveLost > 0">
-                    {{ gate.stats.ghostWouldHaveLost }}
-                  </span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label" title="Entry price was never reached">
-                    Ghost no-fill
-                  </span>
-                  <span class="stat-value">{{ gate.stats.ghostEntryNotReached }}</span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label" title="Walk window ended with neither TP nor SL hit">
-                    Ghost expired
-                  </span>
-                  <span class="stat-value">{{ gate.stats.ghostWouldHaveExpired }}</span>
-                </div>
-                @if (gate.stats.ghostUnresolvable > 0) {
+                <div class="stats">
+                  <div class="stat">
+                    <span class="stat-label" title="Signals this gate rejected in the trailing 24h">
+                      Rejected 24h
+                    </span>
+                    <span class="stat-value">{{ gate.stats.todayRejectionCount }}</span>
+                  </div>
                   <div class="stat">
                     <span
                       class="stat-label"
-                      title="Resolved as Unresolvable — no candles to walk the signal forward on (all time)"
+                      title="Signals flagged in Advisory mode in the trailing 24h"
                     >
-                      Unresolvable
+                      Advisory 24h
                     </span>
-                    <span class="stat-value">{{ gate.stats.ghostUnresolvable }}</span>
+                    <span class="stat-value">{{ gate.stats.todayAdvisoryCount }}</span>
                   </div>
-                }
-                @if (gate.stats.avgWinPips !== null) {
                   <div class="stat">
-                    <span class="stat-label">Avg win</span>
-                    <span class="stat-value pos">
-                      +{{ gate.stats.avgWinPips | number: '1.1-1' }} pips
+                    <span
+                      class="stat-label"
+                      title="Every ghost outcome resolved for this gate (all time), including unresolvable ones"
+                    >
+                      Ghosts resolved
                     </span>
+                    <span class="stat-value">{{ gate.stats.ghostResolvedCount }}</span>
                   </div>
-                }
-                @if (gate.stats.avgLossPips !== null) {
                   <div class="stat">
-                    <span class="stat-label">Avg loss</span>
-                    <span class="stat-value neg">
-                      {{ gate.stats.avgLossPips | number: '1.1-1' }} pips
+                    <span
+                      class="stat-label"
+                      title="Rejected signals that went on to hit TP (all time)"
+                    >
+                      Ghost wins
+                    </span>
+                    <span class="stat-value" [class.pos]="gate.stats.ghostWouldHaveWon > 0">
+                      {{ gate.stats.ghostWouldHaveWon }}
                     </span>
                   </div>
-                }
-              </div>
-
-              <!-- Editor ----------------------------------------------------- -->
-              <div class="editor">
-                <label class="field">
-                  <span class="field-label">Mode</span>
-                  <select
-                    class="control"
-                    [ngModel]="draftMode(gate.name)"
-                    (ngModelChange)="setDraftMode(gate.name, $event)"
-                  >
-                    @for (m of modes; track m) {
-                      <option [value]="m">{{ m }}</option>
-                    }
-                  </select>
-                </label>
-
-                @if (showsReasonField(gate.name)) {
-                  <label class="field">
-                    <span class="field-label">Change reason</span>
-                    <input
-                      class="control"
-                      type="text"
-                      [ngModel]="draftReason(gate.name)"
-                      (ngModelChange)="setDraftReason(gate.name, $event)"
-                      [placeholder]="
-                        blockFlagLoosening(gate.name)
-                          ? 'Why is this direction being unblocked?'
-                          : 'Why is this gate’s mode changing?'
-                      "
-                    />
-                    <span class="field-help muted">
-                      Loosening (Enforce → Advisory / Off, or lifting a direction block) requires a
-                      reason and is queued for the 24h cooling-off period unless applied
-                      immediately.
+                  <div class="stat">
+                    <span class="stat-label" title="Rejected signals that went on to hit SL">
+                      Ghost losses
                     </span>
-                  </label>
-                  <label class="field checkbox-field">
-                    <input
-                      type="checkbox"
-                      [ngModel]="draftImmediate(gate.name)"
-                      (ngModelChange)="setDraftImmediate(gate.name, $event)"
-                    />
-                    <span class="field-label">Apply immediately (break-glass)</span>
-                  </label>
-                }
-
-                @for (t of gate.thresholds; track t.key) {
-                  @if (isBooleanThreshold(t)) {
-                    <!-- An Integer knob bounded to [0, 1] is a flag; the engine
-                         still stores 0/1 but the operator sees a switch, not
-                         "(0=no, 1=yes) INT = 1". -->
-                    <div class="field switch-field">
-                      <label class="switch-row">
-                        <input
-                          type="checkbox"
-                          role="switch"
-                          [ngModel]="draftThreshold(gate.name, t.key) === 1"
-                          (ngModelChange)="setDraftThreshold(gate.name, t.key, $event ? 1 : 0)"
-                        />
-                        <span class="field-label">{{ flagLabel(t.label) }}</span>
-                        <span class="switch-state muted">
-                          {{ draftThreshold(gate.name, t.key) === 1 ? 'On' : 'Off' }}
-                        </span>
-                      </label>
-                      @if (t.helpText) {
-                        <span class="field-help muted">{{ t.helpText }}</span>
-                      }
-                      <span class="field-default muted">
-                        default {{ t.defaultValue === 1 ? 'on' : 'off' }}
+                    <span class="stat-value" [class.neg]="gate.stats.ghostWouldHaveLost > 0">
+                      {{ gate.stats.ghostWouldHaveLost }}
+                    </span>
+                  </div>
+                  <div class="stat">
+                    <span class="stat-label" title="Entry price was never reached">
+                      Ghost no-fill
+                    </span>
+                    <span class="stat-value">{{ gate.stats.ghostEntryNotReached }}</span>
+                  </div>
+                  <div class="stat">
+                    <span class="stat-label" title="Walk window ended with neither TP nor SL hit">
+                      Ghost expired
+                    </span>
+                    <span class="stat-value">{{ gate.stats.ghostWouldHaveExpired }}</span>
+                  </div>
+                  @if (gate.stats.ghostUnresolvable > 0) {
+                    <div class="stat">
+                      <span
+                        class="stat-label"
+                        title="Resolved as Unresolvable — no candles to walk the signal forward on (all time)"
+                      >
+                        Unresolvable
+                      </span>
+                      <span class="stat-value">{{ gate.stats.ghostUnresolvable }}</span>
+                    </div>
+                  }
+                  @if (gate.stats.avgWinPips !== null) {
+                    <div class="stat">
+                      <span class="stat-label">Avg win</span>
+                      <span class="stat-value pos">
+                        +{{ gate.stats.avgWinPips | number: '1.1-1' }} pips
                       </span>
                     </div>
-                  } @else {
-                    <label class="field">
-                      <span class="field-label">
-                        {{ t.label }}
-                        <span class="kind-tag">{{ kindSuffix(t.kind) }}</span>
+                  }
+                  @if (gate.stats.avgLossPips !== null) {
+                    <div class="stat">
+                      <span class="stat-label">Avg loss</span>
+                      <span class="stat-value neg">
+                        {{ gate.stats.avgLossPips | number: '1.1-1' }} pips
                       </span>
+                    </div>
+                  }
+                </div>
+
+                <!-- Editor ----------------------------------------------------- -->
+                <div class="editor">
+                  <label class="field">
+                    <span class="field-label">Mode</span>
+                    <select
+                      class="control"
+                      [ngModel]="draftMode(gate.name)"
+                      (ngModelChange)="setDraftMode(gate.name, $event)"
+                    >
+                      @for (m of modes; track m) {
+                        <option [value]="m">{{ m }}</option>
+                      }
+                    </select>
+                  </label>
+
+                  @if (showsReasonField(gate.name)) {
+                    <label class="field">
+                      <span class="field-label">Change reason</span>
                       <input
                         class="control"
-                        type="number"
-                        [ngModel]="draftThreshold(gate.name, t.key)"
-                        (ngModelChange)="setDraftThreshold(gate.name, t.key, $event)"
-                        [min]="t.minValue"
-                        [max]="t.maxValue"
-                        [step]="stepFor(t.kind)"
+                        type="text"
+                        [ngModel]="draftReason(gate.name)"
+                        (ngModelChange)="setDraftReason(gate.name, $event)"
+                        [placeholder]="
+                          blockFlagLoosening(gate.name)
+                            ? 'Why is this direction being unblocked?'
+                            : 'Why is this gate’s mode changing?'
+                        "
                       />
-                      @if (t.helpText) {
-                        <span class="field-help muted">{{ t.helpText }}</span>
-                      }
-                      <span class="field-default muted">
-                        default {{ t.defaultValue | number: '1.0-4' }} · range [{{ t.minValue }},
-                        {{ t.maxValue }}]
+                      <span class="field-help muted">
+                        Loosening (Enforce → Advisory / Off, or lifting a direction block) requires
+                        a reason and is queued for the 24h cooling-off period unless applied
+                        immediately.
                       </span>
                     </label>
+                    <label class="field checkbox-field">
+                      <input
+                        type="checkbox"
+                        [ngModel]="draftImmediate(gate.name)"
+                        (ngModelChange)="setDraftImmediate(gate.name, $event)"
+                      />
+                      <span class="field-label">Apply immediately (break-glass)</span>
+                    </label>
                   }
-                }
-              </div>
 
-              <!-- Actions ---------------------------------------------------- -->
-              <footer class="actions">
-                @if (savingGate() === gate.name) {
-                  <span class="muted">Saving…</span>
-                } @else if (savedGate() === gate.name) {
-                  <span class="ok">Saved.</span>
-                } @else if (saveNotice(gate.name); as notice) {
-                  <span class="notice">{{ notice }}</span>
-                } @else if (saveError(gate.name); as err) {
-                  <span class="err">{{ err }}</span>
-                } @else if (isDirty(gate.name)) {
-                  <span class="muted">Unsaved changes.</span>
-                }
-                <button
-                  class="btn btn-ghost"
-                  type="button"
-                  (click)="resetGate(gate.name)"
-                  [disabled]="!isDirty(gate.name) || savingGate() === gate.name"
-                >
-                  Revert
-                </button>
-                <button
-                  class="btn btn-ghost"
-                  type="button"
-                  (click)="resetToDefaults(gate.name)"
-                  [disabled]="savingGate() === gate.name"
-                  title="Set every knob to its compile-time default"
-                >
-                  Reset to defaults
-                </button>
-                <button
-                  class="btn btn-primary"
-                  type="button"
-                  (click)="save(gate.name)"
-                  [disabled]="!isDirty(gate.name) || savingGate() === gate.name"
-                >
-                  Save changes
-                </button>
-              </footer>
-            </article>
-          }
-        </div>
+                  @for (t of gate.thresholds; track t.key) {
+                    @if (isBooleanThreshold(t)) {
+                      <!-- An Integer knob bounded to [0, 1] is a flag; the engine
+                         still stores 0/1 but the operator sees a switch, not
+                         "(0=no, 1=yes) INT = 1". -->
+                      <div class="field switch-field">
+                        <label class="switch-row">
+                          <input
+                            type="checkbox"
+                            role="switch"
+                            [ngModel]="draftThreshold(gate.name, t.key) === 1"
+                            (ngModelChange)="setDraftThreshold(gate.name, t.key, $event ? 1 : 0)"
+                          />
+                          <span class="field-label">{{ flagLabel(t.label) }}</span>
+                          <span class="switch-state muted">
+                            {{ draftThreshold(gate.name, t.key) === 1 ? 'On' : 'Off' }}
+                          </span>
+                        </label>
+                        @if (t.helpText) {
+                          <span class="field-help muted">{{ t.helpText }}</span>
+                        }
+                        <span class="field-default muted">
+                          default {{ t.defaultValue === 1 ? 'on' : 'off' }}
+                        </span>
+                      </div>
+                    } @else {
+                      <label class="field">
+                        <span class="field-label">
+                          {{ t.label }}
+                          <span class="kind-tag">{{ kindSuffix(t.kind) }}</span>
+                        </span>
+                        <input
+                          class="control"
+                          type="number"
+                          [ngModel]="draftThreshold(gate.name, t.key)"
+                          (ngModelChange)="setDraftThreshold(gate.name, t.key, $event)"
+                          [min]="t.minValue"
+                          [max]="t.maxValue"
+                          [step]="stepFor(t.kind)"
+                        />
+                        @if (t.helpText) {
+                          <span class="field-help muted">{{ t.helpText }}</span>
+                        }
+                        <span class="field-default muted">
+                          default {{ t.defaultValue | number: '1.0-4' }} · range [{{ t.minValue }},
+                          {{ t.maxValue }}]
+                        </span>
+                      </label>
+                    }
+                  }
+                </div>
+
+                <!-- Actions ---------------------------------------------------- -->
+                <footer class="actions">
+                  @if (savingGate() === gate.name) {
+                    <span class="muted">Saving…</span>
+                  } @else if (savedGate() === gate.name) {
+                    <span class="ok">Saved.</span>
+                  } @else if (saveNotice(gate.name); as notice) {
+                    <span class="notice">{{ notice }}</span>
+                  } @else if (saveError(gate.name); as err) {
+                    <span class="err">{{ err }}</span>
+                  } @else if (isDirty(gate.name)) {
+                    <span class="muted">Unsaved changes.</span>
+                  }
+                  <button
+                    class="btn btn-ghost"
+                    type="button"
+                    (click)="resetGate(gate.name)"
+                    [disabled]="!isDirty(gate.name) || savingGate() === gate.name"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    class="btn btn-ghost"
+                    type="button"
+                    (click)="resetToDefaults(gate.name)"
+                    [disabled]="savingGate() === gate.name"
+                    title="Set every knob to its compile-time default"
+                  >
+                    Reset to defaults
+                  </button>
+                  <button
+                    class="btn btn-primary"
+                    type="button"
+                    (click)="save(gate.name)"
+                    [disabled]="!isDirty(gate.name) || savingGate() === gate.name"
+                  >
+                    Save changes
+                  </button>
+                </footer>
+              </article>
+            }
+          </div>
+        </fieldset>
       }
     </section>
   `,
   styles: [
     `
+      .ro-fieldset {
+        display: contents;
+        border: 0;
+        margin: 0;
+        padding: 0;
+        min-width: 0;
+      }
+
       .page {
         padding: var(--space-2) 0;
       }
@@ -830,11 +859,16 @@ import {
 export class ViabilityGatesPageComponent {
   private readonly svc = inject(ViabilityGatesService);
   private readonly pendingSvc = inject(ViabilityGatePendingChangesService);
+  private readonly auth = inject(AuthService);
+  /** Gate PUTs, ghost config PUT and the ghost-cycle POST all need platform.engine.manage. */
+  readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
 
   readonly modes = VIABILITY_GATE_MODES;
 
   /** Cooling-off queue entries for `ViabilityGates:*` keys (empty when none or unreadable). */
   private readonly pending = signal<PendingConfigChange[]>([]);
+  /** The cooling-off queue could not be read: say so rather than implying nothing is queued. */
+  readonly pendingUnavailable = signal(false);
 
   readonly loading = signal<boolean>(true);
   readonly error = signal<string | null>(null);
@@ -1107,12 +1141,13 @@ export class ViabilityGatesPageComponent {
   private reloadPending(): void {
     this.pendingSvc
       .listPending()
-      .pipe(catchError(() => of([] as PendingConfigChange[])))
-      .subscribe((rows) =>
-        this.pending.set(
-          (rows ?? []).filter((p) => p.key?.toLowerCase().startsWith('viabilitygates:')),
-        ),
-      );
+      .pipe(catchError(() => of(null)))
+      .subscribe((rows) => {
+        // A failed read is NOT an empty queue: keep the last rows read and flag it.
+        this.pendingUnavailable.set(rows === null);
+        if (rows === null) return;
+        this.pending.set(rows.filter((p) => p.key?.toLowerCase().startsWith('viabilitygates:')));
+      });
   }
 
   /** Queued changes whose key belongs to this gate (its mode key or one of its knobs). */

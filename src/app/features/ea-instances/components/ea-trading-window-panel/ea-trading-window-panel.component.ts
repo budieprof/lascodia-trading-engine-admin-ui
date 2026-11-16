@@ -33,13 +33,25 @@ const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
             clock.
           </p>
         </div>
-        <span class="status-pill" [class.on]="cfg().enabled" [class.off]="!cfg().enabled">
-          {{ cfg().enabled ? 'ENFORCED' : 'OFF' }}
-        </span>
+        @if (loaded()) {
+          <span class="status-pill" [class.on]="cfg().enabled" [class.off]="!cfg().enabled">
+            {{ cfg().enabled ? 'ENFORCED' : 'OFF' }}
+          </span>
+        }
       </header>
 
       @if (loading()) {
         <p class="muted small">Loading…</p>
+      } @else if (!loaded()) {
+        <!-- No form until the live policy has loaded: the save is a full-replace PUT, so editing
+             the defaults (enabled, flatten at 17:00 UTC) could flatten the whole fleet. -->
+        <div class="load-error" role="alert">
+          <span class="error small">
+            Could not load the trading-window policy{{ loadError() ? ': ' + loadError() : '' }}.
+            Nothing can be edited until it loads.
+          </span>
+          <button type="button" class="btn" (click)="load()">Retry</button>
+        </div>
       } @else {
         <div class="form-row">
           <label class="inline-check">
@@ -245,6 +257,12 @@ const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
       .error {
         color: #b91c1c;
       }
+      .load-error {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+      }
     `,
   ],
 })
@@ -254,23 +272,40 @@ export class EATradingWindowPanelComponent implements OnInit {
   readonly allDays = [...ALL_DAYS];
   readonly cfg = signal<TradingWindowConfig>(this.defaultCfg());
   readonly loading = signal(true);
+  /** True only after the engine's current policy loaded — the form (and Save) exist only then. */
+  readonly loaded = signal(false);
+  readonly loadError = signal<string | null>(null);
   readonly saving = signal(false);
   readonly dirty = signal(false);
   readonly error = signal<string | null>(null);
   readonly savedAt = signal<Date | null>(null);
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
     this.svc
       .getTradingWindow()
       .pipe(
         catchError((err) => {
-          this.error.set(err?.message ?? 'Failed to load policy');
+          this.loadError.set(err?.error?.message ?? err?.message ?? 'request failed');
           return of(null);
         }),
       )
       .subscribe((res) => {
         this.loading.set(false);
-        if (res?.data) this.cfg.set(this.normalise(res.data));
+        if (res?.status === true && res.data) {
+          this.cfg.set(this.normalise(res.data));
+          this.dirty.set(false);
+          this.loaded.set(true);
+          return;
+        }
+        // status:false (or an empty answer) is a failed load, not "use the defaults".
+        this.loaded.set(false);
+        if (res) this.loadError.set(res.message || 'the engine refused the request');
       });
   }
 
@@ -288,24 +323,39 @@ export class EATradingWindowPanelComponent implements OnInit {
   }
 
   save(): void {
-    if (this.saving()) return;
+    if (this.saving() || !this.loaded()) return;
     this.saving.set(true);
     this.error.set(null);
     this.svc
       .updateTradingWindow(this.cfg())
       .pipe(
         catchError((err) => {
-          this.error.set(err?.message ?? 'Save failed');
+          this.error.set(`Save failed: ${err?.error?.message ?? err?.message ?? 'request failed'}`);
           return of(null);
         }),
       )
       .subscribe((res) => {
         this.saving.set(false);
-        if (res?.data) {
+        if (!res) return; // transport error — already surfaced
+        if (res.responseCode === '-202-approval') {
+          // Parked for a second operator (the approval interceptor says so); not saved yet.
+          this.error.set('Sent for approval — the policy changes once a second person approves it.');
+          return;
+        }
+        if (res.status === true && res.data) {
           this.cfg.set(this.normalise(res.data));
           this.dirty.set(false);
           this.savedAt.set(new Date());
+          return;
         }
+        if (res.status === true) {
+          // Accepted without echoing the policy: re-read it rather than trust the local copy.
+          this.dirty.set(false);
+          this.savedAt.set(new Date());
+          this.load();
+          return;
+        }
+        this.error.set(`Save failed: ${res.message || 'the engine refused the change'}`);
       });
   }
 
@@ -315,10 +365,11 @@ export class EATradingWindowPanelComponent implements OnInit {
       enabled: !!raw.enabled,
       startUtc: raw.startUtc ?? '00:00',
       endUtc: raw.endUtc ?? '17:00',
-      days:
-        Array.isArray(raw.days) && raw.days.length > 0
-          ? ALL_DAYS.filter((d) => raw.days.includes(d))
-          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      // An EMPTY list is a deliberate soft-disable ("untick all"), not "missing" — only an
+      // absent field falls back to Mon–Fri, or a re-save would silently re-enable the window.
+      days: Array.isArray(raw.days)
+        ? ALL_DAYS.filter((d) => raw.days.includes(d))
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
       flattenOnExit: raw.flattenOnExit ?? true,
     };
   }

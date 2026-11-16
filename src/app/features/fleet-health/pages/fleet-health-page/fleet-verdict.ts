@@ -41,6 +41,12 @@ export interface VerdictInput {
   dbLatencyMs: number | null;
   outboxPending: number | null;
   staleMinutes: number;
+  /**
+   * Telemetry reads that FAILED on their last attempt ("fleet summary", "engine telemetry"). A
+   * failed read is not a healthy reading: before this, a failure became null, null checks were
+   * skipped, and the page said "Fleet healthy" over no data at all (review O4).
+   */
+  unavailable?: readonly string[];
 }
 
 /** Same tiers as the Engine tile: < 50 ms fast, < 200 ms slow, else very slow. */
@@ -87,6 +93,9 @@ export function fleetVerdict(x: VerdictInput): FleetVerdict {
   }
   if (x.outboxPending !== null && x.outboxPending > 100)
     issues.push({ tone: 'warn', text: `${x.outboxPending} outbox messages pending` });
+  for (const what of x.unavailable ?? []) {
+    issues.push({ tone: 'warn', text: `Telemetry unavailable: ${what} could not be read` });
+  }
 
   issues.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'bad' ? -1 : 1));
 

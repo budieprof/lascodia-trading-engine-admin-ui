@@ -137,7 +137,7 @@ import {
           <section class="missing" role="status">
             <h2>No signal #{{ signalId() }}</h2>
             <p>{{ m.sentence }}</p>
-            @if (m.range.totalSignals != null) {
+            @if ((m.range.totalSignals ?? null) !== null) {
               <p class="muted small">
                 The engine holds {{ m.range.totalSignals | number }} signal(s).
               </p>
@@ -212,7 +212,7 @@ import {
                     <dt>ML score</dt>
                     <dd>
                       {{
-                        s.mlConfidenceScore != null
+                        (s.mlConfidenceScore ?? null) !== null
                           ? (s.mlConfidenceScore | number: '1.2-2') +
                             ' · ' +
                             (s.mlPredictedDirection ?? '—')

@@ -204,6 +204,14 @@ import { OrderSignalContextComponent } from '../../components/order-signal-conte
                     placeholder="Take Profit price"
                   />
                 </div>
+                <p class="form-hint">
+                  Removing a stop loss or take profit is not supported here — an empty field
+                  would leave the current level in place, so a field that has a level must keep a
+                  price.
+                </p>
+                @if (modifyProblem(); as mp) {
+                  <p class="form-hint form-hint-error" role="alert">{{ mp }}</p>
+                }
                 <div class="modify-actions">
                   <button
                     type="button"
@@ -213,7 +221,11 @@ import { OrderSignalContextComponent } from '../../components/order-signal-conte
                   >
                     Cancel
                   </button>
-                  <button type="submit" class="btn btn-primary" [disabled]="actionLoading()">
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    [disabled]="actionLoading() || modifyProblem() !== null"
+                  >
                     @if (actionLoading()) {
                       <span class="spinner"></span>
                     } @else {
@@ -1037,9 +1049,34 @@ export class OrderDetailPageComponent implements OnInit {
     this.showModifyPanel.set(true);
   }
 
+  /**
+   * Why the modify form cannot be sent, or null. The engine's ModifyOrder treats a null level
+   * as "keep the current one" (`request.StopLoss ?? order.StopLoss`), so clearing a field that
+   * has a level would toast success and change nothing — block it instead.
+   */
+  modifyProblem(): string | null {
+    const o = this.order();
+    if (!o) return 'Order not loaded.';
+    const v = this.modifyForm.getRawValue();
+    const bad = (x: number | null) => x !== null && (!Number.isFinite(x) || x <= 0);
+    if (bad(v.stopLoss)) return 'Stop loss must be a positive price.';
+    if (bad(v.takeProfit)) return 'Take profit must be a positive price.';
+    if (v.stopLoss === null && o.stopLoss !== null)
+      return 'Enter a stop-loss price — the stop cannot be removed from here.';
+    if (v.takeProfit === null && o.takeProfit !== null)
+      return 'Enter a take-profit price — the target cannot be removed from here.';
+    if (v.stopLoss === o.stopLoss && v.takeProfit === o.takeProfit) return 'Nothing changed.';
+    return null;
+  }
+
   onModify(): void {
     const o = this.order();
     if (!o) return;
+    const problem = this.modifyProblem();
+    if (problem) {
+      this.notifications.error(problem);
+      return;
+    }
     const v = this.modifyForm.getRawValue();
     const request: ModifyOrderRequest = {
       stopLoss: v.stopLoss,

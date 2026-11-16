@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import {
   provideRouter,
+  withNavigationErrorHandler,
   withPreloading,
   withRouterConfig,
   withViewTransitions,
@@ -24,9 +25,11 @@ import { serverClockInterceptor } from '@core/time/server-clock';
 import { pageApiActivityInterceptor } from '@core/assistant/page-api-activity';
 import { assistantWriteGuardInterceptor } from '@core/assistant/assistant-write-guard';
 import { errorInterceptor } from '@core/auth/error.interceptor';
+import { expectedTenantInterceptor } from '@core/auth/expected-tenant.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
 import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
 import { GlobalErrorHandler } from '@core/errors/global-error-handler';
+import { reloadOnceForChunkError } from '@core/errors/chunk-reload';
 import { sentryProviders } from '@core/observability/sentry';
 import { webVitalsProviders } from '@core/observability/web-vitals';
 import { provideChartTouchCancel } from '@shared/utils/lwc-touch-cancel';
@@ -80,6 +83,12 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
         // Angular 22 changed the default to 'always' (child routes inherit
         // every parent param). Keep the pre-v22 behaviour explicitly.
         withRouterConfig({ paramsInheritanceStrategy: 'emptyOnly' }),
+        // A lazy route whose chunk the live release no longer has (a tab opened before a deploy):
+        // the edge answers 404 and the import fails — reload onto the live release, once
+        // (core/errors/chunk-reload.ts; a repeat reaches the ErrorHandler, which explains it).
+        withNavigationErrorHandler((e) => {
+          reloadOnceForChunkError(e.error);
+        }),
         // Native View Transitions API on each navigation. The browser
         // snapshots the outgoing page and crossfades into the incoming
         // one; we customise the animation in global styles via the
@@ -109,17 +118,24 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
           },
         }),
       ),
-      // Order matters: assistant write guard (first, so a write it refuses never retries, toasts or
-      // leaves the browser) → auth → CSRF (BFF sign-in) → retry (so retries carry both) → error
-      // (final toast, step-up, CSRF refresh) → approval (two-person 202 notice).
+      // Order matters. Angular runs functional interceptors in list order on the way OUT and the
+      // reverse on the way back, so an EARLIER interceptor WRAPS every later one and sees only what
+      // they finally emit:
+      //  assistant write guard (first, so a write it refuses never retries, toasts or leaves the
+      //  browser) → auth → CSRF (BFF sign-in) → error (sees only the FINAL failure, so one toast per
+      //  request; step-up, CSRF refresh) → expected tenant (cross-tab organisation check; its 409 is
+      //  passed through the error interceptor silently) → retry (transient GET failures, retried
+      //  INSIDE the error interceptor, each attempt re-sending the headers added above) → approval
+      //  (two-person 202 notice).
       provideHttpClient(
         withXhr(),
         withInterceptors([
           assistantWriteGuardInterceptor,
           authInterceptor,
           csrfInterceptor,
-          retryInterceptor,
           errorInterceptor,
+          expectedTenantInterceptor,
+          retryInterceptor,
           approvalInterceptor,
           serverClockInterceptor,
           // Which engine calls the current page made — the assistant's map of where its data comes from.

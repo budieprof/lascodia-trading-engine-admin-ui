@@ -15,6 +15,11 @@ export class BrowserLocation {
     window.location.assign(url);
   }
 
+  /** Reload the document (nothing in memory survives). */
+  reload(): void {
+    window.location.reload();
+  }
+
   /** The path + query + fragment the document is on. */
   currentPath(): string {
     const l = window.location;

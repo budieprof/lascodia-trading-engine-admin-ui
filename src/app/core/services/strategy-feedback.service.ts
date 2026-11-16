@@ -49,11 +49,17 @@ export class StrategyFeedbackService {
     return this.api.get(`/strategy-feedback/optimization/${strategyId}/dry-run`);
   }
 
-  approveOptimization(id: number): Observable<ResponseData<OptimizationRunDto>> {
+  /**
+   * Approve a completed run. The engine answers `ResponseData<string>` (a status sentence, not the run):
+   * it starts a gradual rollout of the best parameters, or defers it when the strategy is already
+   * mid-rollout — `message`/`data` say which. Re-read the run with {@link getOptimizationRun}.
+   */
+  approveOptimization(id: number): Observable<ResponseData<string>> {
     return this.api.put(`/strategy-feedback/optimization/${id}/approve`);
   }
 
-  rejectOptimization(id: number): Observable<ResponseData<OptimizationRunDto>> {
+  /** Reject a completed run. Answers `ResponseData<string>`; re-read the run afterwards. */
+  rejectOptimization(id: number): Observable<ResponseData<string>> {
     return this.api.put(`/strategy-feedback/optimization/${id}/reject`);
   }
 

@@ -202,6 +202,10 @@ export class PaperTradingPageComponent implements OnInit {
         this.showConfirm.set(false);
         if (res.status) {
           this.notifications.success(`Paper trading ${next ? 'enabled' : 'disabled'}`);
+        } else if (res.responseCode === '-202-approval') {
+          // Parked for a second operator — the approval interceptor already said so; the mode
+          // is unchanged until it is approved, so re-read it rather than claim either state.
+          this.service.getStatus().subscribe({ error: () => undefined });
         } else {
           this.notifications.error(res.message ?? 'Failed to toggle mode');
         }

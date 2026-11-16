@@ -80,8 +80,12 @@ interface ParsedAlert extends AlertDto {
  * (severity, alertType). The triage queue is overwhelmingly recurring
  * noise (one worker crash → 20 alerts; one MU drift → 30 alerts across
  * symbols). Grouping by `${severity}::${alertType}` collapses the wall
- * into ~10 distinct things to triage, each with bulk snooze/ack.
+ * into ~10 distinct things to triage, each with bulk snooze (browser-local).
  */
+/** What the 24h snooze is — and is not. */
+const LOCAL_SNOOZE_NOTE =
+  'Snoozed for 24h in this browser only — the alert stays active on the engine and for other operators.';
+
 interface IncidentGroup {
   key: string;
   severity: AlertSeverity;
@@ -223,8 +227,13 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                 <button type="button" class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
                   1h
                 </button>
-                <button type="button" class="btn btn-accent btn-xs" (click)="acknowledge(a)">
-                  Ack
+                <button
+                  type="button"
+                  class="btn btn-accent btn-xs"
+                  (click)="acknowledge(a)"
+                  title="Hides it from this queue for 24 h in this browser only — the alert stays active on the engine and for everyone else"
+                >
+                  Snooze 24h (this browser)
                 </button>
               }
             </div>
@@ -698,8 +707,9 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                               class="btn btn-accent btn-xs"
                               (click)="ackGroup(g)"
                               [disabled]="g.snoozedCount === g.count"
+                              title="Hides it from this queue for 24 h in this browser only — the alert stays active on the engine and for everyone else"
                             >
-                              Ack all
+                              Snooze all 24h (this browser)
                             </button>
                           </div>
                         </header>
@@ -764,8 +774,12 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                                       >
                                         1h
                                       </button>
-                                      <button class="btn btn-accent btn-xs" (click)="ackRow(row)">
-                                        Ack
+                                      <button
+                                        class="btn btn-accent btn-xs"
+                                        (click)="ackRow(row)"
+                                        title="Hides it from this queue for 24 h in this browser only — the alert stays active on the engine and for everyone else"
+                                      >
+                                        Snooze 24h (this browser)
                                       </button>
                                     }
                                     @if (row.symbol) {
@@ -847,8 +861,12 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                               <button class="btn btn-ghost btn-xs" (click)="snooze(a.id, 60)">
                                 1h
                               </button>
-                              <button class="btn btn-accent btn-xs" (click)="acknowledge(a)">
-                                Ack
+                              <button
+                                class="btn btn-accent btn-xs"
+                                (click)="acknowledge(a)"
+                                title="Hides it from this queue for 24 h in this browser only — the alert stays active on the engine and for everyone else"
+                              >
+                                Snooze 24h (this browser)
                               </button>
                             }
                             @if (a.symbol) {
@@ -1368,7 +1386,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         color: var(--text-primary);
       }
       /* Page-level action (Refresh): the same outline secondary button every
-         page uses. The solid accent style is reserved for Ack. */
+         page uses. The solid accent style is reserved for the 24h snooze. */
       .btn-secondary {
         height: 36px;
         padding: 0 var(--space-4);
@@ -1662,7 +1680,7 @@ export class AlertTriagePageComponent {
   /**
    * Queue display mode. `grouped` (default) bucket alerts by
    * `severity × alertType` so 25 `WorkerFault` rows collapse to one
-   * incident card with bulk Snooze / Ack. `flat` shows every alert on
+   * incident card with bulk snoozes. `flat` shows every alert on
    * its own row for raw inspection.
    */
   protected readonly viewMode = signal<'grouped' | 'flat'>('grouped');
@@ -2235,13 +2253,14 @@ export class AlertTriagePageComponent {
     this.notify.success(`Snoozed for ${minutes} min`);
   }
 
+  /**
+   * A 24 h snooze kept in THIS browser. The engine has no acknowledge endpoint (the Alert entity
+   * has no acknowledged state), so this never tells the engine or another operator anything —
+   * it was labelled "Ack", which read as if it did.
+   */
   acknowledge(alert: AlertDto): void {
-    // The Alert entity doesn't have an explicit `AcknowledgedAt` column yet,
-    // so "acknowledge" is implemented as a 24h local snooze. When the engine
-    // ships server-side ack (a column + a PUT endpoint), this becomes a
-    // proper call and the local snooze becomes a redundant safety net.
-    this.snooze(alert.id, 60 * 24);
-    this.notify.info('Acknowledged locally (snoozed 24h). Engine-side ack pending.');
+    this.bulkSnooze([alert], 60 * 24);
+    this.notify.info(LOCAL_SNOOZE_NOTE);
   }
 
   // ── Linked alert actions ────────────────────────────────────────────
@@ -2320,7 +2339,7 @@ export class AlertTriagePageComponent {
 
   // ── Group-level actions (grouped view) ──────────────────────────────
 
-  private bulkSnooze(alerts: ParsedAlert[], minutes: number): void {
+  private bulkSnooze(alerts: readonly Pick<AlertDto, 'id'>[], minutes: number): void {
     const until = Date.now() + minutes * 60 * 1000;
     const next = { ...this.snoozedUntil() };
     for (const a of alerts) next[a.id] = until;
@@ -2335,7 +2354,9 @@ export class AlertTriagePageComponent {
 
   ackGroup(g: IncidentGroup): void {
     this.bulkSnooze(g.alerts, 60 * 24);
-    this.notify.info(`Acknowledged ${g.count} ${g.alertType} alerts (snoozed 24h)`);
+    this.notify.info(
+      `Snoozed ${g.count} ${g.alertType} alerts for 24h in this browser only — they stay active on the engine.`,
+    );
   }
 
   /** Row-level actions cover every alert folded into the row, not just the newest. */
@@ -2352,8 +2373,8 @@ export class AlertTriagePageComponent {
     this.bulkSnooze(row.alerts, 60 * 24);
     this.notify.info(
       row.count === 1
-        ? 'Acknowledged locally (snoozed 24h). Engine-side ack pending.'
-        : `Acknowledged ${row.count} alerts (snoozed 24h). Engine-side ack pending.`,
+        ? LOCAL_SNOOZE_NOTE
+        : `Snoozed ${row.count} alerts for 24h in this browser only — they stay active on the engine.`,
     );
   }
 

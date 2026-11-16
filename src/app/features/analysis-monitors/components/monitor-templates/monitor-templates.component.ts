@@ -11,6 +11,7 @@ import { catchError, of } from 'rxjs';
 
 import { AnalysisMonitorsService } from '@core/services/analysis-monitors.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { warnedSubjects } from '../../monitor-arm-warnings';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import type {
   MonitorInstantiationResult,
@@ -154,6 +155,22 @@ import type {
                   </p>
                   @for (f of r.failures; track f) {
                     <p class="err">{{ f }}</p>
+                  }
+                  @if (warned().length > 0) {
+                    <p class="muted">
+                      {{ warned().length }} subject(s) were refused over warnings you may accept ({{
+                        warned().join(', ')
+                      }}). Check them above before arming anyway.
+                    </p>
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      data-testid="arm-warned-anyway"
+                      (click)="armWarnedAnyway()"
+                      [disabled]="working()"
+                    >
+                      Arm {{ warned().length }} anyway
+                    </button>
                   }
                 </div>
               }
@@ -446,6 +463,9 @@ export class MonitorTemplatesComponent {
     return !['Portfolio', 'Sweep', 'Fleet', 'Engine'].includes(kind);
   });
 
+  /** Subjects the last fan-out refused over warnings the operator may accept. */
+  protected readonly warned = computed(() => warnedSubjects(this.result()?.failures ?? []));
+
   protected instantiate(): void {
     const t = this.selected();
     if (!t) return;
@@ -461,10 +481,33 @@ export class MonitorTemplatesComponent {
       this.notify.error('Name at least one subject to create this template for.');
       return;
     }
+    // First attempt never accepts warnings: the engine refuses a subject whose trigger looks
+    // wrong, the refusal is shown, and only the operator's "Arm anyway" resends with them accepted.
+    this.run(t.id, subjectRefs, false, null);
+  }
 
+  /** Re-arm only the subjects refused over acceptable warnings, now accepting them. */
+  protected armWarnedAnyway(): void {
+    const t = this.selected();
+    const prev = this.result();
+    const warned = this.warned();
+    if (!t || !prev || warned.length === 0) return;
+    // A subject-less template's failure is labelled with its kind; its request subject is ''.
+    const subjectRefs = this.needsSubjects() ? warned : [''];
+    this.run(t.id, subjectRefs, true, prev);
+  }
+
+  private run(
+    templateId: number,
+    subjectRefs: string[],
+    acceptWarnings: boolean,
+    previous: MonitorInstantiationResult | null,
+  ): void {
+    const t = this.selected();
+    if (!t) return;
     this.working.set(true);
     this.monitors
-      .instantiateTemplate(t.id, {
+      .instantiateTemplate(templateId, {
         subjectRefs,
         parameters: Object.fromEntries(
           Object.entries(this.paramValues()).filter(
@@ -473,18 +516,29 @@ export class MonitorTemplatesComponent {
         ),
         timeframe: t.subjectKind === 'Symbol' ? this.timeframe() : null,
         expiresInHours: Number(this.expiresInHours()),
-        // Templates are lint-validated at authoring time with their example
-        // values, so a warning here is about this instance's parameters and the
-        // operator has already chosen them deliberately.
-        acceptWarnings: true,
+        acceptWarnings,
       })
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
         this.working.set(false);
         if (res?.data) {
-          this.result.set(res.data);
+          // A retry of the warned subjects keeps the first run's armed watches and its other
+          // (non-overridable) failures on screen.
+          const merged: MonitorInstantiationResult = previous
+            ? {
+                monitorGroupId: res.data.monitorGroupId,
+                created: [...previous.created, ...res.data.created],
+                failures: [
+                  ...previous.failures.filter((f) => warnedSubjects([f]).length === 0),
+                  ...res.data.failures,
+                ],
+              }
+            : res.data;
+          this.result.set(merged);
           this.instantiated.emit(res.data);
           if (res.data.created.length > 0) this.notify.success(res.message || 'Monitors armed.');
+          else if (!acceptWarnings && warnedSubjects(res.data.failures).length > 0)
+            this.notify.error('The engine has warnings about these watches — review them below.');
           else this.notify.error(res.message || 'No monitors could be armed.');
         } else {
           this.notify.error(res?.message ?? 'Could not instantiate this template.');

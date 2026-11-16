@@ -133,7 +133,7 @@ import type { ScenarioType, StressScenario } from '../risk.types';
     <app-confirm-dialog
       [open]="toggling() !== null"
       [title]="toggling()?.isActive ? 'Switch this library scenario off for every organisation?' : 'Switch this library scenario on for every organisation?'"
-      [message]="'“' + (toggling()?.name ?? '') + '” is part of the platform library: the change applies to every organisation\\'s stress tests and pre-trade check.'"
+      [message]="'“' + (toggling()?.name ?? '') + '” is part of the platform library: the change applies to every organisation’s stress tests and pre-trade check.'"
       confirmLabel="Confirm"
       (confirm)="toggle()"
       (cancelled)="toggling.set(null)"

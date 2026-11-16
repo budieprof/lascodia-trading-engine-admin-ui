@@ -766,13 +766,16 @@ export class AccountsPageComponent implements OnInit {
       headerName: '',
       field: 'id',
       colId: 'actions',
-      width: 176,
-      minWidth: 176,
+      width: 132,
+      minWidth: 132,
       sortable: false,
       resizable: false,
       cellStyle: { paddingLeft: '6px', paddingRight: '6px' },
       // "Activate" only makes sense on an inactive account; on active rows it
-      // was a no-op button that also pushed Sync/Delete out of the cell.
+      // was a no-op button that also pushed Delete out of the cell.
+      // There is deliberately NO "Sync": PUT trading-account/{id}/sync is the EA's balance-ingest
+      // endpoint (it writes the body's Balance/Equity/Margin), so an operator click with no body
+      // zeroed the account. Balances refresh from the EA; there is no operator refresh endpoint.
       cellRenderer: (params: { data?: TradingAccountDto }) => {
         const btn = (action: string, label: string, color: string, border: string) =>
           `<button data-action="${action}" style="height:24px;padding:0 7px;border:1px solid ${border};background:transparent;border-radius:999px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;color:${color}">${label}</button>`;
@@ -781,14 +784,12 @@ export class AccountsPageComponent implements OnInit {
           : btn('activate', 'Activate', '#248A3D', 'rgba(52,199,89,0.45)');
         return `<div style="display:flex;gap:3px;align-items:center;justify-content:flex-end;height:100%">
           ${activate}
-          ${btn('sync', 'Sync', '#0040DD', 'rgba(0,113,227,0.35)')}
           ${btn('delete', 'Delete', '#D70015', 'rgba(255,59,48,0.35)')}
         </div>`;
       },
       onCellClicked: (params: any) => {
         const action = (params.event?.target as HTMLElement)?.getAttribute('data-action');
         if (action === 'activate') this.activateAccount(params.data);
-        if (action === 'sync') this.syncBalance(params.data);
         if (action === 'delete') this.deleteAccount(params.data);
       },
     },
@@ -861,26 +862,6 @@ export class AccountsPageComponent implements OnInit {
       error: () => {
         this.processing.set(false);
         this.notifications.error('Failed to activate account');
-      },
-    });
-  }
-
-  syncBalance(account: TradingAccountDto): void {
-    this.processing.set(true);
-    this.accountsService.sync(account.id).subscribe({
-      next: (res) => {
-        this.processing.set(false);
-        if (res.status) {
-          this.notifications.success(`Balance synced for "${account.accountName}"`);
-          this.dataTable()?.loadData();
-          this.loadAnalyticsSample();
-        } else {
-          this.notifications.error(res.message ?? 'Failed to sync balance');
-        }
-      },
-      error: () => {
-        this.processing.set(false);
-        this.notifications.error('Failed to sync balance');
       },
     });
   }

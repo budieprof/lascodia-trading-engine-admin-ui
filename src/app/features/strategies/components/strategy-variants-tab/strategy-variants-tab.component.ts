@@ -8,18 +8,16 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { StrategiesService } from '@core/services/strategies.service';
-import { AuditTrailService } from '@core/services/audit-trail.service';
-import { NotificationService } from '@core/notifications/notification.service';
 import type { StrategyVariantDto } from '@core/api/api.types';
 
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { PromoteVariantDialogComponent } from '../promote-variant-dialog/promote-variant-dialog.component';
 
 /**
  * Variants tab content for the strategy detail page (PRD §5.3 FR-3.3).
@@ -34,11 +32,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   imports: [
     DatePipe,
     DecimalPipe,
-    FormsModule,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    PromoteVariantDialogComponent,
   ],
   template: `
     <section class="panel">
@@ -142,7 +140,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                     type="button"
                     class="action ok"
                     (click)="askPromote(v)"
-                    [disabled]="submitting()"
+                    [disabled]="pending() !== null"
                   >
                     Promote →
                   </button>
@@ -155,42 +153,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     </section>
 
     @if (pending(); as p) {
-      <div class="modal-overlay" (click)="cancel()">
-        <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
-          <header class="modal-head">
-            <h2>Promote variant</h2>
-            <button type="button" class="close-btn" (click)="cancel()" aria-label="Close">×</button>
-          </header>
-          <p class="modal-target">
-            <span class="mono">#{{ p.id }} · {{ p.name }}</span>
-          </p>
-          <p class="modal-desc">
-            Promotion copies this variant's parameter overrides onto the base strategy and retires
-            the shadow run. The base strategy continues trading with the new parameters. This is
-            reversible only by capturing a strategy version before promoting (use the version
-            history drawer).
-          </p>
-          <label class="reason-field">
-            <span>Reason (optional, written to audit trail)</span>
-            <textarea
-              rows="2"
-              [(ngModel)]="reasonText"
-              placeholder="Why is this variant worth promoting?"
-            ></textarea>
-          </label>
-          <footer class="modal-foot">
-            <button type="button" class="btn btn-secondary" (click)="cancel()">Cancel</button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              (click)="confirm()"
-              [disabled]="submitting()"
-            >
-              {{ submitting() ? 'Promoting…' : 'Promote' }}
-            </button>
-          </footer>
-        </div>
-      </div>
+      <app-promote-variant-dialog [variant]="p" (closed)="onDialogClosed()" />
     }
   `,
   styles: [
@@ -356,99 +319,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         opacity: 0.55;
         cursor: not-allowed;
       }
-      .modal-overlay {
-        position: fixed;
-        inset: 0;
-        background: var(--backdrop-scrim, rgba(0, 0, 0, 0.45));
-        display: grid;
-        place-items: center;
-        z-index: 1000;
-      }
-      .modal {
-        background: var(--bg-primary);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        max-width: 520px;
-        width: 90%;
-        padding: var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .modal-head h2 {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      .close-btn {
-        background: none;
-        border: none;
-        font-size: 24px;
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .modal-target,
-      .modal-desc {
-        margin: 0;
-        font-size: var(--text-sm);
-      }
-      .modal-target {
-        color: var(--text-secondary);
-      }
-      .modal-desc {
-        color: var(--text-primary);
-      }
-      .reason-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .reason-field span {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .reason-field textarea {
-        padding: 8px 12px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: var(--font-sans);
-        resize: vertical;
-      }
-      .modal-foot {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
-      }
-      .btn-primary {
-        padding: 8px 18px;
-        border-radius: var(--radius-sm);
-        background: var(--accent);
-        color: #fff;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        border: none;
-        cursor: pointer;
-      }
-      .btn-primary:disabled {
-        background: var(--bg-tertiary, #d1d1d6);
-        cursor: not-allowed;
-      }
     `,
   ],
 })
 export class StrategyVariantsTabComponent {
   private readonly strategies = inject(StrategiesService);
-  private readonly auditTrail = inject(AuditTrailService);
-  private readonly notify = inject(NotificationService);
 
   readonly strategyId = input.required<number>();
 
@@ -497,58 +372,13 @@ export class StrategyVariantsTabComponent {
 
   // Promote modal --------------------------------------------------------
   protected readonly pending = signal<StrategyVariantDto | null>(null);
-  protected reasonText = '';
-  protected readonly submitting = signal(false);
 
   protected askPromote(v: StrategyVariantDto): void {
-    this.reasonText = '';
     this.pending.set(v);
   }
 
-  protected cancel(): void {
-    if (this.submitting()) return;
+  protected onDialogClosed(): void {
     this.pending.set(null);
-  }
-
-  protected confirm(): void {
-    const v = this.pending();
-    if (!v) return;
-    this.submitting.set(true);
-    const reason = this.reasonText.trim();
-    this.strategies
-      .promoteVariant(v.id)
-      .pipe(
-        finalize(() => {
-          this.submitting.set(false);
-          this.pending.set(null);
-          this.load();
-        }),
-      )
-      .subscribe({
-        next: (res) => {
-          if (res.status) {
-            this.notify.success(`Variant #${v.id} promoted.`);
-            this.auditTrail
-              .create({
-                entityType: 'StrategyVariant',
-                entityId: v.id,
-                decisionType: 'StrategyVariantPromoted',
-                outcome: 'Promoted',
-                reason: reason || null,
-                contextJson: JSON.stringify({
-                  baseStrategyId: v.baseStrategyId,
-                  name: v.name,
-                  shadowSignalCount: v.shadowSignalCount,
-                  shadowSharpeRatio: v.shadowSharpeRatio,
-                }),
-                source: 'AdminUI',
-              })
-              .subscribe({ error: () => undefined });
-          } else {
-            this.notify.error(res.message ?? 'Variant promotion failed.');
-          }
-        },
-        error: () => this.notify.error('Variant promotion failed.'),
-      });
+    this.load();
   }
 }

@@ -60,6 +60,14 @@ export interface PollOptions<T = unknown> {
    * repainting the page. Pass a cheaper one for very large payloads.
    */
   equal?: (a: T | null, b: T | null) => boolean;
+  /**
+   * What the fetch depends on (account scope, symbol, filters) — read at the start of every fetch.
+   * When it differs from the key of the value on screen, that value belongs to the PREVIOUS inputs
+   * and is dropped at once (`value` null, `loading` true again until the new fetch settles): a
+   * failed refetch must never leave another scope's numbers on screen as if they were this one's.
+   * Compared structurally. Omit for a resource with no inputs (rule 3 above then applies as before).
+   */
+  key?: () => unknown;
 }
 
 export interface PolledResource<T> {
@@ -73,7 +81,10 @@ export interface PolledResource<T> {
   readonly lastUpdated: Signal<number | null>;
   /** Trigger an extra fetch now. Does not reset the interval. */
   refresh(): void;
-  /** Stop polling. Resource remains readable. */
+  /**
+   * Stop polling for good: the interval, a tab becoming visible again and realtime events no
+   * longer refetch. Resource remains readable; an explicit `refresh()` still fetches once.
+   */
   stop(): void;
 }
 
@@ -109,9 +120,24 @@ export function createPolledResource<T>(
   const visibility$ = fromEvent(document, 'visibilitychange');
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let inflight: Subscription | null = null;
+  /** Set by stop(): nothing automatic may start polling again. */
+  let stopped = false;
+  /** The key the value on screen was fetched for (see `PollOptions.key`). */
+  let valueKey: unknown = undefined;
+  let hasValueKey = false;
 
   const runOnce = () => {
     if (inflight) inflight.unsubscribe();
+    const key = options.key ? options.key() : undefined;
+    if (options.key && hasValueKey && !structuralEqual(valueKey, key)) {
+      // The inputs moved: what is on screen answers a different question. Drop it now, so a
+      // failed or slow fetch for the new inputs can never present it as current.
+      value.set(null);
+      error.set(null);
+      lastUpdated.set(null);
+      settled.set(false);
+      hasValueKey = false;
+    }
     // Never re-raise `loading` once we have data — that is the flicker. Only
     // the subtle `refreshing` flag moves on a background fetch.
     refreshing.set(true);
@@ -127,6 +153,8 @@ export function createPolledResource<T>(
           // Identical payload → the custom `equal` makes this a no-op and
           // nothing downstream recomputes.
           value.set(result);
+          valueKey = key;
+          hasValueKey = true;
           error.set(null);
           lastUpdated.set(Date.now());
         }
@@ -142,7 +170,7 @@ export function createPolledResource<T>(
   };
 
   const startInterval = () => {
-    if (intervalId !== null || !options.intervalMs) return;
+    if (stopped || intervalId !== null || !options.intervalMs) return;
     intervalId = setInterval(() => {
       if (shouldRun()) runOnce();
     }, options.intervalMs);
@@ -155,9 +183,25 @@ export function createPolledResource<T>(
     }
   };
 
-  merge(visibility$, manualRefresh$)
+  visibility$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
+    // A stopped resource stays stopped: becoming visible used to restart it.
+    if (stopped) return;
+    if (shouldRun()) {
+      runOnce();
+      startInterval();
+    } else {
+      stopInterval();
+    }
+  });
+
+  manualRefresh$
     .pipe(takeUntilDestroyed(destroyRef))
     .subscribe(() => {
+      if (stopped) {
+        // An explicit refresh of a stopped resource fetches once and starts nothing.
+        runOnce();
+        return;
+      }
       if (shouldRun()) {
         runOnce();
         startInterval();
@@ -172,7 +216,7 @@ export function createPolledResource<T>(
     merge(...options.refreshOn.map((name) => realtime.on(name)))
       .pipe(auditTime(options.refreshDebounceMs ?? 400), takeUntilDestroyed(destroyRef))
       .subscribe(() => {
-        if (shouldRun()) runOnce();
+        if (!stopped && shouldRun()) runOnce();
       });
   }
 
@@ -196,6 +240,7 @@ export function createPolledResource<T>(
     lastUpdated: computed(() => lastUpdated()),
     refresh: () => manualRefresh$.next(),
     stop: () => {
+      stopped = true;
       stopInterval();
       if (inflight) inflight.unsubscribe();
     },

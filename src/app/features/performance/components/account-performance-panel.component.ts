@@ -472,6 +472,7 @@ export class AccountPerformancePanelComponent {
   protected readonly activeStrategies = signal<StrategyDto[] | null>(null);
   protected readonly liveAccounts = signal<TradingAccountDto[]>([]);
   protected readonly healthWorker = signal<WorkerHealthDto | null | undefined>(undefined);
+  private readonly canSeeWorkers = this.workers.canRead();
 
   protected readonly money = money;
   protected readonly count = count;
@@ -490,8 +491,10 @@ export class AccountPerformancePanelComponent {
         catchError(() => of(null)),
       )
       .subscribe((rows) => this.activeStrategies.set(rows));
-    this.workers
-      .list()
+    // `GET health/workers` is platform staff / House only (platform.infrastructure.manage): not
+    // asked without it (review O2) — the requirement then says so instead of "checking…".
+    if (this.canSeeWorkers) this.workers
+      .list({ silent: true })
       .pipe(catchError(() => of(null)))
       .subscribe((rows) =>
         this.healthWorker.set(
@@ -549,8 +552,9 @@ export class AccountPerformancePanelComponent {
       {
         label: 'StrategyHealthWorker is running',
         ok: w === undefined ? null : w === null ? null : w.status !== 'Failed' && w.isRunning,
-        detail:
-          w === undefined
+        detail: !this.canSeeWorkers
+          ? 'not available to your role (worker health is platform staff only)'
+          : w === undefined
             ? 'checking…'
             : w === null
               ? 'not reported by this engine process'

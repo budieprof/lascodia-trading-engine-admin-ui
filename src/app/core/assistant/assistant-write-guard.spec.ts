@@ -49,6 +49,39 @@ describe('AssistantWriteGuard', () => {
     expect(describeBlocked(report)).toContain('BLOCKED');
   });
 
+  it('lets the operator’s own write through right after a trusted gesture (review A10)', async () => {
+    await guard.run(() => {
+      // A synthetic event (the assistant driving the page) does not open the gate.
+      guard.noteGesture({ isTrusted: false, target: null });
+      expect(guard.admit('PUT', `${API}/admin/kill-switch/global`)).toBe('PUT /admin/kill-switch/global');
+      // A real press on the page does.
+      guard.noteGesture({ isTrusted: true, target: null });
+      expect(guard.admit('PUT', `${API}/admin/kill-switch/global`)).toBeNull();
+    }, FAST);
+  });
+
+  it('a gesture inside the assistant dock does not count', async () => {
+    const dock = document.createElement('app-assistant-dock');
+    const send = document.createElement('button');
+    dock.appendChild(send);
+    document.body.appendChild(dock);
+    try {
+      await guard.run(() => {
+        guard.noteGesture({ isTrusted: true, target: send });
+        expect(guard.admit('POST', `${API}/strategy/12/pause`)).toBe('POST /strategy/12/pause');
+      }, FAST);
+    } finally {
+      dock.remove();
+    }
+  });
+
+  it('the gesture window closes', async () => {
+    await guard.run(() => {
+      guard.noteGesture({ isTrusted: true, target: null }, Date.now() - AssistantWriteGuard.GESTURE_WINDOW_MS - 50);
+      expect(guard.admit('POST', `${API}/strategy/12/pause`)).toBe('POST /strategy/12/pause');
+    }, FAST);
+  });
+
   it('stays up for the tail and hands late refusals to the next command', async () => {
     await guard.run(() => undefined, FAST);
     expect(guard.active()).toBe(true);

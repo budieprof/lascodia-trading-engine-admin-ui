@@ -46,7 +46,10 @@ describe('pendingFor', () => {
       route: '/iam/grants',
       label: 'POST iam/grants',
       createdAt: 1000,
+      tenantId: null,
+      userId: null,
     });
+    expect(pendingFor(req, '/', 1, { tenantId: 3, userId: 12 })).toMatchObject({ tenantId: 3, userId: 12 });
   });
 
   it('refuses bodies it cannot replay faithfully', () => {
@@ -111,6 +114,8 @@ describe('StepUpService', () => {
       route: '/iam/security',
       label: 'PUT iam/security-policy',
       createdAt: Date.now() - 30_000,
+      tenantId: 3,
+      userId: 12,
       ...over,
     };
     sessionStorage.setItem(STEP_UP_PENDING_KEY, JSON.stringify(record));
@@ -182,7 +187,62 @@ describe('StepUpService', () => {
     const { stepUp, browser } = await setup(10 * 60_000);
     expect(stepUp.isFresh()).toBe(false);
     stepUp.confirmWithMfa();
-    expect(browser.assign).toHaveBeenCalledWith(`${API}/bff/login?returnUrl=%2Fiam%2Fsecurity&acr=mfa`);
+    // Asks for the organisation the tab acts in, so the round trip cannot land in another one.
+    expect(browser.assign).toHaveBeenCalledWith(
+      `${API}/bff/login?returnUrl=%2Fiam%2Fsecurity&tenant=3&acr=mfa`,
+    );
     expect(sessionStorage.getItem(STEP_UP_PENDING_KEY)).toBeNull();
+  });
+
+  it('a challenge records the organisation and person, and asks for the same organisation', async () => {
+    const { stepUp, browser } = await setup(10 * 60_000);
+    stepUp.challenge(new HttpRequest('PUT', `${ENGINE}/iam/sso`, { a: 1 }));
+    const saved = JSON.parse(sessionStorage.getItem(STEP_UP_PENDING_KEY)!) as PendingStepUp;
+    expect(saved).toMatchObject({ tenantId: 3, userId: 12 });
+    expect(browser.assign).toHaveBeenCalledWith(
+      `${API}/bff/login?returnUrl=%2Fiam%2Fsecurity&tenant=3&acr=mfa`,
+    );
+  });
+
+  it('refuses to offer an action recorded for another organisation or person', async () => {
+    const { stepUp, notify } = await setup(10_000);
+    stash({ tenantId: 1 });
+    stepUp.restore();
+    expect(stepUp.pending()).toBeNull();
+    expect(notify.error).toHaveBeenCalledWith(expect.stringContaining('different organisation'));
+    expect(sessionStorage.getItem(STEP_UP_PENDING_KEY)).toBeNull();
+
+    stash({ userId: 99 });
+    stepUp.restore();
+    expect(stepUp.pending()).toBeNull();
+  });
+
+  it('a replay the engine refuses with status:false is reported, not called done', async () => {
+    const { stepUp, ctl, notify } = await setup(20_000);
+    stash();
+    stepUp.restore();
+    const done = stepUp.retry();
+    ctl
+      .expectOne(`${ENGINE}/iam/security-policy`)
+      .flush({ status: false, message: 'Policy locked.', responseCode: '-11', data: null });
+    await expect(done).resolves.toBe(false);
+    expect(notify.success).not.toHaveBeenCalled();
+    expect(notify.error).toHaveBeenCalledWith(expect.stringContaining('Policy locked.'));
+  });
+
+  it('a replay parked for approval is not called done', async () => {
+    const { stepUp, ctl, notify } = await setup(20_000);
+    stash();
+    stepUp.restore();
+    const done = stepUp.retry();
+    ctl
+      .expectOne(`${ENGINE}/iam/security-policy`)
+      .flush(
+        { status: false, responseCode: '-202-approval', data: null },
+        { status: 202, statusText: 'Accepted' },
+      );
+    await expect(done).resolves.toBe(false);
+    expect(notify.success).not.toHaveBeenCalled();
+    expect(notify.info).toHaveBeenCalledWith(expect.stringContaining('Sent for approval'));
   });
 });

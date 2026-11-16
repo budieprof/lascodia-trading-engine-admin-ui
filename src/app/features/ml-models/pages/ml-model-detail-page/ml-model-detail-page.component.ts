@@ -1532,9 +1532,10 @@ export class MLModelDetailPageComponent {
         this.busy.set(false);
         this.showRollback.set(false);
         if (res.status) {
-          this.notifications.success('Rolled back to prior model');
-          if (res.data) {
-            this.router.navigate(['/ml-models', res.data.id]);
+          this.notifications.success(res.message || 'Rolled back to prior model');
+          // The engine answers the restored model's id (ResponseData<long>), not the model.
+          if (typeof res.data === 'number' && res.data > 0) {
+            this.router.navigate(['/ml-models', res.data]);
           } else {
             this.goBack();
           }

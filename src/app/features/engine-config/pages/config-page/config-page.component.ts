@@ -23,6 +23,8 @@ import {
   type ConfigUpsertResponse,
 } from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import type { ConfigDataType, EngineConfigDto, UpsertConfigRequest } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -104,6 +106,12 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
       >
         <app-presence-badge routeKey="engine-config" />
       </app-page-header>
+      @if (!canEdit()) {
+        <!-- Writes are platform.engine.manage (engine EngineConfigurationController PUT); reads are open. -->
+        <p class="read-only-note" role="note">
+          Read-only: changing engine settings needs the platform engine permission.
+        </p>
+      }
 
       @if (loading()) {
         <div class="loading-state">
@@ -222,7 +230,8 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
           <button
             type="button"
             class="save-btn primary"
-            [disabled]="dirtyCount() === 0 || bulkSaving()"
+            [hidden]="!canEdit()"
+            [disabled]="!canEdit() || dirtyCount() === 0 || bulkSaving()"
             (click)="saveAllDirty()"
             [title]="dirtyCount() > 0 ? 'Save all unsaved (⌘S)' : 'No unsaved changes'"
           >
@@ -364,6 +373,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                               class="config-input config-textarea"
                               rows="1"
                               [(ngModel)]="config.editValue"
+                              [disabled]="!canEdit()"
                               (ngModelChange)="markDirty(config)"
                               (keydown)="onValueKey($event, config)"
                               [title]="config.editValue"
@@ -372,6 +382,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                             <select
                               class="config-input"
                               [(ngModel)]="config.editValue"
+                              [disabled]="!canEdit()"
                               (ngModelChange)="markDirty(config)"
                               (keydown)="onValueKey($event, config)"
                             >
@@ -383,6 +394,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                               type="text"
                               class="config-input"
                               [(ngModel)]="config.editValue"
+                              [disabled]="!canEdit()"
                               (ngModelChange)="markDirty(config)"
                               (keydown)="onValueKey($event, config)"
                               [title]="config.editValue"
@@ -421,6 +433,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                           >
                         </td>
                         <td class="col-actions">
+                          @if (canEdit()) {
                           @if (config.dirty) {
                             <button
                               type="button"
@@ -444,6 +457,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                               Save
                             }
                           </button>
+                          }
                         </td>
                       </tr>
                     }
@@ -532,6 +546,13 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
 })
 export class ConfigPageComponent implements OnInit {
   private readonly configService = inject(ConfigService);
+  private readonly auth = inject(AuthService);
+  /**
+   * Engine settings are written with platform.engine.manage (review O7); reads stay open
+   * (`GET config/*` is access.viewer), so without the key the page is read-only — no edit
+   * controls, and every write path below refuses.
+   */
+  protected readonly canEdit = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
   private readonly notifications = inject(NotificationService);
   private readonly route = inject(ActivatedRoute);
 
@@ -909,6 +930,7 @@ export class ConfigPageComponent implements OnInit {
 
   // ── Edit / save ────────────────────────────────────────────────
   markDirty(config: ConfigEntry): void {
+    if (!this.canEdit()) return;
     config.dirty = config.editValue !== config.value;
     this.entries.set([...this.entries()]);
   }
@@ -926,7 +948,7 @@ export class ConfigPageComponent implements OnInit {
   reviewImmediate = false;
 
   private openReview(configs: ConfigEntry[]): void {
-    if (configs.length === 0) return;
+    if (configs.length === 0 || !this.canEdit()) return;
     this.reviewReason = '';
     this.reviewImmediate = false;
     this.review.set(configs);
@@ -940,7 +962,7 @@ export class ConfigPageComponent implements OnInit {
     const configs = this.review();
     const reason = this.reviewReason.trim();
     const immediate = this.reviewImmediate;
-    if (!configs || (immediate && !reason)) return;
+    if (!configs || (immediate && !reason) || !this.canEdit()) return;
     this.review.set(null);
     this.persist(configs, reason || null, immediate);
   }

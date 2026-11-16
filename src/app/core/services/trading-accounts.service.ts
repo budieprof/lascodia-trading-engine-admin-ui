@@ -41,10 +41,6 @@ export class TradingAccountsService {
     return this.api.put(`/trading-account/${id}/activate`);
   }
 
-  sync(id: number): Observable<ResponseData<TradingAccountDto>> {
-    return this.api.put(`/trading-account/${id}/sync`);
-  }
-
   /**
    * Assign (or clear) a per-account risk profile. riskProfileId = null clears
    * it (account reverts to strategy/default). When set, the engine sizes

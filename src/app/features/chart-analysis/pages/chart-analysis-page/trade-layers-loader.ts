@@ -1,5 +1,6 @@
 import { signal, type DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { forkJoin } from 'rxjs';
 import type { OrderDto } from '@core/api/api.types';
 import type { PositionsService } from '@core/services/positions.service';
 import type { OrdersService } from '@core/services/orders.service';
@@ -7,6 +8,11 @@ import type { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { MartingaleService } from '@core/services/martingale.service';
 import type { ChartMarker } from '../../chart/chart-host.component';
 import type { ChartPosition } from '../../overlays/trade-layer';
+
+/** The order statuses that can still fill (the ones `orderLines` draws). */
+const WORKING_ORDER_STATUSES = ['Pending', 'Submitted', 'PartialFill'] as const;
+/** Per working status — far above any real book on one symbol, so nothing working is cut off. */
+const WORKING_ORDERS_PAGE = 200;
 
 export interface TradeLayersDeps {
   symbol(): string;
@@ -54,7 +60,10 @@ export class TradeLayersLoader {
    *
    * Filtered by symbol and account server-side via the nested `filter` object — sent flat the
    * criteria are discarded in silence and the handler answers with page 1 of the whole table — and
-   * re-checked here (`positionLines` / `orderLines`).
+   * re-checked here (`positionLines` / `orderLines`). The field names differ per query: positions
+   * filter on `symbol`; orders and trade signals have NO `symbol` field (their `OrderQueryFilter` /
+   * `TradeSignalQueryFilter` ignore it) and narrow on `search`, a contains-match on the symbol —
+   * so the exact symbol is re-checked client-side.
    */
   load(): void {
     const d = this.deps;
@@ -90,24 +99,42 @@ export class TradeLayersLoader {
     // ── Working orders ────────────────────────────────────────────────────
     //
     // Only orders that can still fill (orderLines). A filled order is already a
-    // position and is drawn as one; a cancelled one is history.
+    // position and is drawn as one; a cancelled one is history. The engine's order filter
+    // takes ONE status, so each working status is asked for separately — a single
+    // newest-50 page of every status let a busy symbol's fills and cancels push its
+    // working orders off the chart.
     if (!d.showOrders()) {
       loads.orders++;
       this.workingOrders.set([]);
     } else {
       const seq = ++loads.orders;
-      d.orders
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 50,
-          filter: { symbol, tradingAccountIds: accountIds },
-          sortBy: 'id',
-          sortDirection: 'desc',
-        })
+      forkJoin(
+        WORKING_ORDER_STATUSES.map((status) =>
+          d.orders.list({
+            currentPage: 1,
+            itemCountPerPage: WORKING_ORDERS_PAGE,
+            filter: { search: symbol, status, tradingAccountIds: accountIds },
+            sortBy: 'id',
+            sortDirection: 'desc',
+          }),
+        ),
+      )
         .pipe(takeUntilDestroyed(d.destroyRef))
-        .subscribe((res) => {
-          if (seq !== loads.orders || !current() || !res?.status || !res.data) return;
-          this.workingOrders.set(res.data.data ?? []);
+        .subscribe({
+          next: (replies) => {
+            // All three or nothing: a partial set would erase working orders from the chart.
+            if (seq !== loads.orders || !current()) return;
+            if (replies.some((r) => !r?.status || !r.data)) return;
+            const sym = symbol.toUpperCase();
+            const byId = new Map<number, OrderDto>();
+            for (const r of replies)
+              for (const o of r!.data!.data ?? [])
+                if ((o.symbol ?? '').toUpperCase() === sym) byId.set(o.id, o);
+            this.workingOrders.set([...byId.values()]);
+          },
+          error: () => {
+            /* keep the last drawn orders; the next refresh tries again */
+          },
         });
     }
 
@@ -190,7 +217,9 @@ export class TradeLayersLoader {
       .list({
         currentPage: 1,
         itemCountPerPage: 100,
-        filter: { symbol },
+        // TradeSignalQueryFilter has no `symbol`: `search` is its symbol match (contains,
+        // so the exact symbol is re-checked below).
+        filter: { search: symbol },
         sortBy: 'id',
         sortDirection: 'desc',
       })

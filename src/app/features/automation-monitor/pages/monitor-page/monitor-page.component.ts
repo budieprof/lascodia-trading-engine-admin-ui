@@ -606,6 +606,15 @@ export class AutomationMonitorPageComponent {
       mls: safe(this.mlModels.listTrainingRuns(pager('StartedAt'))),
     }).pipe(
       tap(({ strategies, opts, bts, mls }) => {
+        // A feed that failed (or was refused) keeps its last rows, and is COUNTED: the page used
+        // to say nothing and stamp "last refresh" even when every feed failed.
+        const feeds: [string, { status?: boolean; data?: unknown } | null][] = [
+          ['strategies', strategies],
+          ['optimizations', opts],
+          ['backtests', bts],
+          ['ML training', mls],
+        ];
+        const failed = feeds.filter(([, r]) => !(r?.status && r.data)).map(([name]) => name);
         if (strategies?.status && strategies.data) {
           this.recentStrategies.set(strategies.data.data ?? []);
         }
@@ -618,7 +627,19 @@ export class AutomationMonitorPageComponent {
         if (mls?.status && mls.data) {
           this.recentMls.set(mls.data.data ?? []);
         }
-        this.lastRefresh.set(new Date());
+        if (failed.length === feeds.length) {
+          this.errorMessage.set(
+            'Could not read any feed — the lists below are from the last successful refresh.',
+          );
+        } else {
+          if (failed.length > 0) {
+            this.errorMessage.set(
+              `${failed.length} of ${feeds.length} feeds could not be read (${failed.join(', ')}) — those lists are from the last successful refresh.`,
+            );
+          }
+          // Only a refresh that read something moves "last refresh".
+          this.lastRefresh.set(new Date());
+        }
         this.loading.set(false);
       }),
     );

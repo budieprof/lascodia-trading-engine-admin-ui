@@ -1,26 +1,46 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# REFERENCE COPY of the admin-UI site block.
+# REFERENCE COPY of the console site (:8080) — NOT the deployed source of truth.
 #
-# The file Caddy actually runs is /opt/homebrew/etc/Caddyfile (a root
-# LaunchDaemon: `sudo brew services start caddy`). That installed file carries
-# this same :8080 site — under a longer header recording why it changed — plus a
-# second site, an `app.codiapay.com:443` LAN fast path used only by EA instances
-# on other machines, which has nothing to do with the UI and is not reproduced
-# here.
+# The deployed source of truth is the ENGINE repo's
+#     lascodia-trading-engine/deploy/caddy/Caddyfile.bluegreen
+# (blue/green money path since 2026-11-08; its security diff beside it). That file
+# is what /opt/homebrew/etc/Caddyfile on the production host is made from: it
+# also carries the global options, the `app.codiapay.com:443` LAN fast path for
+# EA instances on other machines, the Keycloak loopback sites and the `:5081`
+# pass-through — none of which concern the UI and none of which are reproduced
+# here. This copy mirrors only its :8080 site (routing, headers, CSP) so the UI
+# repo documents how the console is served; change the engine copy FIRST, then
+# bring this one in line. Last synced: 2026-11-16 (review A8/A9), plus one
+# UI-side change to land in the engine copy: hashed assets missing on disk now
+# answer 404 + no-store instead of the SPA shell.
 #
-# cloudflared maps app.codiapay.com → localhost:8080, so this block is what the
-# outside world reaches. Until 2026-09-19 its catch-all proxied `ng serve`,
-# which made every source edit a live deploy to the operator console; it now
-# serves a compiled release off disk and no Node process is in the path at all.
-#
-# Keep the two in sync when you change this one:
-#
-#     cp Caddyfile /opt/homebrew/etc/Caddyfile   # then re-append the LAN block
-#     caddy reload --config /opt/homebrew/etc/Caddyfile
+# cloudflared maps app.codiapay.com → localhost:8080, so this site is what the
+# outside world reaches. It serves a compiled release off disk; no Node process
+# is in the path.
 #
 # Deploying the UI does NOT require touching either file — `scripts/release.sh
-# publish` swaps a symlink underneath the root below.
+# publish` swaps a symlink underneath the root below. A Caddy change applies with
+#     caddy reload --config /opt/homebrew/etc/Caddyfile
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Global options (engine copy): a replaced config gives open requests at most 10 s.
+{
+	grace_period 10s
+}
+
+# The money path: api-blue / api-green, following the role:money-path leader (engine copy).
+(engine_money_path) {
+	to localhost:5091 localhost:5092
+	lb_policy first
+	lb_try_duration 5s
+	lb_try_interval 250ms
+	health_uri /health/leader
+	health_interval 1s
+	health_timeout 5s
+	health_fails 3
+	health_passes 1
+	health_status 200
+}
 
 :8080 {
 	# ── Security headers at the edge (multi-tenancy f1-prod P1.5, 2026-10-20) ─────────────────────────
@@ -30,6 +50,7 @@
 	# covers only *.app.codiapay.com (none exist), never codiapay.com's other hosts. No preload: preload
 	# is a one-way door for the whole registrable domain and needs the apex to send HSTS too.
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	# (Caddyfile.bluegreen itself still says max-age=86400; Caddyfile.security.diff beside it raises it to this.)
 
 	# Engine responses: no MIME sniffing and no server banner, also on error answers.
 	@engine_response path /api/* /health*
@@ -105,8 +126,6 @@
 		# SS-I4 (chart + Pine program, 2026-10-09): the scripting API and its hub run in the research process (Pine CPU
 		# off the money path; research publishes 127.0.0.1:5083). strategy/{id}/script/* stays on api (the live sessions
 		# live there). Roll back: put back the single `reverse_proxy localhost:5081 { header_up -Accept-Encoding }`.
-		# Enterprise onboarding: the anonymous public demo (demo, demo/*) reads the market-data store and keeps the recorded
-		# window in memory — research, so anonymous traffic never lands on the money-path process.
 		@scripting path /api/v1/lascodia-trading-engine/scripting/* /api/v1/lascodia-trading-engine/chart-flow/* /api/v1/lascodia-trading-engine/md/history /api/v1/lascodia-trading-engine/md/orderflow /api/v1/lascodia-trading-engine/md/orderflow/* /api/v1/lascodia-trading-engine/demo /api/v1/lascodia-trading-engine/demo/* /api/v1/lascodia-trading-engine/dealing/* /api/v1/lascodia-trading-engine/futures/continuous /api/v1/lascodia-trading-engine/md/crypto/orderflow /api/hubs/scripting /api/hubs/scripting/*
 		route {
 			# SECURITY (2026-10-19, multi-tenancy Phase 0): every request through this PUBLIC site is
@@ -116,7 +135,8 @@
 				header_up -Accept-Encoding
 				header_up X-Lascodia-Edge public
 			}
-			reverse_proxy localhost:5081 {
+			reverse_proxy {
+				import engine_money_path
 				header_up -Accept-Encoding
 				header_up X-Lascodia-Edge public
 			}
@@ -137,7 +157,19 @@
 	# index.html and HTTP 200, so every EA would read a dead engine as healthy
 	# and the dead-man switch would never fire. Do not remove it.
 	handle /health* {
-		reverse_proxy localhost:5081 {
+		reverse_proxy {
+			import engine_money_path
+			header_up X-Lascodia-Edge public
+		}
+	}
+
+	# Console sign-in sessions (BFF, ADR-0030 §3) and SCIM provisioning (multi-tenancy W3): served by the engine at its
+	# root, before the SPA catch-all. Public site → marked public like /api/*.
+	@engine_root path /bff/* /scim/v2/*
+	handle @engine_root {
+		reverse_proxy {
+			import engine_money_path
+			header_up -Accept-Encoding
 			header_up X-Lascodia-Edge public
 		}
 	}
@@ -185,8 +217,17 @@
 		# `header` runs BEFORE try_files in Caddy's directive order, so these
 		# match the ORIGINAL request path — which is what makes the deep-link
 		# case land in the no-cache class rather than looking like index.html.
+		#
+		# A hashed name that is NOT on disk (a tab still running an older release asks for a chunk the
+		# new one no longer has) is answered 404 + no-store — never the SPA shell. try_files used to
+		# rewrite it to index.html, served as JavaScript under the one-year `immutable` header: the
+		# browser cached an HTML page as the chunk for a year and the lazy route stayed broken. A 404
+		# lets the app's chunk-load handler reload onto the current release (core/errors/chunk-reload).
 		@hashed path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
-		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		@hashed_present {
+			path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
+			file
+		}
 
 		@revalidate not path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
 		header @revalidate Cache-Control "no-cache"
@@ -210,10 +251,9 @@
 		# TO ROLL BACK: rename this header to `Content-Security-Policy-Report-Only`
 		# and `caddy reload`. That restores reporting without blocking, which is
 		# the right first move if a page ever breaks in a way CSP could explain.
-		# Gaps program security (2026-11-01): no inline script. The console build emits none since admin-ui
-		# angular.json inlineCritical=false (the critical-CSS inliner's one-line <script> was the only one);
-		# apply this ONLY after that admin-ui release is live, or the stylesheets stay media=print. Residue:
-		# style-src keeps 'unsafe-inline' (Angular component <style> elements, charting/editor inline styles).
+		# Gaps program security (2026-11-01): no inline script — `script-src 'self'`, never 'unsafe-inline'. The
+		# console build emits none since angular.json inlineCritical=false. Residue: style-src keeps 'unsafe-inline'
+		# (Angular component <style> elements, charting/editor inline styles).
 		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 		header {
@@ -235,10 +275,23 @@
 
 		encode zstd gzip
 
+		# Hashed assets: exactly the file, cached for a year...
+		handle @hashed_present {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+		# ...or, missing, a 404 nothing may keep (see the cache classes above).
+		handle @hashed {
+			header Cache-Control "no-store"
+			respond 404
+		}
+
 		# SPA fallback: client-side routes (/ea-instances, /market-data/...)
 		# are not files on disk, so they must resolve to the shell.
-		try_files {path} /index.html
-		file_server
+		handle {
+			try_files {path} /index.html
+			file_server
+		}
 	}
 }
 

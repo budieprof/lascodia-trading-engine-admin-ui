@@ -758,3 +758,13 @@
   color: var(--text-secondary);
   text-align: center;
 }
+
+// Review O7: shown when the person may read but not write engine settings.
+.read-only-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  color: var(--text-secondary, inherit);
+  font-size: 13px;
+}

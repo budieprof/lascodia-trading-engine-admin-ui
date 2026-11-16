@@ -3,6 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { NotificationService } from '@core/notifications/notification.service';
 import { reportError } from '@core/observability/sentry';
 import { ApiError } from '@core/api/api.types';
+import { isChunkLoadError, reloadOnceForChunkError } from './chunk-reload';
 
 /**
  * Catch-all ErrorHandler. Replaces Angular's default (which logs to console and
@@ -28,6 +29,14 @@ export class GlobalErrorHandler implements ErrorHandler {
     reportError(error);
 
     if (this.isAlreadyHandled(error)) return;
+
+    // A lazy chunk of an older release that is no longer served (review A8): reload onto the live
+    // release once; a repeat within the guard window is explained instead of looping.
+    if (isChunkLoadError(error)) {
+      if (reloadOnceForChunkError(error)) return;
+      this.notifications.error('Part of the console could not be loaded. Reload the page to get the current version.');
+      return;
+    }
 
     const message = this.describe(error);
     this.notifications.error(`Unexpected error: ${message}`);

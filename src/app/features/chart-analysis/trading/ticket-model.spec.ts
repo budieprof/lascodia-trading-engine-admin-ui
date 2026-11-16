@@ -10,6 +10,7 @@ import {
   stopGuardProblem,
   ticketEntry,
   ticketLines,
+  ticketEntryProblem,
   ticketRequest,
   type TicketState,
 } from './ticket-model';
@@ -45,6 +46,18 @@ describe('ticket model (SP-I4)', () => {
       1.095,
     );
     expect(ticketRequest({ ...DEFAULT_TICKET }, 'EURUSD')).toBeNull();
+  });
+
+  it('never turns an "at price" ticket without a valid entry into a market order', () => {
+    // entryPrice:null is MARKET to the engine — a blank / invalid entry must not be a request at all.
+    expect(ticketRequest(state({ atMarket: false, entry: null }), 'EURUSD')).toBeNull();
+    expect(ticketRequest(state({ atMarket: false, entry: 0 }), 'EURUSD')).toBeNull();
+    expect(ticketRequest(state({ atMarket: false, entry: Number.NaN }), 'EURUSD')).toBeNull();
+    expect(ticketEntryProblem(state({ atMarket: false, entry: null }))).toContain('Set the entry price');
+    expect(ticketEntryProblem(state({ atMarket: false, entry: 1.095 }))).toBeNull();
+    // At market the entry is irrelevant (the engine prices it).
+    expect(ticketEntryProblem(state({ atMarket: true, entry: null }))).toBeNull();
+    expect(ticketRequest(state({ atMarket: true, entry: null }), 'EURUSD')!.entryPrice).toBeNull();
   });
 
   it('defaults to paper', () => expect(DEFAULT_TICKET.mode).toBe('Paper'));

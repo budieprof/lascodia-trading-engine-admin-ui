@@ -5750,10 +5750,20 @@ export class MlModelsPageComponent implements OnInit {
       learnerArchitecture: v.learnerArchitecture,
     };
     this.mlModelsService.triggerTraining(req).subscribe({
-      next: () => {
-        this.notifications.success('Training run triggered successfully');
-        this.showTrainingModal.set(false);
+      next: (res) => {
         this.submittingTraining.set(false);
+        // HTTP 200 + status:false is a refusal (duplicate run, unknown architecture, …): say
+        // why and keep the form open so the operator can correct it.
+        if (!res?.status) {
+          this.notifications.error(res?.message || 'The engine refused the training run.');
+          return;
+        }
+        this.notifications.success(
+          res.message && res.message !== 'Successful'
+            ? res.message
+            : 'Training run triggered successfully',
+        );
+        this.showTrainingModal.set(false);
         this.trainingTable()?.loadData();
       },
       error: () => {
@@ -5784,10 +5794,16 @@ export class MlModelsPageComponent implements OnInit {
       requiredTrades: v.requiredTrades,
     };
     this.mlEvaluationService.startShadow(req).subscribe({
-      next: () => {
+      next: (res) => {
+        this.submittingShadow.set(false);
+        if (!res?.status) {
+          this.notifications.error(
+            res?.message || 'The engine refused to start the shadow evaluation.',
+          );
+          return;
+        }
         this.notifications.success('Shadow evaluation started');
         this.showShadowModal.set(false);
-        this.submittingShadow.set(false);
         this.shadowTable()?.loadData();
       },
       error: () => {

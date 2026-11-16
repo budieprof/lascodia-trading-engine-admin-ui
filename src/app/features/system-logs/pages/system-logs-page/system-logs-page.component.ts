@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Subject, timer, takeUntil, catchError, of } from 'rxjs';
+import { Subject, timer, takeUntil, catchError, of, map, switchMap } from 'rxjs';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { SystemLogsService } from '@core/services/system-logs.service';
@@ -285,7 +285,56 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
 
   private filterChangeDebounce: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * One request stream (review O10): each fetch supersedes the one in flight (switchMap), so a slow
+   * answer to an OLD filter can never land after — and overwrite — the answer to the new one.
+   */
+  private readonly fetch$ = new Subject<void>();
+
   ngOnInit() {
+    this.fetch$
+      .pipe(
+        switchMap(() => {
+          this.loading.set(true);
+          this.errorMessage.set(null);
+          return this.logsService
+            .getRecent({
+              level: this.minLevel || undefined,
+              category: this.category?.trim() || undefined,
+              search: this.search?.trim() || undefined,
+              limit: this.limit,
+            })
+            .pipe(
+              map((res) => {
+                // An envelope refusal is an error, not "no logs".
+                if (!res || res.status === false) {
+                  return { error: res?.message || 'The engine refused the log request.' };
+                }
+                return { data: res.data ?? null };
+              }),
+              catchError((err) =>
+                of({
+                  error:
+                    (err?.error?.message as string) ??
+                    (err?.message as string) ??
+                    'Failed to load logs.',
+                }),
+              ),
+            );
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((r: { data?: EngineLogPageDto | null; error?: string }) => {
+        this.loading.set(false);
+        if (r.error !== undefined) {
+          this.errorMessage.set(r.error);
+          return;
+        }
+        if (r.data) {
+          this.pageData.set(r.data);
+          this.lastFetchedAt.set(new Date());
+        }
+      });
     this.fetchNow();
     // Auto-refresh loop: 5s cadence whenever the toggle is on. The effect
     // doesn't need to be tracked through the signal because we manually
@@ -306,31 +355,7 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
   }
 
   fetchNow() {
-    this.loading.set(true);
-    this.errorMessage.set(null);
-    this.logsService
-      .getRecent({
-        level: this.minLevel || undefined,
-        category: this.category?.trim() || undefined,
-        search: this.search?.trim() || undefined,
-        limit: this.limit,
-      })
-      .pipe(
-        catchError((err) => {
-          const msg =
-            (err?.error?.message as string) ?? (err?.message as string) ?? 'Failed to load logs.';
-          this.errorMessage.set(msg);
-          return of(null);
-        }),
-        takeUntil(this.destroy$),
-      )
-      .subscribe((res) => {
-        this.loading.set(false);
-        if (res?.data) {
-          this.pageData.set(res.data);
-          this.lastFetchedAt.set(new Date());
-        }
-      });
+    this.fetch$.next();
   }
 
   /**

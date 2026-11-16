@@ -550,6 +550,17 @@ details.method {
   background: rgba(255, 59, 48, 0.08);
   border-left: 3px solid var(--loss);
 }
+.release-error .link-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 // ── Tables ──
 .trans-scroll {

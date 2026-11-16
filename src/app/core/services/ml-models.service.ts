@@ -58,7 +58,8 @@ export class MLModelsService {
     return this.api.put(`/ml-model/${id}/activate`);
   }
 
-  rollback(data: RollbackMLModelRequest): Observable<ResponseData<MLModelDto>> {
+  /** Answers the id of the model now serving (the engine's `ResponseData<long>`), not the model. */
+  rollback(data: RollbackMLModelRequest): Observable<ResponseData<number>> {
     return this.api.post(`/ml-model/rollback`, data);
   }
 

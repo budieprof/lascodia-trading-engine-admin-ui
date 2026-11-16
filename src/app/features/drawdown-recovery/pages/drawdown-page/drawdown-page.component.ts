@@ -263,7 +263,21 @@ function emptyChart(text: string): EChartsOption {
       @if (activeTab() === 'accounts') {
         @if (accountsLoading()) {
           <app-card-skeleton [lines]="6" />
+        } @else if (accountsError() && accountsNeverLoaded()) {
+          <app-error-state
+            title="Could not load per-account recovery state"
+            [message]="
+              'The halt state of each account is unknown until this loads (' + accountsError() + ').'
+            "
+            (retry)="retryAccounts()"
+          />
         } @else {
+          @if (accountsError(); as ae) {
+            <p class="release-error" role="alert">
+              Refresh failed ({{ ae }}) — showing the last rows the engine returned.
+              <button type="button" class="link-btn" (click)="retryAccounts()">Retry</button>
+            </p>
+          }
           @if (releaseNote(); as note) {
             <p class="release-note">{{ note }}</p>
           }
@@ -1009,9 +1023,13 @@ export class DrawdownPageComponent {
   // be released.
   private readonly accountsResource = createPolledResource(
     () =>
+      // No catchError → []: an empty list here reads as "nobody is halted". A failed read (or
+      // status:false) must reach the resource's error state, which keeps the last good rows.
       this.service.listByAccount(true).pipe(
-        map((r) => r.data ?? []),
-        catchError(() => of([] as AccountRecoveryStateDto[])),
+        map((r) => {
+          if (r?.status === false) throw new Error(r.message || 'The engine refused the request.');
+          return r?.data ?? [];
+        }),
       ),
     {
       // Push-driven: the interval is only a fallback for a missed
@@ -1023,8 +1041,22 @@ export class DrawdownPageComponent {
 
   readonly allAccounts = computed(() => this.accountsResource.value() ?? []);
   readonly accountsLoading = computed(
-    () => this.accountsResource.loading() && this.accountsResource.value() === null,
+    () =>
+      this.accountsResource.loading() &&
+      this.accountsResource.value() === null &&
+      this.accountsResource.error() === null,
   );
+  /** The per-account read failed: with no rows yet that is "unknown", never "nobody halted". */
+  readonly accountsError = computed(() => {
+    const e = this.accountsResource.error() as { error?: { message?: string }; message?: string } | null;
+    if (e === null || e === undefined) return null;
+    return e?.error?.message ?? e?.message ?? 'request failed';
+  });
+  readonly accountsNeverLoaded = computed(() => this.accountsResource.value() === null);
+
+  retryAccounts(): void {
+    this.accountsResource.refresh();
+  }
 
   /**
    * Accounts the engine is actually evaluating. `listByAccount(true)` also returns
@@ -1119,8 +1151,15 @@ export class DrawdownPageComponent {
         if (!res.status || !result?.rebased) {
           // The engine refuses some rebases deliberately; surface its reason verbatim
           // rather than a generic failure, because the reason is the actionable part.
+          // The engine's message is the human sentence; refusedReason is the machine code —
+          // show the sentence first and keep the code as a suffix for support.
+          // (On status:true the message is just "Successful" — never show that as a reason.)
+          const msg = (res.status ? null : res.message?.trim()) || null;
+          const code = result?.refusedReason?.trim() || null;
           this.releaseError.set(
-            result?.refusedReason ?? res.message ?? 'The engine refused the release.',
+            msg && code && msg !== code
+              ? `${msg} (${code})`
+              : (msg ?? code ?? 'The engine refused the release.'),
           );
           return;
         }

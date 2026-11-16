@@ -796,3 +796,12 @@ table.dense td.why {
   text-overflow: ellipsis;
   color: var(--text-secondary);
 }
+
+// Review O8: the last refresh failed; the snapshot below is older than it looks.
+.stale-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #ff9500) 14%, transparent);
+  font-size: 13px;
+}

@@ -28,7 +28,7 @@ import type {
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-import { Observable, Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { Observable, Subject, Subscription, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import type { PagedData, PagerRequest } from '@core/api/api.types';
 import { structuralEqual } from '@core/signals/structural-equal';
 import { TableStateService } from './table-state.service';
@@ -494,6 +494,14 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
   private gridApi?: GridApi;
   private search$ = new Subject<string>();
   private destroy$ = new Subject<void>();
+  /**
+   * The fetch in flight, and a sequence number for the latest one. Each loadData() cancels the
+   * previous request and ignores anything but the newest answer: a slow page-1 response arriving
+   * after a fast page-2 one (or after a search / account-scope change) used to overwrite the newer
+   * rows with the older ones.
+   */
+  private loadSub: Subscription | null = null;
+  private loadSeq = 0;
 
   totalPages = signal(1);
   startItem = signal(0);
@@ -579,10 +587,13 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
       sortDirection: sortDir === 'asc' || sortDir === 'desc' ? sortDir : undefined,
     };
 
-    this.fetchData()(params)
+    const seq = ++this.loadSeq;
+    this.loadSub?.unsubscribe();
+    const sub = this.fetchData()(params)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result) => {
+          if (seq !== this.loadSeq) return;
           const totalPages = result.pager.pageNo || 1;
           // Guard against a stale out-of-range page: if the dataset shrank
           // below the current page (account-scope switch, a filter that
@@ -617,6 +628,7 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
           this.refreshing.set(false);
         },
         error: () => {
+          if (seq !== this.loadSeq) return;
           // Settle both flags, and keep whatever rows are already on screen —
           // a failed refresh must not blank a table the operator is reading.
           this.hasLoadedOnce = true;
@@ -624,6 +636,9 @@ export class DataTableComponent<T> implements OnInit, OnDestroy {
           this.refreshing.set(false);
         },
       });
+    // A synchronous source may already have answered (and even started a newer load from its
+    // page-snap branch): only remember this subscription while it is still the newest.
+    if (seq === this.loadSeq) this.loadSub = sub;
   }
 
   onGridReady(event: GridReadyEvent) {

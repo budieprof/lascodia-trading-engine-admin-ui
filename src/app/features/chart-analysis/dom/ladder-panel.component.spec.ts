@@ -295,6 +295,47 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     expect(byId('ladder-armed')).not.toBeNull();
   }
 
+  it('armed: a double click sends ONE order — a second click while the first is in flight is ignored', async () => {
+    setup();
+    await settle();
+    await armLive();
+    // Hold the engine's answer open so the first click is still in flight.
+    const pending = new Subject<unknown>();
+    trading.submit.mockImplementationOnce(() => pending as never);
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).toHaveBeenCalledTimes(1);
+    expect(byId<HTMLButtonElement>('ladder-buy-mkt')!.disabled).toBe(true);
+    expect(byId<HTMLButtonElement>('ladder-sell-mkt')!.disabled).toBe(true);
+    pending.next(ok({ mode: 'Live', tradeSignalId: 56, paperExecutionId: null, manualStrategyId: 3, preview: preview(), message: 'sent' }));
+    pending.complete();
+    await settle();
+    expect(byId<HTMLButtonElement>('ladder-buy-mkt')!.disabled).toBe(false);
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).toHaveBeenCalledTimes(2);
+  });
+
+  it('a four-eyes hold (-202-approval) on a ladder order is not shown as a refusal', async () => {
+    setup();
+    await settle();
+    await armLive();
+    trading.submit.mockImplementationOnce(
+      () =>
+        of({
+          data: { approvalId: 9, expiresAtUtc: '2026-11-17T10:00:00Z' },
+          status: false,
+          message: 'Awaiting approval',
+          responseCode: '-202-approval',
+        }) as never,
+    );
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).toHaveBeenCalledTimes(1);
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
   it('UF05: hiding the tab disarms one-click and the ladder says why', async () => {
     setup();
     await settle();

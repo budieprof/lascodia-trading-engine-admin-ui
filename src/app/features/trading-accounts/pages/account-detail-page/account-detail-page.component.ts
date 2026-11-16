@@ -28,6 +28,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'app-account-detail-page',
@@ -40,6 +41,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     MetricCardComponent,
     ErrorStateComponent,
     RelativeTimePipe,
+    ConfirmDialogComponent,
   ],
   template: `
     <div class="page">
@@ -374,9 +376,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 <dt>Risk profile (per-account)</dt>
                 <dd>
                   <select
+                    #riskSelect
                     class="account-risk-select"
-                    [disabled]="savingRiskProfile()"
-                    (change)="onAssignRiskProfile($any($event.target).value)"
+                    [disabled]="savingRiskProfile() || pendingRiskProfile() !== null"
+                    (change)="askAssignRiskProfile(riskSelect)"
                   >
                     <option value="" [selected]="a.riskProfileId === null">
                       None — use strategy / default risk
@@ -544,6 +547,16 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           }
         </section>
       }
+
+      <app-confirm-dialog
+        [open]="pendingRiskProfile() !== null"
+        title="Change the account's risk profile?"
+        [message]="pendingRiskProfileMessage()"
+        confirmLabel="Change risk profile"
+        [loading]="savingRiskProfile()"
+        (confirm)="confirmAssignRiskProfile()"
+        (cancelled)="cancelAssignRiskProfile()"
+      />
     </div>
   `,
   styles: [
@@ -1264,29 +1277,90 @@ export class AccountDetailPageComponent implements OnInit, OnDestroy {
       });
   }
 
-  /** Assign (or clear when raw === '') the per-account risk profile, then
-   *  refresh so the displayed binding + sizing implication update. */
-  onAssignRiskProfile(raw: string): void {
-    const id = this.accountId();
-    if (id === null || this.savingRiskProfile()) return;
+  /**
+   * A risk-profile change re-sizes every trade on this account, so a select change only
+   * STAGES it; the PUT runs after the operator confirms. Cancel / failure put the select back.
+   */
+  readonly pendingRiskProfile = signal<{ profileId: number | null; el: HTMLSelectElement } | null>(
+    null,
+  );
+  readonly pendingRiskProfileMessage = computed(() => {
+    const p = this.pendingRiskProfile();
+    if (!p) return '';
+    const acct = this.account()?.accountName ?? 'this account';
+    if (p.profileId === null)
+      return `Clear the per-account risk profile on ${acct}? Trades revert to the strategy / default risk sizing.`;
+    const prof = this.riskProfiles().find((r) => r.id === p.profileId);
+    const label = prof ? `${prof.name} (risk ${prof.maxRiskPerTradePct}% / trade)` : `#${p.profileId}`;
+    return `Assign ${label} to ${acct}? Every trade on this account is then sized to that % of equity, overriding the strategy profile.`;
+  });
+
+  askAssignRiskProfile(el: HTMLSelectElement): void {
+    if (this.accountId() === null || this.savingRiskProfile()) return;
+    const raw = el.value;
     const profileId = raw === '' ? null : Number(raw);
+    if (profileId !== null && !Number.isFinite(profileId)) {
+      this.resetRiskSelect(el);
+      return;
+    }
+    if (profileId === (this.account()?.riskProfileId ?? null)) return;
+    this.pendingRiskProfile.set({ profileId, el });
+  }
+
+  cancelAssignRiskProfile(): void {
+    const p = this.pendingRiskProfile();
+    if (this.savingRiskProfile()) return;
+    this.pendingRiskProfile.set(null);
+    if (p) this.resetRiskSelect(p.el);
+  }
+
+  /** Assign (or clear) the staged per-account risk profile, then refresh. */
+  confirmAssignRiskProfile(): void {
+    const id = this.accountId();
+    const pending = this.pendingRiskProfile();
+    if (id === null || !pending || this.savingRiskProfile()) return;
+    const { profileId, el } = pending;
     this.savingRiskProfile.set(true);
+    const fail = (msg: string) => {
+      this.savingRiskProfile.set(false);
+      this.pendingRiskProfile.set(null);
+      this.resetRiskSelect(el);
+      this.notifications.error(msg);
+    };
     this.accountsService
       .assignRiskProfile(id, profileId)
       .pipe(takeUntil(this.destroy$))
-      .subscribe((res) => {
-        this.savingRiskProfile.set(false);
-        if (res?.status) {
+      .subscribe({
+        next: (res) => {
+          if (res?.responseCode === '-202-approval') {
+            // Parked for a second operator (the approval interceptor says so): not applied yet.
+            this.savingRiskProfile.set(false);
+            this.pendingRiskProfile.set(null);
+            this.resetRiskSelect(el);
+            return;
+          }
+          if (!res?.status) {
+            fail(res?.message ?? 'Failed to assign risk profile.');
+            return;
+          }
+          this.savingRiskProfile.set(false);
+          this.pendingRiskProfile.set(null);
           this.notifications.success(
             profileId === null
               ? 'Risk profile cleared — account reverts to strategy/default.'
               : 'Risk profile assigned — trades on this account now size to its risk %.',
           );
           this.loadAll();
-        } else {
-          this.notifications.error(res?.message ?? 'Failed to assign risk profile.');
-        }
+        },
+        error: (e) =>
+          fail(e?.error?.message ?? e?.message ?? 'Failed to assign risk profile.'),
       });
+  }
+
+  /** Put the select back on the account's current binding (the change was not applied). */
+  private resetRiskSelect(el: HTMLSelectElement): void {
+    const cur = this.account()?.riskProfileId ?? null;
+    el.value = cur === null ? '' : String(cur);
   }
 
   heartbeatAgeSec(ea: EAInstanceDto): number | null {

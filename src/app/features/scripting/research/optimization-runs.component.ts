@@ -26,7 +26,7 @@ export const RUN_POLL_MS = 10_000;
 /**
  * The strategy's optimization runs (PE-I4 workbench): status and stage in words, what each ranked by, its best health
  * score against the baseline — re-read every 10 s while one is queued or running. Selecting a run opens its results.
- * A completed run can be approved (its best parameters applied to the strategy) or rejected only by an explicit,
+ * A completed run can be approved (a gradual rollout of its best parameters starts) or rejected only by an explicit,
  * confirmed operator action: nothing here approves or promotes on its own.
  */
 @Component({
@@ -272,9 +272,10 @@ export class OptimizationRunsComponent {
     const ok = await this.dialogs.confirm({
       title: `Approve optimization run #${run.id}?`,
       message:
-        'Approving applies the run’s best parameters to the strategy. The engine re-checks the run before it applies them.',
+        'Approving starts a gradual rollout of the run’s best parameters (25% of signals first, then 50/75/100% as the ' +
+        'live results hold up; rolled back automatically if they degrade). Refused while the strategy is mid-rollout.',
       details: run.bestParametersJson ? [`Best parameters: ${run.bestParametersJson}`] : undefined,
-      confirmLabel: 'Approve and apply',
+      confirmLabel: 'Approve and start rollout',
     });
     if (!ok) return;
     await this.act(

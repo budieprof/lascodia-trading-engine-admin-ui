@@ -29,11 +29,13 @@ import type {
   TicketMode,
 } from './manual-trading.types';
 import {
+  DEFAULT_TICKET,
   defaultBrackets,
   firstRefusal,
   flipBrackets,
   stopGuardProblem,
   ticketEntry,
+  ticketEntryProblem,
   ticketRequest,
   type TicketState,
 } from './ticket-model';
@@ -582,7 +584,25 @@ export class OrderTicketComponent {
     lots: number;
     account: string;
     accountType: string;
+    /** The exact request this confirmation was built for — submit refuses any other. */
+    key: string;
   } | null>(null);
+
+  /** The ticket as the engine would receive it (null = not a request yet). */
+  private readonly ticketKey = computed(() => {
+    const r = ticketRequest(this.state(), this.symbol());
+    return r ? JSON.stringify(r) : null;
+  });
+  /** The request the shown preview answered; a preview counts only for that exact request. */
+  private readonly previewKey = signal<string | null>(null);
+  /**
+   * The dry run of THIS ticket — never one of an earlier edit still on screen during the 350 ms
+   * debounce. Every gate (submit enabled, the live confirm, the send) reads this, not `preview`.
+   */
+  private readonly currentPreview = computed(() => {
+    const key = this.ticketKey();
+    return key !== null && this.previewKey() === key ? this.preview() : null;
+  });
 
   /** Accounts a ticket can be for: those with a live EA (paper tickets too — they are priced on that account). */
   readonly accounts = computed(() => {
@@ -610,9 +630,14 @@ export class OrderTicketComponent {
 
   readonly submitBlockedReason = computed(() => {
     if (this.state().accountId === null) return 'Choose the account the ticket is for.';
+    const entryProblem = ticketEntryProblem(this.state());
+    if (entryProblem) return entryProblem;
     if (this.guardProblem()) return this.guardProblem();
-    const p = this.preview();
-    if (!p) return this.loading() ? null : 'Waiting for the engine to check the ticket.';
+    const p = this.currentPreview();
+    if (!p)
+      return this.loading() || this.preview() !== null
+        ? 'Checking the edited ticket…'
+        : 'Waiting for the engine to check the ticket.';
     return firstRefusal(p.gates)?.detail ?? p.refusedReason;
   });
 
@@ -620,7 +645,7 @@ export class OrderTicketComponent {
     () =>
       !this.submitting() &&
       !this.loading() &&
-      !!this.preview()?.canSubmit &&
+      !!this.currentPreview()?.canSubmit &&
       !this.submitBlockedReason(),
   );
 
@@ -659,6 +684,7 @@ export class OrderTicketComponent {
     const request = ticketRequest(this.state(), this.symbol());
     if (!request) return;
     const seq = ++this.seq;
+    const key = JSON.stringify(request);
     this.loading.set(true);
     this.trading
       .preview(request)
@@ -669,12 +695,14 @@ export class OrderTicketComponent {
           this.loading.set(false);
           if (!res?.status || !res.data) {
             this.preview.set(null);
+            this.previewKey.set(null);
             this.previewError.set(res?.message || 'The engine could not check the ticket.');
             this.previewChange.emit(null);
             return;
           }
           this.previewError.set(null);
           this.preview.set(res.data);
+          this.previewKey.set(key);
           this.previewChange.emit(res.data);
           this.applyDefaultBrackets(res.data);
         },
@@ -753,14 +781,16 @@ export class OrderTicketComponent {
 
   /** Paper submits at once; Live asks once more, naming the account and the size. */
   askSubmit(): void {
-    const p = this.preview();
-    if (!this.canSubmit() || !p) return;
+    const p = this.currentPreview();
+    const key = this.ticketKey();
+    if (!this.canSubmit() || !p || key === null) return;
     if (this.state().mode === 'Live') {
       this.confirmLive.set({
         direction: p.direction,
         lots: p.lotsAfterRiskCheck ?? p.lots ?? 0,
         account: p.account.accountId,
         accountType: p.account.accountType,
+        key,
       });
       return;
     }
@@ -770,6 +800,17 @@ export class OrderTicketComponent {
   submit(): void {
     const request = ticketRequest(this.state(), this.symbol());
     if (!request || this.submitting()) return;
+    const key = JSON.stringify(request);
+    // Only the exact ticket the engine just checked (and, live, the one the operator confirmed)
+    // is sent: an edit after the confirm opened makes it stale, and it is asked again.
+    if (this.previewKey() !== key || !this.currentPreview()?.canSubmit) {
+      this.confirmLive.set(null);
+      return;
+    }
+    if (this.state().mode === 'Live' && this.confirmLive()?.key !== key) {
+      this.confirmLive.set(null);
+      return;
+    }
     this.submitting.set(true);
     this.trading
       .submit(request)
@@ -783,9 +824,31 @@ export class OrderTicketComponent {
             this.submitted.emit(res.data);
             return;
           }
+          if (res?.responseCode === '-202-approval') {
+            // Parked for a second authorised person — accepted, not refused, so never an error
+            // and never an invitation to resend. The approval interceptor announces a well-formed
+            // hold (it carries an approvalId); say it here only when it could not.
+            const hold = res.data as unknown as { approvalId?: number | string } | null;
+            if (hold?.approvalId === undefined || hold?.approvalId === null)
+              this.notify.info(
+                'Sent for approval: the ticket waits for a second authorised person, and the engine judges it again when it is approved.',
+              );
+            // Reset the ticket (account, mode and side stay; the levels belonged to this order).
+            this.preview.set(null);
+            this.previewKey.set(null);
+            this.previewChange.emit(null);
+            this.state.update((st) => ({
+              ...DEFAULT_TICKET,
+              accountId: st.accountId,
+              mode: st.mode,
+              direction: st.direction,
+            }));
+            return;
+          }
           // Refused: show the engine's judgement (it re-ran every check) and keep the ticket.
           if (res?.data?.preview) {
             this.preview.set(res.data.preview);
+            this.previewKey.set(key);
             this.previewChange.emit(res.data.preview);
           }
           this.notify.error(res?.message || 'The ticket was refused.');

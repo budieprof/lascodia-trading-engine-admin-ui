@@ -7,7 +7,7 @@ import { DeadLetterService } from '@core/services/dead-letter.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { refetchOnChange } from '@core/polling/refetch-on-change';
-import type { DeadLetterDto } from '@core/api/api.types';
+import { ApiError, type DeadLetterDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -161,7 +161,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
       } @else if (resource.error() && resource.value() === null) {
         <app-error-state
           title="Could not load dead letters"
-          message="Engine returned an error. The dead-letter list endpoint may be unhealthy — check System Health."
+          [message]="loadErrorText()"
           (retry)="resource.refresh()"
         />
       } @else if (totalCount() === 0) {
@@ -1222,6 +1222,14 @@ export class DeadLetterPageComponent {
       ),
     { intervalMs: 60_000 },
   );
+
+  /** The engine's own refusal (ApiError from the service, review O11), else the generic line. */
+  protected loadErrorText(): string {
+    const err = this.resource.error();
+    return err instanceof ApiError && err.message
+      ? err.message
+      : 'Engine returned an error. The dead-letter list endpoint may be unhealthy — check System Health.';
+  }
 
   constructor() {
     // The window is a server filter now; refetch when it changes (not on the first run — the

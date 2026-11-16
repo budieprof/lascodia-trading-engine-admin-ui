@@ -12,7 +12,7 @@ import type {
   EngineObservabilityDto,
   FleetObservabilityDto,
 } from '@core/api/api.types';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -516,20 +516,16 @@ export class FleetHealthPageComponent {
   private readonly runtimeConfig = inject(RUNTIME_CONFIG);
 
   // ── Polled resources ─────────────────────────────────────────────
+  // Not caught into null: a failed read must reach the verdict as "telemetry unavailable", not
+  // vanish into "Fleet healthy" (review O4). The resource keeps the last good value and records
+  // the failure in error(); an envelope refusal (status:false) counts as a failure too.
   protected readonly fleetResource = createPolledResource(
-    () =>
-      this.observ.fleet().pipe(
-        map((r) => r.data ?? null),
-        catchError(() => of<FleetObservabilityDto | null>(null)),
-      ),
+    () => this.observ.fleet().pipe(map((r) => envelopeData<FleetObservabilityDto>(r, 'fleet'))),
     { intervalMs: 10_000 },
   );
   protected readonly engineResource = createPolledResource(
     () =>
-      this.observ.engine().pipe(
-        map((r) => r.data ?? null),
-        catchError(() => of<EngineObservabilityDto | null>(null)),
-      ),
+      this.observ.engine().pipe(map((r) => envelopeData<EngineObservabilityDto>(r, 'engine'))),
     { intervalMs: 10_000 },
   );
   /**
@@ -626,6 +622,10 @@ export class FleetHealthPageComponent {
       dbLatencyMs: e ? e.dbLatencyMs : null,
       outboxPending: e ? e.outboxPending : null,
       staleMinutes: this.staleMinutes(),
+      unavailable: [
+        ...(this.fleetResource.error() !== null ? ['fleet summary'] : []),
+        ...(this.engineResource.error() !== null ? ['engine telemetry'] : []),
+      ],
     });
   });
 
@@ -818,4 +818,10 @@ export class FleetHealthPageComponent {
     if (v === null || v === undefined) return '—';
     return `${(v * 100).toFixed(1)}%`;
   }
+}
+
+/** `data` of a successful envelope; throws on a refusal so the resource records it as an error. */
+function envelopeData<T>(r: { status?: boolean; data?: T | null; message?: string | null } | null, what: string): T | null {
+  if (!r || r.status === false) throw new Error(r?.message || `The ${what} observability read was refused.`);
+  return r.data ?? null;
 }

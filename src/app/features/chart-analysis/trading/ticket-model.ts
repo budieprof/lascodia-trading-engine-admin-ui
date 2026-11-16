@@ -71,9 +71,24 @@ export function ticketEntry(state: TicketState, quote: LiveQuote | null): number
   return state.atMarket ? marketEntry(state.direction, quote) : state.entry;
 }
 
-/** The request both ticket endpoints take; null until an account is chosen. */
+/**
+ * Why the ticket's entry cannot be asked about, or null. An "at price" ticket with no valid entry
+ * would send `entryPrice: null` — which the engine reads as a MARKET order — so it is not a request.
+ */
+export function ticketEntryProblem(state: TicketState): string | null {
+  if (state.atMarket) return null;
+  if (state.entry === null || !Number.isFinite(state.entry) || !(state.entry > 0))
+    return 'Set the entry price (or switch to market): an "at price" ticket without one is not sent.';
+  return null;
+}
+
+/**
+ * The request both ticket endpoints take; null until an account is chosen, and null for an
+ * "at price" ticket without a valid entry (never silently a market order).
+ */
 export function ticketRequest(state: TicketState, symbol: string): ManualTradeRequest | null {
   if (state.accountId === null) return null;
+  if (ticketEntryProblem(state) !== null) return null;
   return {
     tradingAccountId: state.accountId,
     symbol,

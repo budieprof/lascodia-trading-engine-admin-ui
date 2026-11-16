@@ -858,9 +858,12 @@ export class BacktestQueueFormComponent {
       symbol: s.symbol,
       timeframe: s.timeframe,
       initialBalance: this.initialBalance()!,
-      // UTC midnight: the engine's dates are UTC.
+      // The engine's dates are UTC and its candle window is INCLUSIVE at both ends
+      // (BacktestWorker: Timestamp >= FromDate && Timestamp <= ToDate). The end date is a whole
+      // day, so it runs to the day's last second — midnight dropped every bar of the last day
+      // but its 00:00 open.
       fromDate: `${this.fromDate()}T00:00:00Z`,
-      toDate: `${this.toDate()}T00:00:00Z`,
+      toDate: `${this.toDate()}T23:59:59Z`,
     };
     const sym = this.symbolOverride().trim().toUpperCase();
     if (sym && sym !== s.symbol.toUpperCase()) req.symbolOverride = sym;

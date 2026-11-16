@@ -29,6 +29,15 @@ describe('attentionItems / overallTone', () => {
     expect(overallTone(items)).toBe('ok');
   });
 
+  it('says the engine is unreachable (and the figures stale) rather than "not running"', () => {
+    const since = '2026-11-16T10:00:00Z';
+    const items = attentionItems({ ...base, running: false, unreachableSince: since });
+    expect(items[0].text).toContain('Engine unreachable');
+    expect(items.some((x) => x.text === 'Engine is not running')).toBe(false);
+    expect(overallTone(items)).not.toBe('ok');
+    expect(attentionItems({ ...base, unreachableSince: '' })[0].text).toContain('no status read');
+  });
+
   it('lists worst first and treats idle workers as neutral', () => {
     const items = attentionItems({ ...base, failed: 2, idle: 4, dlqTotal: 1 });
     expect(items.map((x) => x.text)).toEqual([

@@ -101,6 +101,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                   </span>
                 </div>
                 <div class="hero-meta">
+                  @if (canSeeInfra()) {
                   <span class="meta-pair">
                     <span class="meta-label">Workers</span>
                     <span class="meta-value">{{ workerSnapshots().length }}</span>
@@ -134,6 +135,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                       {{ dlqTotal() ?? '—' }}
                     </span>
                   </span>
+                  }
                 </div>
               </div>
 
@@ -153,6 +155,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                   [dotColor]="s.pendingOrders > 0 ? 'var(--warning)' : ''"
                   [caption]="s.pendingOrders > 0 ? 'Waiting to be filled or cancelled' : null"
                 />
+                @if (canSeeInfra()) {
                 <app-metric-card
                   label="Healthy workers"
                   [value]="workerCounts().Healthy"
@@ -185,6 +188,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                   [dotColor]="(dlqTotal() ?? 0) > 0 ? 'var(--loss)' : ''"
                   [caption]="(dlqTotal() ?? 0) > 0 ? 'Events never delivered to a consumer' : null"
                 />
+                }
               </div>
 
               <!-- Non-healthy workers first: this is the list the operator came for. Idle is
@@ -269,6 +273,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
 
               <!-- Fleet + dead letters side by side. The fleet is a proportional bar, not a donut:
                    at 94 of 98 healthy a donut is one green ring (the donut is on Infrastructure). -->
+              @if (canSeeInfra()) {
               <div class="hp-charts">
                 <section class="hp-board">
                   <header class="hp-board-head">
@@ -359,6 +364,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                   </section>
                 }
               </div>
+              }
 
               <!-- Quick actions / drill-down links -->
               <h4 class="hp-section-label">Go deeper</h4>
@@ -367,6 +373,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                   <span class="hp-action-label">Engine Overview</span>
                   <span class="hp-action-desc"> Combined status + worker + DLQ panel </span>
                 </a>
+                @if (canSeeInfra()) {
                 <a routerLink="/worker-health" class="hp-action">
                   <span class="hp-action-label">Worker Health</span>
                   <span class="hp-action-desc">
@@ -379,6 +386,7 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
                     {{ dlqTotal() ?? '—' }} unresolved · retry posture
                   </span>
                 </a>
+                }
                 <a routerLink="/audit-trail" class="hp-action">
                   <span class="hp-action-label">Audit trail</span>
                   <span class="hp-action-desc">Operator-facing change log</span>
@@ -399,7 +407,14 @@ import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './he
 
         @if (activeTab() === 'infrastructure') {
           <!-- Per-category worker breakdown -->
-          @if (workerSnapshots().length > 0) {
+          @if (!canSeeInfra()) {
+            <!-- health/workers and dead-letter/list are platform staff / House only
+                 (platform.infrastructure.manage): never polled without it, never shown as 0. -->
+            <app-empty-state
+              title="Not available to your role"
+              description="Worker and dead-letter details need the platform infrastructure permission."
+            />
+          } @else if (workerSnapshots().length > 0) {
             <!-- 8-card infra KPI strip — fleet-wide performance signals. Durations are shown
                  in a readable unit (393,015 ms → 6.6 min); the exact ms stays in the title. -->
             <div class="hp-kpis">
@@ -743,9 +758,13 @@ export class HealthPageComponent {
   // /health/workers returns a raw array, not a ResponseData envelope.
   // No catchError: a failed read used to become [] and paint "0%" healthy in red; the resource
   // keeps the last good list and records the failure in error().
-  protected readonly workersResource = createPolledResource(() => this.workersService.list(), {
-    intervalMs: 15_000,
-  });
+  /** `GET health/workers` + `POST dead-letter/list` need platform.infrastructure.manage (review O2). */
+  protected readonly canSeeInfra = computed(() => this.workersService.canRead());
+
+  protected readonly workersResource = createPolledResource(
+    () => this.workersService.list({ silent: true }),
+    { intervalMs: 15_000, active: this.canSeeInfra },
+  );
 
   // Newest 25 unresolved DLQ rows plus the queue's real total (the page used to show the
   // capped row count as "Unresolved DLQ").
@@ -758,14 +777,14 @@ export class HealthPageComponent {
           filter: { isResolved: false },
           sortBy: 'deadLetteredAt',
           sortDirection: 'desc',
-        })
+        }, { silent: true })
         .pipe(
           map((r) => ({
             rows: r.data?.data ?? [],
             total: r.data?.pager?.totalItemCount ?? r.data?.data?.length ?? 0,
           })),
         ),
-    { intervalMs: 15_000 },
+    { intervalMs: 15_000, active: this.canSeeInfra },
   );
 
   readonly status = computed(() => this.resource.value());

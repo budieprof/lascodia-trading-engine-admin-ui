@@ -8,7 +8,17 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
+import {
+  Observable,
+  catchError,
+  forkJoin,
+  from,
+  map,
+  mergeMap,
+  of,
+  switchMap,
+  toArray,
+} from 'rxjs';
 
 import { AlgoEngineerService } from '@core/services/algo-engineer.service';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -42,6 +52,7 @@ import {
 import {
   auditKindLabel,
   buildWorkOrder,
+  extractPendingApprovals,
   formatAgo,
   isEngineerConversation,
   runningWorkOrders,
@@ -58,16 +69,15 @@ const CONVERSATION_PAGE = 40;
 /** Sessions to fetch a run state for. Only ones the list says have a run. */
 const RUN_LIMIT = 12;
 /**
- * Sessions whose thread is read looking for open approval cards.
+ * Thread reads in flight at once while scanning for open approval cards.
  *
- * The thread is the ONLY place a pending card lives, and reading one is not cheap, so this is
- * deliberately small and aimed where cards actually are: a run that is alive (a Working run can hold
- * an open card too — the host stops blocking on it after ~3 minutes but the card stays Pending), a
- * run that stopped reporting, and anything touched in the last few hours. A card left open on a work
- * order that finished days ago is not shown here; its conversation still has it.
+ * The thread is the ONLY place a pending card lives (the engine has no cross-thread "pending
+ * approvals" read), so EVERY listed work order is scanned — the old scan read only the six most
+ * recent and silently missed a card left open on an older one. Reads are cached between polls (see
+ * `threadCache`), so after the first pass only threads that changed, are running, or still hold an
+ * open card are re-read.
  */
-const APPROVAL_SCAN_LIMIT = 6;
-const APPROVAL_SCAN_WINDOW_MS = 6 * 3_600_000;
+const APPROVAL_SCAN_CONCURRENCY = 4;
 
 interface OpsBoard {
   conversations: AnalysisConversationSummaryDto[];
@@ -77,6 +87,8 @@ interface OpsBoard {
   changeSets: AgentChangeSetDto[];
   /** Null when the audit endpoint is not deployed (or failed) — the page then degrades, silently. */
   audit: AlgoEngineerAuditRowDto[] | null;
+  /** Threads whose read failed this poll: an approval held there may be missing from "Waiting for you". */
+  unreadThreads: number;
 }
 
 const EMPTY_BOARD: OpsBoard = {
@@ -84,6 +96,7 @@ const EMPTY_BOARD: OpsBoard = {
   runs: {},
   monitors: {},
   turns: {},
+  unreadThreads: 0,
   changeSets: [],
   audit: null,
 };
@@ -158,8 +171,22 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
             }
             <span class="hint">Approvals nobody has answered — each one holds its work order</span>
           </header>
+          @if (board().unreadThreads > 0) {
+            <p class="none unread" role="alert">
+              Could not read {{ board().unreadThreads }} work-order thread{{
+                board().unreadThreads === 1 ? '' : 's'
+              }}
+              — an approval held there may be missing below. It retries on the next refresh.
+            </p>
+          }
           @if (approvals().length === 0) {
-            <p class="none">Nothing is waiting on you.</p>
+            <p class="none">
+              {{
+                board().unreadThreads > 0
+                  ? 'Nothing waiting in the threads that could be read.'
+                  : 'Nothing is waiting on you.'
+              }}
+            </p>
           } @else {
             <app-ops-approvals [approvals]="approvals()" />
           }
@@ -590,6 +617,10 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
         font-size: var(--text-sm);
         color: var(--text-tertiary);
       }
+      .none.unread {
+        color: var(--warning);
+        margin-bottom: var(--space-2);
+      }
       .kpis {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -757,13 +788,19 @@ export class AlgoEngineerOperationsPageComponent {
 
   protected readonly stopping = signal<number | null>(null);
 
+  /** Declared before `resource`, whose first fetch may run during construction. Last good read of each thread, keyed by conversation, with the activity stamp it was read at. */
+  private readonly threadCache = new Map<
+    number,
+    { stamp: string; turns: SpotAnalysisFollowUpTurnDto[] }
+  >();
+
   protected readonly resource = createPolledResource<OpsBoard>(() => this.loadBoard(), {
     intervalMs: 20_000,
     refreshOn: ['analysisConversationChanged', 'analysisMonitorChanged', 'analysisMonitorFired'],
     refreshDebounceMs: 800,
   });
 
-  private readonly board = computed(() => this.resource.value() ?? EMPTY_BOARD);
+  protected readonly board = computed(() => this.resource.value() ?? EMPTY_BOARD);
 
   protected readonly firstLoad = computed(
     () => this.resource.loading() && this.board().conversations.length === 0,
@@ -884,14 +921,18 @@ export class AlgoEngineerOperationsPageComponent {
             .filter((c) => (c.runStatus ?? '').trim().length > 0)
             .slice(0, RUN_LIMIT);
           const withMonitors = conversations.filter((c) => (c.activeMonitorCount ?? 0) > 0);
-          const toScan = conversations
-            .filter(
-              (c) =>
-                isRunLive(c.runStatus) ||
-                (c.runStatus ?? '').toLowerCase() === 'stale' ||
-                nowMs - Date.parse(c.lastActivityAtUtc) < APPROVAL_SCAN_WINDOW_MS,
-            )
-            .slice(0, APPROVAL_SCAN_LIMIT);
+          // Re-read a thread when it is new to us, changed since the last read, is running (or
+          // stopped reporting), or still held an open card — a cached read stands in otherwise.
+          const toScan = conversations.filter((c) => {
+            const hit = this.threadCache.get(c.llmInvocationId);
+            return (
+              !hit ||
+              hit.stamp !== c.lastActivityAtUtc ||
+              isRunLive(c.runStatus) ||
+              (c.runStatus ?? '').toLowerCase() === 'stale' ||
+              extractPendingApprovals(c.llmInvocationId, '', hit.turns, nowMs).length > 0
+            );
+          });
 
           return forkJoin({
             conversations: of(conversations),
@@ -911,16 +952,7 @@ export class AlgoEngineerOperationsPageComponent {
                 ),
               ),
             ).pipe(map((pairs) => Object.fromEntries(pairs))),
-            turns: collect(
-              toScan.map((c) =>
-                this.marketData.getAnalysisFollowUps(c.llmInvocationId, { silent: true }).pipe(
-                  map((r) => [c.llmInvocationId, r?.data ?? []] as const),
-                  catchError(() =>
-                    of([c.llmInvocationId, [] as SpotAnalysisFollowUpTurnDto[]] as const),
-                  ),
-                ),
-              ),
-            ).pipe(map((pairs) => Object.fromEntries(pairs))),
+            turns: this.scanThreads(conversations, toScan),
             changeSets: this.algoEngineer.getChangeSets(null, 100).pipe(
               map((r) => r?.data ?? []),
               catchError(() => of<AgentChangeSetDto[]>([])),
@@ -931,9 +963,56 @@ export class AlgoEngineerOperationsPageComponent {
               map((r) => (r?.status ? (r.data ?? []) : null)),
               catchError(() => of(null)),
             ),
-          });
+          }).pipe(
+            map(({ turns, ...rest }) => ({
+              ...rest,
+              turns: turns.byId,
+              unreadThreads: turns.unread,
+            })),
+          );
         }),
       );
+  }
+
+  /**
+   * Read `toScan`'s threads (a few at a time) and answer every listed conversation's turns: fresh
+   * where read, cached otherwise. A failed read is COUNTED (and its cached turns, if any, kept) —
+   * it used to become [] and an open card there simply vanished from "Waiting for you".
+   */
+  private scanThreads(
+    conversations: readonly AnalysisConversationSummaryDto[],
+    toScan: readonly AnalysisConversationSummaryDto[],
+  ): Observable<{ byId: Record<number, SpotAnalysisFollowUpTurnDto[]>; unread: number }> {
+    const reads = from(toScan).pipe(
+      mergeMap(
+        (c) =>
+          this.marketData.getAnalysisFollowUps(c.llmInvocationId, { silent: true }).pipe(
+            map((r) => ({ c, turns: r?.status ? (r.data ?? []) : null })),
+            catchError(() => of({ c, turns: null as SpotAnalysisFollowUpTurnDto[] | null })),
+          ),
+        APPROVAL_SCAN_CONCURRENCY,
+      ),
+      toArray(),
+    );
+    return reads.pipe(
+      map((results) => {
+        let unread = 0;
+        for (const { c, turns } of results) {
+          if (turns === null) unread++;
+          else this.threadCache.set(c.llmInvocationId, { stamp: c.lastActivityAtUtc, turns });
+        }
+        // Forget conversations that left the list.
+        const listed = new Set(conversations.map((c) => c.llmInvocationId));
+        for (const id of [...this.threadCache.keys()])
+          if (!listed.has(id)) this.threadCache.delete(id);
+        const byId: Record<number, SpotAnalysisFollowUpTurnDto[]> = {};
+        for (const c of conversations) {
+          const hit = this.threadCache.get(c.llmInvocationId);
+          if (hit) byId[c.llmInvocationId] = hit.turns;
+        }
+        return { byId, unread };
+      }),
+    );
   }
 
   protected stopRun(sessionId: number): void {

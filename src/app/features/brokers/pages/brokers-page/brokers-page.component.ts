@@ -14,6 +14,8 @@ import { Subject, catchError, forkJoin, of, takeUntil, timer } from 'rxjs';
 
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAAdminService } from '@core/services/ea-admin.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import type { EAFleetItem, TradingAccountDto } from '@core/api/api.types';
 import {
   FLEET_STATUS_LABELS,
@@ -95,11 +97,15 @@ import {
         />
         <app-metric-card
           label="Active EAs"
-          [value]="dataUnavailable() ? null : activeEaCount()"
+          [value]="dataUnavailable() || !canSeeEas() ? null : activeEaCount()"
           format="number"
-          [dotColor]="anyEaDisconnected() ? '#FF3B30' : '#34C759'"
+          [dotColor]="!canSeeEas() ? '' : anyEaDisconnected() ? '#FF3B30' : '#34C759'"
           [caption]="
-            anyEaDisconnected() ? disconnectedEaCount() + ' disconnected' : 'all connected'
+            !canSeeEas()
+              ? 'not available to your role'
+              : anyEaDisconnected()
+                ? disconnectedEaCount() + ' disconnected'
+                : 'all connected'
           "
         />
         <app-metric-card
@@ -141,8 +147,11 @@ import {
             <span class="count-chip">{{ brokers().length }}</span>
             <span class="muted head-note">
               grouped by broker server family · money totals cover active accounts only ·
-              {{ inactiveAccountsCount() }} inactive account(s) · {{ disconnectedEaCount() }}
-              disconnected EA(s) · refreshes every 15s
+              {{ inactiveAccountsCount() }} inactive account(s) ·
+              @if (canSeeEas()) {
+                {{ disconnectedEaCount() }} disconnected EA(s) ·
+              }
+              refreshes every 15s
             </span>
           </header>
           @if (brokers().length > 0) {
@@ -388,6 +397,15 @@ import {
         </section>
 
         <!-- ── EA instances table ────────────────────────────────────── -->
+        <!-- GET admin/ea needs access.operator (review O5): without it the table is not "no EAs". -->
+        @if (!canSeeEas()) {
+          <section class="brokers-section">
+            <header class="section-head"><h3>EA instances</h3></header>
+            <div class="empty-state">
+              <span class="muted">EA instances are not available to your role.</span>
+            </div>
+          </section>
+        } @else {
         <section class="brokers-section">
           <header class="section-head">
             <h3>EA instances</h3>
@@ -464,6 +482,7 @@ import {
             </div>
           }
         </section>
+        }
       }
     </div>
   `,
@@ -475,6 +494,9 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
 
   private readonly accountsService = inject(TradingAccountsService);
   private readonly eaAdmin = inject(EAAdminService);
+  private readonly auth = inject(AuthService);
+  /** `GET admin/ea` (the fleet) needs access.operator — not polled without it (review O5). */
+  protected readonly canSeeEas = computed(() => this.auth.hasPermission(Permission.AccessOperator));
   private readonly destroyRef = inject(DestroyRef);
   private readonly destroy$ = new Subject<void>();
 
@@ -587,7 +609,9 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
       accounts: this.accountsService
         .list({ currentPage: 1, itemCountPerPage: 200 })
         .pipe(catchError(() => of(null))),
-      eas: this.eaAdmin.listFleet().pipe(catchError(() => of(null))),
+      eas: this.canSeeEas()
+        ? this.eaAdmin.listFleet().pipe(catchError(() => of(null)))
+        : of(null),
     })
       .pipe(takeUntil(this.destroy$))
       .subscribe(({ accounts, eas }) => {

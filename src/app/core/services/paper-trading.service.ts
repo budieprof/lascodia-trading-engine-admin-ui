@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, tap } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ResponseData, SetPaperTradingModeRequest } from '@core/api/api.types';
 
@@ -59,6 +59,15 @@ export interface PaperExecutionRowDto {
   tradeSignalId: number | null;
 }
 
+/** Bare boolean (engine today) or an object → `PaperTradingStatus`; anything else → null. */
+export function normalisePaperStatus(
+  data: PaperTradingStatus | boolean | null | undefined,
+): PaperTradingStatus | null {
+  if (typeof data === 'boolean') return { isPaperMode: data };
+  if (data && typeof data === 'object' && typeof data.isPaperMode === 'boolean') return data;
+  return null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PaperTradingService {
   private readonly api = inject(ApiService);
@@ -68,25 +77,34 @@ export class PaperTradingService {
   readonly isPaperMode = computed(() => this._status()?.isPaperMode ?? false);
 
   setMode(data: SetPaperTradingModeRequest): Observable<ResponseData<void>> {
-    return this.api
-      .put<ResponseData<void>>(`/paper-trading/mode`, data)
-      .pipe(
-        tap(() =>
-          this._status.update((s) => ({
-            ...(s ?? { isPaperMode: false }),
-            isPaperMode: data.isPaperMode,
-            reason: data.reason,
-          })),
-        ),
-      );
-  }
-
-  getStatus(): Observable<ResponseData<PaperTradingStatus>> {
-    return this.api.get<ResponseData<PaperTradingStatus>>(`/paper-trading/status`).pipe(
+    return this.api.put<ResponseData<void>>(`/paper-trading/mode`, data).pipe(
       tap((res) => {
-        if (res.data) this._status.set(res.data);
+        // HTTP 200 with status:false is a refusal (and '-202-approval' parks it for a second
+        // operator) — the mode has NOT changed, so the banner must not claim it has.
+        if (res?.status !== true) return;
+        this._status.update((s) => ({
+          ...(s ?? { isPaperMode: false }),
+          isPaperMode: data.isPaperMode,
+          reason: data.reason,
+        }));
       }),
     );
+  }
+
+  /**
+   * The engine's GET paper-trading/status returns a BARE `ResponseData<bool>` (the mode flag
+   * itself), not a status object. Normalise it so `isPaperMode()` reflects the engine; an
+   * object payload (a future richer DTO) is accepted as-is.
+   */
+  getStatus(): Observable<ResponseData<PaperTradingStatus>> {
+    return this.api
+      .get<ResponseData<PaperTradingStatus | boolean>>(`/paper-trading/status`)
+      .pipe(
+        map((res) => ({ ...res, data: normalisePaperStatus(res?.data) }) as ResponseData<PaperTradingStatus>),
+        tap((res) => {
+          if (res.status !== false && res.data) this._status.set(res.data);
+        }),
+      );
   }
 
   /** The per-strategy paper track record over the last `days` days plus the newest executions. */

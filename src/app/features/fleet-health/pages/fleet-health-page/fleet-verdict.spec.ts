@@ -69,6 +69,18 @@ describe('fleet verdict', () => {
     expect(fleetVerdict(input({ outboxPending: 101 })).tone).toBe('warn');
   });
 
+  it('never says "Fleet healthy" when telemetry could not be read (review O4)', () => {
+    const v = fleetVerdict(
+      input({ daemons: null, dbLatencyMs: null, outboxPending: null, unavailable: ['fleet summary', 'engine telemetry'] }),
+    );
+    expect(v.tone).toBe('warn');
+    expect(v.headline).not.toBe('Fleet healthy');
+    expect(v.issues.map((i) => i.text)).toEqual([
+      'Telemetry unavailable: fleet summary could not be read',
+      'Telemetry unavailable: engine telemetry could not be read',
+    ]);
+  });
+
   it('tiers db latency like the Engine tile', () => {
     expect(dbTier(49)).toBe('fast');
     expect(dbTier(50)).toBe('warn');

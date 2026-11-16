@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { catchError, of, tap } from 'rxjs';
+import { of, tap } from 'rxjs';
 
 import { createPolledResource } from '@core/polling/polled-resource';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -95,7 +95,15 @@ const INFO = '#0071E3';
         <app-refresh-button [refreshing]="metrics.refreshing()" (refresh)="refresh()" />
       </div>
 
-      @if (breaches().length > 0) {
+      @if (breachesUnknown()) {
+        <section class="breaches" role="alert" aria-label="Assistant health alerts unknown">
+          <h3>Breaches unknown</h3>
+          <p class="muted small src">
+            The open assistant-health alerts could not be read, so this panel cannot say whether a
+            limit is breached. It retries on the next refresh.
+          </p>
+        </section>
+      } @else if (breaches().length > 0) {
         <section class="breaches" role="alert" aria-label="Active assistant health alerts">
           <h3>Needs attention</h3>
           <p class="muted small src">
@@ -595,13 +603,18 @@ export class AssistantHealthPanelComponent {
    */
   readonly alerts = createPolledResource(
     () =>
-      hasWindowVerdict(this.metrics.value())
-        ? of([])
-        : this.api.activeHealthAlerts().pipe(catchError(() => of([]))),
+      // A failed read is recorded as an error (→ "breaches unknown"), never as "no breaches".
+      hasWindowVerdict(this.metrics.value()) ? of([]) : this.api.activeHealthAlerts(),
     { intervalMs: 300_000, runImmediately: false },
   );
 
   readonly breachesFromWindow = computed(() => hasWindowVerdict(this.metrics.value()));
+
+  /**
+   * The fallback alerts read failed, so whether a limit is breached is not known. Shown as such —
+   * an empty list here read as "healthy".
+   */
+  readonly breachesUnknown = computed(() => !this.breachesFromWindow() && !!this.alerts.error());
 
   readonly breaches = computed<HealthBreach[]>(() => {
     const m = this.metrics.value();

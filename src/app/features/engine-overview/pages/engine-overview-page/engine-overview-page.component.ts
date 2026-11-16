@@ -95,7 +95,7 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
         <!-- Headline: is the engine up, and does anything need a look? Worst first. -->
         <section
           class="status-card"
-          [attr.data-running]="status()?.isRunning ? '1' : '0'"
+          [attr.data-running]="!statusUnreachable() && status()?.isRunning ? '1' : '0'"
           aria-label="Engine status"
         >
           <div class="status-id">
@@ -103,9 +103,17 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
             <div class="status-text">
               <span class="status-label">Engine</span>
               <span class="status-value">
-                {{ status()?.isRunning ? 'Running' : 'Stopped' }}
+                {{ statusUnreachable() ? 'Unreachable' : status()?.isRunning ? 'Running' : 'Stopped' }}
               </span>
-              @if (status()?.checkedAt) {
+              @if (statusUnreachable()) {
+                <span class="status-meta">
+                  @if (lastRefreshAt(); as t) {
+                    stale since {{ t | relativeTime }}
+                  } @else {
+                    no status read has succeeded yet
+                  }
+                </span>
+              } @else if (status()?.checkedAt) {
                 <span class="status-meta">checked {{ status()!.checkedAt | relativeTime }}</span>
               }
             </div>
@@ -160,6 +168,7 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
               }}</span>
             }
           </div>
+          @if (canSeeWorkers()) {
           <div class="kpi">
             <span class="label">Total workers</span>
             <span class="value">{{ workerSnapshots().length }}</span>
@@ -191,6 +200,7 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
               }}</span>
             }
           </div>
+          }
           @if (canSeeDeadLetters()) {
             <div class="kpi" [class.warn]="dlqTotal() > 0">
               <span class="label">Unresolved DLQ</span>
@@ -206,7 +216,9 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
              stat list in the same slot. -->
         @if (!wallMode()) {
           <section class="row charts-row">
-            @if (workerStatusEntries().length >= 3) {
+            @if (!canSeeWorkers()) {
+              <!-- health/workers is platform staff / House only: no panel, not an empty one. -->
+            } @else if (workerStatusEntries().length >= 3) {
               <app-chart-card
                 title="Worker status"
                 [subtitle]="workerSnapshots().length + ' workers'"
@@ -303,6 +315,7 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
 
         <!-- Worker health row -->
         <section class="row">
+          @if (canSeeWorkers()) {
           <div class="panel">
             <header class="panel-head">
               <h3>Workers</h3>
@@ -354,6 +367,7 @@ import { attentionItems, eventTypeLabel } from './engine-overview.logic';
               <p class="muted small">All workers reporting healthy.</p>
             }
           </div>
+          }
 
           <!-- The queue is platform machinery (platform.infrastructure.manage, catalog v2): without
                the key the engine refuses the list, so the DLQ figures are left out, not shown as 0. -->
@@ -522,7 +536,12 @@ export class EngineOverviewPageComponent {
   readonly deadLetters = signal<DeadLetterDto[]>([]);
   /** Unresolved rows in the whole queue (pager total) — `deadLetters` holds only the newest 25. */
   readonly dlqTotal = signal(0);
+  /** When the last SUCCESSFUL engine status read landed — never advanced by a failed refresh. */
   readonly lastRefreshAt = signal<string | null>(null);
+  /** The last status read failed: the page shows an unreachable / stale headline (review O3). */
+  readonly statusUnreachable = signal(false);
+  /** `GET health/workers` is platform staff / House only (platform.infrastructure.manage). */
+  readonly canSeeWorkers = computed(() => this.workers.canRead());
 
   /** Toggled via `?wall=1` query param or the in-page button. */
   readonly wallMode = signal(this.route.snapshot.queryParamMap.get('wall') === '1');
@@ -716,6 +735,7 @@ export class EngineOverviewPageComponent {
       degraded: c.Degraded,
       idle: c.Idle,
       dlqTotal: this.canSeeDeadLetters() ? this.dlqTotal() : null,
+      unreachableSince: this.statusUnreachable() ? (this.lastRefreshAt() ?? '') : null,
     });
   });
 
@@ -881,7 +901,9 @@ export class EngineOverviewPageComponent {
   private refresh(): void {
     forkJoin({
       status: this.health.getStatus().pipe(catchError(() => of(null))),
-      workers: this.workers.list().pipe(catchError(() => of(null))),
+      workers: this.canSeeWorkers()
+        ? this.workers.list({ silent: true }).pipe(catchError(() => of(null)))
+        : of(null),
       deadLetters: this.canSeeDeadLetters()
         ? this.deadLetterSvc
             .list({
@@ -894,7 +916,9 @@ export class EngineOverviewPageComponent {
             .pipe(catchError(() => of(null)))
         : of(null),
     }).subscribe(({ status, workers, deadLetters }) => {
-      if (status?.data) this.status.set(status.data);
+      const statusData = status && status.status !== false ? (status.data ?? null) : null;
+      const statusOk = statusData !== null;
+      if (statusData) this.status.set(statusData);
       // /health/workers returns a raw array, not a ResponseData envelope.
       if (workers) this.workerSnapshots.set(workers);
       if (deadLetters?.data) {
@@ -902,7 +926,10 @@ export class EngineOverviewPageComponent {
         this.deadLetters.set(rows);
         this.dlqTotal.set(deadLetters.data.pager?.totalItemCount ?? rows.length);
       }
-      this.lastRefreshAt.set(new Date().toISOString());
+      // Only a successful status read is a refresh: when every call failed, "updated just now"
+      // was a lie told over stale figures.
+      if (statusOk) this.lastRefreshAt.set(new Date().toISOString());
+      this.statusUnreachable.set(!statusOk);
       this.loading.set(false);
     });
   }

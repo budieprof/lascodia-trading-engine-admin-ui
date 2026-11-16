@@ -27,6 +27,7 @@ import { BffSessionService } from './bff-session.service';
 import type { BffImpersonation, BffMembership, BffSession, BffTenant } from './bff.types';
 import { CSRF_HEADER } from './bff.types';
 import { IdleTimeoutService } from './idle-timeout.service';
+import { SessionSyncService } from './session-sync.service';
 import { permissionsForLegacyRoles } from './legacy-role-permissions';
 import { Permission, type PermissionKey } from './permissions.generated';
 import { canSee, type AccessSubject } from './route-access';
@@ -179,6 +180,7 @@ export class AuthService {
   private readonly bff = inject(BffSessionService);
   private readonly browser = inject(BrowserLocation);
   private readonly idle = inject(IdleTimeoutService);
+  private readonly sessionSync = inject(SessionSyncService);
 
   /** Fixed for the life of the page: the flag is read once from `config.json`. */
   readonly mode: AuthMode = authModeFrom(inject(RUNTIME_CONFIG));
@@ -333,6 +335,8 @@ export class AuthService {
       for (const k of [TOKEN_KEY, USER_KEY, PERMS_KEY]) this.removeSession(k);
       // Per-person storage stays shut until `initialize()` knows who is signed in.
       this.syncStorageIdentity();
+      // The cookie session is shared by every tab: hear when another one switches or signs out.
+      this.sessionSync.start();
       return;
     }
 
@@ -465,8 +469,9 @@ export class AuthService {
    */
   async switchTenant(tenantId: number): Promise<'switched' | 'stepUp'> {
     if (this.mode !== 'bff') throw new Error('Organisations are switched through the BFF session.');
+    let switched: BffSession;
     try {
-      await this.bff.switchTenant(tenantId);
+      switched = await this.bff.switchTenant(tenantId);
     } catch (err) {
       if (isStepUpError(err)) {
         this.beginStepUp(DEFAULT_POST_LOGIN_ROUTE, tenantId);
@@ -475,6 +480,8 @@ export class AuthService {
       throw err;
     }
     this.idle.stop();
+    // Every other tab now shares a session in the new organisation: tell them before leaving.
+    this.sessionSync.announceTenantSwitch(tenantId, switched.user.id);
     this.browser.assign(DEFAULT_POST_LOGIN_ROUTE);
     return 'switched';
   }
@@ -735,6 +742,7 @@ export class AuthService {
       this.removeSession(SIGNED_OUT_NOTE_KEY);
     }
     this.idle.stop();
+    this.sessionSync.announceSignOut();
     const url = await this.bff.logout();
     this.syncStorageIdentity();
     this.browser.assign(url);

@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
+import { ApiService, type ApiCallOptions } from '@core/api/api.service';
 import {
   ResponseData,
   AnalyserComparisonSummaryDto,
@@ -41,13 +41,16 @@ export class AnalyserComparisonService {
    * Run the T1–T5 look-ahead-bias audit suite for one (symbol, timeframe).
    * `sampleAt` defaults to UtcNow on the server when omitted.
    */
-  runAudit(args: {
-    symbol: string;
-    timeframe: Timeframe;
-    sampleAt?: string;
-  }): Observable<ResponseData<LookAheadAuditReport>> {
+  runAudit(
+    args: {
+      symbol: string;
+      timeframe: Timeframe;
+      sampleAt?: string;
+    },
+    opts?: ApiCallOptions,
+  ): Observable<ResponseData<LookAheadAuditReport>> {
     let params = new HttpParams().set('symbol', args.symbol).set('timeframe', args.timeframe);
     if (args.sampleAt) params = params.set('sampleAt', args.sampleAt);
-    return this.api.get(`/synthetic-analyser-audit?${params.toString()}`);
+    return this.api.get(`/synthetic-analyser-audit?${params.toString()}`, opts);
   }
 }

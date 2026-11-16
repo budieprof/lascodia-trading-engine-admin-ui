@@ -16,6 +16,7 @@ import { AnalysisMonitorsService } from '@core/services/analysis-monitors.servic
 import { NotificationService } from '@core/notifications/notification.service';
 import type { AnalysisMonitorDto } from '@core/api/api.types';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { isAcceptableWarning } from '../../monitor-arm-warnings';
 import type {
   MonitorAction,
   MonitorMetric,
@@ -422,16 +423,35 @@ interface ConditionRow {
           @if (saveError(); as e) {
             <p class="err">{{ e }}</p>
           }
+          @if (armWarnings(); as w) {
+            <div class="warn-box" role="alert" data-testid="arm-warnings">
+              <strong>The engine has warnings about this watch:</strong>
+              <p>{{ w }}</p>
+              <p class="muted">Arm it anyway only if you have checked them.</p>
+            </div>
+          }
           <div class="spacer"></div>
           <button type="button" class="btn btn-secondary" (click)="close()">Cancel</button>
-          <button
-            type="button"
-            class="btn btn-primary"
-            (click)="save()"
-            [disabled]="saving() || !intentText().trim()"
-          >
-            {{ saving() ? 'Arming…' : 'Arm monitor' }}
-          </button>
+          @if (armWarnings()) {
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-testid="arm-anyway"
+              (click)="save(true)"
+              [disabled]="saving()"
+            >
+              {{ saving() ? 'Arming…' : 'Arm anyway' }}
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="btn btn-primary"
+              (click)="save()"
+              [disabled]="saving() || !intentText().trim()"
+            >
+              {{ saving() ? 'Arming…' : 'Arm monitor' }}
+            </button>
+          }
         </footer>
       </div>
     </div>
@@ -674,6 +694,17 @@ interface ConditionRow {
         font-size: 12px;
         margin: 3px 0;
       }
+      .warn-box {
+        flex: 1 1 100%;
+        border: 1px solid var(--warning);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: var(--text-primary);
+      }
+      .warn-box p {
+        margin: 3px 0;
+      }
       .warn-line {
         color: var(--warning);
         font-size: 12px;
@@ -776,6 +807,10 @@ export class MonitorBuilderComponent {
   protected readonly previewRunning = signal(false);
   protected readonly saving = signal(false);
   protected readonly saveError = signal<string | null>(null);
+  /** Overridable warnings from the last arm attempt; "Arm anyway" resends with acceptWarnings. */
+  protected readonly armWarnings = signal<string | null>(null);
+  /** The request the warnings were about — "Arm anyway" accepts them only for that exact watch. */
+  private warnedRequest: string | null = null;
 
   constructor() {
     // Seed from a duplicated monitor, once.
@@ -1040,7 +1075,12 @@ export class MonitorBuilderComponent {
 
   // ── Save ─────────────────────────────────────────────────────────────────
 
-  protected save(): void {
+  /**
+   * Arm the watch. The first attempt never accepts warnings: when the engine answers with warnings
+   * the operator may override, they are shown and "Arm anyway" calls `save(true)`. Accepting is
+   * bound to the exact request that was warned about — after an edit it is a fresh first attempt.
+   */
+  protected save(acceptWarnings = false): void {
     this.saveError.set(null);
 
     const steps = this.selectedActions().map((type) => ({ type }));
@@ -1055,38 +1095,40 @@ export class MonitorBuilderComponent {
       return;
     }
 
+    const request = {
+      subjectKind: this.subjectKind(),
+      subjectRef: this.subjectRef().trim() || undefined,
+      symbol: this.subjectKind() === 'Symbol' ? this.subjectRef().trim().toUpperCase() : null,
+      timeframe: this.timeframe(),
+      intentText: this.intentText().trim(),
+      triggerSpecJson: this.triggerSpecJson(),
+      actionSpecJson: JSON.stringify(actionSpec),
+      recurring: this.recurring(),
+      cooldownSeconds: Number(this.cooldownSeconds()),
+      maxTriggers: Number(this.maxTriggers()),
+      expiresInHours: Number(this.expiresInHours()),
+      deliverTo: this.deliverTo(),
+      requiresAck: this.requiresAck(),
+      maxActionTier: tier2 ? 2 : this.selectedActions().includes('propose_trade') ? 1 : 0,
+      actionAuthorization: tier2
+        ? {
+            by: this.authorizedBy().trim(),
+            reason: this.authorizationReason().trim(),
+            actions: this.selectedActions().filter((t) =>
+              this.tier2Actions().some((a) => a.type === t),
+            ),
+            dryRun: this.dryRunActions(),
+          }
+        : null,
+    };
+    const key = JSON.stringify(request);
+    const accept = acceptWarnings && this.warnedRequest === key;
+    this.armWarnings.set(null);
+    this.warnedRequest = null;
+
     this.saving.set(true);
     this.monitors
-      .create({
-        subjectKind: this.subjectKind(),
-        subjectRef: this.subjectRef().trim() || undefined,
-        symbol: this.subjectKind() === 'Symbol' ? this.subjectRef().trim().toUpperCase() : null,
-        timeframe: this.timeframe(),
-        intentText: this.intentText().trim(),
-        triggerSpecJson: this.triggerSpecJson(),
-        actionSpecJson: JSON.stringify(actionSpec),
-        recurring: this.recurring(),
-        cooldownSeconds: Number(this.cooldownSeconds()),
-        maxTriggers: Number(this.maxTriggers()),
-        expiresInHours: Number(this.expiresInHours()),
-        deliverTo: this.deliverTo(),
-        requiresAck: this.requiresAck(),
-        maxActionTier: tier2 ? 2 : this.selectedActions().includes('propose_trade') ? 1 : 0,
-        actionAuthorization: tier2
-          ? {
-              by: this.authorizedBy().trim(),
-              reason: this.authorizationReason().trim(),
-              actions: this.selectedActions().filter((t) =>
-                this.tier2Actions().some((a) => a.type === t),
-              ),
-              dryRun: this.dryRunActions(),
-            }
-          : null,
-        // The operator has just seen the replay; a second refusal over the same
-        // warnings would be nagging rather than protective. Fatal problems are
-        // still refused server-side and are never overridable.
-        acceptWarnings: true,
-      })
+      .create({ ...request, acceptWarnings: accept })
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
         this.saving.set(false);
@@ -1094,6 +1136,9 @@ export class MonitorBuilderComponent {
           this.notify.success(res.message || 'Monitor armed.');
           this.created.emit(res.data);
           this.closed.emit();
+        } else if (!accept && isAcceptableWarning(res?.message)) {
+          this.armWarnings.set(res!.message!);
+          this.warnedRequest = key;
         } else {
           this.saveError.set(res?.message ?? 'Could not arm this monitor.');
         }

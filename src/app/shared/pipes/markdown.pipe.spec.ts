@@ -156,9 +156,66 @@ describe('renderMarkdown — links, images and safety', () => {
   });
 
   it('cannot be broken out of the href attribute', () => {
-    // escapeHtml leaves quotes alone, so the attribute escape is the only thing standing here.
+    // escapeHtml now escapes quotes as well; the attribute escape is the second line.
     const html = renderMarkdown('[x](https://a.test/")onmouseover="alert(1))');
     expect(html).not.toMatch(/href="[^"]*"\s*onmouseover/);
+  });
+
+  // 2026-11-16 review A1: a code span was stashed BEFORE the link rules, so a URL holding one
+  // passed SAFE_URL + attrEscape and the resolved <code>…</code> (with its raw quote) landed
+  // inside the href.
+  describe('a code span can never reach an attribute', () => {
+    /** Every attribute value in the output, quoted, must be free of markup and stray quotes. */
+    const attributeValues = (html: string): string[] =>
+      [...html.matchAll(/\s[a-z-]+="([^"]*)"/g)].map((m) => m[1]);
+    const noBreakout = (html: string) => {
+      expect(html).not.toMatch(/<[a-z]+[^>]*\sonclick=/i);
+      expect(html).not.toMatch(/<[a-z]+[^>]*\sonerror=/i);
+      for (const v of attributeValues(html)) {
+        expect(v).not.toContain('<');
+        expect(v).not.toContain(SENTINEL_CHAR);
+      }
+      expect(html).not.toContain(SENTINEL_CHAR);
+    };
+
+    it('link URL holding a code span stays literal', () => {
+      const html = renderMarkdown('[t](https://a/`x"onclick=alert(1)//`)');
+      noBreakout(html);
+      expect(html).not.toContain('<a ');
+      expect(html).toContain('<code>x&quot;onclick=alert(1)//</code>');
+    });
+
+    it('image URL holding a code span stays literal', () => {
+      const html = renderMarkdown('![a](https://a/`x"onerror=alert(1)//`)');
+      noBreakout(html);
+      expect(html).not.toContain('<img');
+    });
+
+    it('image alt holding a code span stays literal', () => {
+      const html = renderMarkdown('![`x"onerror=alert(1)//`](https://a/b.png)');
+      noBreakout(html);
+      expect(html).not.toContain('<img');
+    });
+
+    it('bare URL running into a code span is not linkified across it', () => {
+      const html = renderMarkdown('see https://a/`x"onclick=alert(1)//` now');
+      noBreakout(html);
+      expect(html).toContain('<code>x&quot;onclick=alert(1)//</code>');
+    });
+
+    it('footnote reference holding a code span keeps a slug id', () => {
+      const html = renderMarkdown('x[^`a"onclick=b`]\n\n[^`a"onclick=b`]: note');
+      noBreakout(html);
+    });
+
+    it('escapes quotes in ordinary text, so none survive as raw attribute terminators', () => {
+      expect(renderInlineMarkdown(`say "hi" it's`)).toBe('say &quot;hi&quot; it&#39;s');
+    });
+
+    it('a bare URL stops at an escaped quote', () => {
+      const html = renderMarkdown('"https://a.test/x" here');
+      expect(html).toContain('href="https://a.test/x"');
+    });
   });
 
   it('does not linkify a URL inside inline code', () => {
@@ -274,7 +331,8 @@ describe('renderMarkdown — blockquotes, tasks, footnotes, breaks', () => {
   it('slugifies a hostile footnote label before it reaches an id', () => {
     const html = renderMarkdown('x[^a"onmouseover=b]');
     expect(html).not.toContain('onmouseover=b"');
-    expect(html).toContain('id="fnref-a-onmouseover-b"');
+    // The quote arrives escaped (&quot;), and the slug reduces the entity to dashes.
+    expect(html).toContain('id="fnref-a-quot-onmouseover-b"');
   });
 
   it('honours a hard line break from two trailing spaces', () => {

@@ -10,6 +10,8 @@ import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { PatientTraderService } from '@core/services/patient-trader.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
@@ -167,8 +169,17 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         <!-- ── Configuration ──────────────────────────────────────────── -->
         <div class="col">
           @if (draft(); as d) {
+            <!-- PUT patient-trader/config needs platform.engine.manage; without it the form is
+                 read-only (a disabled fieldset disables every control inside). -->
+            <fieldset class="ro-fieldset" [disabled]="!canManage()">
             <section class="card">
               <h2>Configuration</h2>
+              @if (!canManage()) {
+                <p class="muted small">
+                  Read-only — changing the Patient Trader needs the platform.engine.manage
+                  permission.
+                </p>
+              }
 
               <div class="field check">
                 <label>
@@ -614,10 +625,16 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                 />
               </div>
 
-              <button type="button" class="save-btn" [disabled]="saving()" (click)="save()">
+              <button
+                type="button"
+                class="save-btn"
+                [disabled]="saving() || !canManage()"
+                (click)="save()"
+              >
                 {{ saving() ? 'Saving…' : 'Save configuration' }}
               </button>
             </section>
+            </fieldset>
           }
         </div>
 
@@ -859,6 +876,14 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
   `,
   styles: [
     `
+      .ro-fieldset {
+        display: contents;
+        border: 0;
+        margin: 0;
+        padding: 0;
+        min-width: 0;
+      }
+
       /* Tokens and structure follow the Spot Sweep page so the two siblings read as one
          product. An earlier pass invented token names (--surface, --accent-fg) that do not
          exist in the design system, so every colour silently fell back to a hardcoded hex
@@ -1418,6 +1443,9 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
 })
 export class PatientTraderPageComponent {
   private readonly svc = inject(PatientTraderService);
+  private readonly auth = inject(AuthService);
+  /** The config PUT needs platform.engine.manage on the engine. */
+  readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
 
   private readonly currencyPairs = inject(CurrencyPairsService);
 
@@ -1604,7 +1632,7 @@ export class PatientTraderPageComponent {
 
   save(): void {
     const current = this.draft();
-    if (!current || this.saving()) return;
+    if (!current || this.saving() || !this.canManage()) return;
 
     // Normalise symbols before they reach the engine — a lower-case entry would silently follow a
     // market the rest of the engine does not recognise.

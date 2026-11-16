@@ -184,12 +184,12 @@ import {
               </button>
             }
             @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
-              <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
+              <button class="btn btn-success" (click)="confirmActivate()" [disabled]="actionLoading()">
                 Activate
               </button>
             }
             @if (strategy()!.status === 'Active') {
-              <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
+              <button class="btn btn-warning" (click)="confirmPause()" [disabled]="actionLoading()">
                 Pause
               </button>
             }
@@ -1469,6 +1469,37 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       .join(' · ');
   });
 
+
+  /** The strategy's name for a confirm ("#42 · EURUSD MeanRev"). */
+  private strategyLabel(): string {
+    const st = this.strategy();
+    return st?.name ? `#${this.strategyId} · ${st.name}` : `#${this.strategyId}`;
+  }
+
+  /** Activate changes what trades live money: one deliberate confirm, naming the strategy. */
+  async confirmActivate(): Promise<void> {
+    if (this.actionLoading()) return;
+    const from = this.strategy()?.status ?? 'Paused';
+    const ok = await this.dialogs.confirm({
+      title: `Activate strategy ${this.strategyLabel()}?`,
+      message: `${from} → Active. The strategy starts generating live signals on its next evaluation.`,
+      confirmLabel: 'Activate',
+    });
+    if (ok) this.onActivate();
+  }
+
+  /** Pause stops new signals from a live strategy: confirm, naming the strategy. */
+  async confirmPause(): Promise<void> {
+    if (this.actionLoading()) return;
+    const ok = await this.dialogs.confirm({
+      title: `Pause strategy ${this.strategyLabel()}?`,
+      message:
+        'Active → Paused. The strategy stops generating new signals; positions it already opened are not closed.',
+      confirmLabel: 'Pause',
+      tone: 'danger',
+    });
+    if (ok) this.onPause();
+  }
 
   /**
    * `PUT strategy/{id}/activate`. The engine answers `data: "Activated"` (not the strategy), and

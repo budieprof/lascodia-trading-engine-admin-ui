@@ -12,7 +12,7 @@ import { FormsModule } from '@angular/forms';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, of, tap, throwError } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
 import type {
@@ -354,6 +354,11 @@ function severityStackedBars(
           </span>
         </div>
       </div>
+      @if (sampleError(); as e) {
+        <div class="dr-error" role="alert">
+          Tiles and charts unavailable — {{ e }} The figures above are not a count of zero alerts.
+        </div>
+      }
       @if (sampleCapped()) {
         <p class="note">
           Tiles, charts and breakdowns cover the first {{ fmt(sampleCap) }} of
@@ -601,6 +606,12 @@ function severityStackedBars(
           }
         </section>
 
+        @if (tableError(); as te) {
+          <div class="dr-error" role="alert">
+            The alert list could not be read — {{ te }} The rows shown (if any) are from the last
+            successful read.
+          </div>
+        }
         <app-data-table
           #table
           [columnDefs]="columns()"
@@ -732,6 +743,13 @@ function severityStackedBars(
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .dr-error {
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--error, #d33);
+        color: var(--error, #d33);
+        font-size: var(--text-sm);
       }
       .note {
         margin: calc(-1 * var(--space-2)) 0 0;
@@ -1511,6 +1529,10 @@ export class DriftReportPageComponent {
   // exactly the same filter + range as the paged table so the two agree.
   readonly driftSample = signal<DriftAlertDto[]>([]);
   readonly sampleTotal = signal(0);
+  /** The analytics sample read failed: the tiles/charts are unknown, not zero. */
+  readonly sampleError = signal<string | null>(null);
+  /** The table's last page read failed (it keeps the rows it had). */
+  readonly tableError = signal<string | null>(null);
   readonly sampleCapped = computed(() => this.sampleTotal() > SAMPLE_CAP);
 
   /** The Detector filter's choices: the engine's DetectorType names, any other seen, and the current pick. */
@@ -1719,12 +1741,24 @@ export class DriftReportPageComponent {
 
   private loadDriftAnalyticsSample(): void {
     const filter = this.currentFilter();
+    const failed = (res: { status?: boolean; message?: string | null } | null): boolean => {
+      if (res?.status) return false;
+      // Tiles/charts would otherwise read a failed read as "0 alerts".
+      this.sampleError.set(
+        res?.message || 'The drift alerts behind the tiles and charts could not be read.',
+      );
+      this.sampleTotal.set(0);
+      this.driftSample.set([]);
+      return true;
+    };
     // Probe-and-fetch: read the true total from a 1-row query, then bring
     // back min(total, cap) rows — without unbounded fetches.
     this.mlService
       .listDriftReport({ currentPage: 1, itemCountPerPage: 1, filter })
       .pipe(catchError(() => of(null)))
       .subscribe((probe) => {
+        if (failed(probe)) return;
+        this.sampleError.set(null);
         const total = probe?.data?.pager?.totalItemCount ?? 0;
         this.sampleTotal.set(total);
         if (total === 0) {
@@ -1739,6 +1773,7 @@ export class DriftReportPageComponent {
           })
           .pipe(catchError(() => of(null)))
           .subscribe((full) => {
+            if (failed(full)) return;
             this.driftSample.set(full?.data?.data ?? []);
           });
       });
@@ -1857,8 +1892,23 @@ export class DriftReportPageComponent {
         filter: this.currentFilter(),
       })
       .pipe(
-        map((res): PagedData<DriftAlertDto> => res.data ?? this.emptyPage()),
-        catchError(() => of(this.emptyPage())),
+        map((res): PagedData<DriftAlertDto> => {
+          // A refusal is not "no alerts": throw so the table keeps what it showed and the
+          // page says the read failed, instead of rendering an empty, reassuring page.
+          if (!res?.status || !res.data) {
+            throw new Error(res?.message || 'The engine refused the drift report read.');
+          }
+          return res.data;
+        }),
+        tap(() => this.tableError.set(null)),
+        catchError((err: unknown) => {
+          this.tableError.set(
+            err instanceof Error && err.message
+              ? err.message
+              : 'The drift report could not be read.',
+          );
+          return throwError(() => err);
+        }),
       );
   };
 
@@ -1937,19 +1987,5 @@ export class DriftReportPageComponent {
 
   private formatDate(iso: string | null): string {
     return iso ? (this.datePipe.transform(iso, DATE_FMT, 'UTC') ?? '—') : '—';
-  }
-
-  private emptyPage(): PagedData<DriftAlertDto> {
-    return {
-      pager: {
-        totalItemCount: 0,
-        filter: null,
-        currentPage: 1,
-        itemCountPerPage: 25,
-        pageNo: 1,
-        pageSize: 25,
-      },
-      data: [],
-    };
   }
 }

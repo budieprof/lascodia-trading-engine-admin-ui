@@ -198,7 +198,9 @@ cmd_publish() {
   # Record uncommitted state in the release identity rather than refusing it.
   # A release you cannot trace back to a commit is worse than one labelled
   # honestly as untraceable.
-  git diff --quiet HEAD -- . || dirty="-dirty"
+  # `git status --porcelain`, not `git diff HEAD`: an UNTRACKED source file (a new component not
+  # yet added) changes the bundle too, and `git diff` never sees it (review A14).
+  [ -z "$(git status --porcelain -- .)" ] || dirty="-dirty"
   local build_sha="${sha}${dirty}"
   local build_time stamp release
   build_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -258,7 +260,21 @@ cmd_publish() {
   swap_current "$release"
 
   if [ "$do_verify" = "1" ]; then
-    verify_live "$release"
+    # In a subshell: verify_live dies on failure, and a release that failed verification must
+    # not stay live. Swap the previous release back in and fail the publish (review A14).
+    if ! ( verify_live "$release" ); then
+      if [ -n "$previous" ]; then
+        warn "verification failed — swapping the previous release ($previous) back in"
+        swap_current "$previous"
+        local prev_id
+        prev_id="$(release_config_key "$previous" releaseId)"
+        if [ -n "$prev_id" ]; then
+          ( verify_live "$prev_id" ) || warn "the restored release $previous did not verify either — check Caddy / the origin"
+        fi
+        die "publish of $release FAILED verification; $previous is live again ($release stays on disk for inspection)"
+      fi
+      die "publish of $release FAILED verification and there is no previous release to restore — it is live"
+    fi
   else
     warn "skipped live verification (--no-verify)"
   fi

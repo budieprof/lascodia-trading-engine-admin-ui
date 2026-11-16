@@ -95,6 +95,7 @@ import { AnalysisVisualComponent } from '@shared/components/analysis-visual/anal
 import { TurnScreenshotComponent } from '@shared/components/turn-screenshot/turn-screenshot.component';
 import { parseVisualSpec, type VisualSpec } from '@shared/components/analysis-visual/visual-spec';
 import { AnnotatedPriceChartComponent } from '@shared/components/annotated-price-chart/annotated-price-chart.component';
+import { openOrDownloadBlob } from '@shared/utils/download';
 import {
   parsePriceChartSpec,
   type PriceChartSpec,
@@ -580,7 +581,7 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
                           <button
                             type="button"
                             class="chip"
-                            (click)="openAttachment(m.id, a.index)"
+                            (click)="openAttachment(m.id, a.index, a.name)"
                             [title]="a.mediaType + ' · ' + sizeOf(a.bytes)"
                           >
                             {{ a.mediaType.startsWith('image/') ? '🖼' : '📄' }} {{ a.name }}
@@ -2931,7 +2932,7 @@ export class AnalysisChatComponent {
    * plain `<a href>` navigation carries no Authorization header, so it would 401 — the same
    * reason the turn screenshot is fetched this way.</p>
    */
-  protected async openAttachment(turnId: number, index: number): Promise<void> {
+  protected async openAttachment(turnId: number, index: number, name?: string): Promise<void> {
     const blob = await this.api.getBlob(
       `/market-data/analyze/follow-up/${turnId}/attachment/${index}`,
     );
@@ -2939,11 +2940,9 @@ export class AnalysisChatComponent {
       this.error.set('That attachment could not be loaded.');
       return;
     }
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener');
-    // The tab has the bytes by now; holding the object URL would pin the blob for the life
-    // of this one.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    // Only a raster image is opened (as a same-origin blob: document it could not script); an
+    // SVG / HTML / PDF the server labels as such is downloaded as opaque bytes instead.
+    openOrDownloadBlob(blob, name || `attachment-${turnId}-${index}`);
   }
 
   protected sizeOf(bytes: number): string {

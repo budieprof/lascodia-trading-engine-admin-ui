@@ -273,8 +273,15 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
                 }
               </button>
             } @empty {
-              <div class="conv-empty">
-                {{ loading() ? 'Loading…' : 'No conversations yet — run a new analysis.' }}
+              @if (!listError()) {
+                <div class="conv-empty">
+                  {{ loading() ? 'Loading…' : 'No conversations yet — run a new analysis.' }}
+                </div>
+              }
+            }
+            @if (listError(); as le) {
+              <div class="conv-empty conv-error" role="alert">
+                Could not load conversations — {{ le }}
               </div>
             }
 
@@ -845,6 +852,9 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
         text-align: center;
         font-size: var(--text-xs);
         color: var(--text-tertiary);
+      }
+      .conv-error {
+        color: var(--loss);
       }
       .load-more {
         border: none;
@@ -1809,20 +1819,49 @@ export class ConversationsPageComponent {
     this.load(true);
   }
 
+  /** Bumped by every list load; a response from a superseded load is dropped. */
+  private loadSeq = 0;
+  /** The list read was refused or failed (shown in the rail, not as "no conversations"). */
+  protected readonly listError = signal<string | null>(null);
+
+  /**
+   * Load a page of the rail. Only the LATEST load's answer is applied: a live-refresh reset that
+   * lands after a "Load more" (or vice versa) used to replace or append out of order, dropping a
+   * page or appending page 2 onto a fresh page 1 and duplicating rows. Appends are de-duplicated
+   * by id as well, since the list can shift between pages while a load is in flight.
+   */
   private load(reset: boolean): void {
     if (reset) this.page = 1;
+    const seq = ++this.loadSeq;
+    const page = this.page;
     this.loading.set(true);
     const filter = { ...this.parseSearch(this.search()), kind: this.kindFilter() || null };
-    this.marketData.listAnalysisConversations(filter, this.page, this.pageSize).subscribe({
+    this.marketData.listAnalysisConversations(filter, page, this.pageSize).subscribe({
       next: (res) => {
+        if (seq !== this.loadSeq) return;
         this.loading.set(false);
-        if (!res?.status || !res.data) return;
+        if (!res?.status || !res.data) {
+          this.listError.set(res?.message || 'the engine refused the request.');
+          if (!reset) this.page = Math.max(1, page - 1); // the page was not loaded; let Load more retry it
+          return;
+        }
+        this.listError.set(null);
         this.totalItems.set(res.data.totalItems);
-        this.conversations.update((list) =>
-          reset ? res.data!.items : [...list, ...res.data!.items],
-        );
+        const items = res.data.items;
+        this.conversations.update((list) => {
+          if (reset) return items;
+          const seen = new Set(list.map((c) => c.llmInvocationId));
+          return [...list, ...items.filter((c) => !seen.has(c.llmInvocationId))];
+        });
       },
-      error: () => this.loading.set(false),
+      error: (err: unknown) => {
+        if (seq !== this.loadSeq) return;
+        this.loading.set(false);
+        this.listError.set(
+          err instanceof Error && err.message ? err.message : 'the request failed.',
+        );
+        if (!reset) this.page = Math.max(1, page - 1);
+      },
     });
   }
 
@@ -1852,17 +1891,8 @@ export class ConversationsPageComponent {
 
   protected select(c: AnalysisConversationSummaryDto): void {
     if (this.selectedId() === c.llmInvocationId) return;
-    this.selectedId.set(c.llmInvocationId);
     this.detail.set(null);
-    this.detailLoading.set(true);
-    this.marketData.getAnalysisConversation(c.llmInvocationId).subscribe({
-      next: (res) => {
-        this.detailLoading.set(false);
-        if (this.selectedId() !== c.llmInvocationId) return;
-        if (res?.status && res.data) this.detail.set(res.data);
-      },
-      error: () => this.detailLoading.set(false),
-    });
+    this.openConversation(c.llmInvocationId);
   }
 
   protected closeNew(): void {
@@ -2010,14 +2040,25 @@ export class ConversationsPageComponent {
 
   /** Select + load a conversation by its anchor invocation id. */
   protected openConversation(llmInvocationId: number): void {
+    if (this.selectedId() !== llmInvocationId) {
+      // A recommendation editor (and its last error) belongs to the conversation it was opened
+      // on; carried over, it would file against the next conversation's recommendation index.
+      this.editingIndex.set(null);
+      this.createError.set(null);
+    }
     this.selectedId.set(llmInvocationId);
     this.detailLoading.set(true);
     this.marketData.getAnalysisConversation(llmInvocationId).subscribe({
       next: (d) => {
+        // A late answer for a conversation the operator has already left must not overwrite
+        // the one now open.
+        if (this.selectedId() !== llmInvocationId) return;
         this.detailLoading.set(false);
         if (d?.status && d.data) this.detail.set(d.data);
       },
-      error: () => this.detailLoading.set(false),
+      error: () => {
+        if (this.selectedId() === llmInvocationId) this.detailLoading.set(false);
+      },
     });
   }
 }

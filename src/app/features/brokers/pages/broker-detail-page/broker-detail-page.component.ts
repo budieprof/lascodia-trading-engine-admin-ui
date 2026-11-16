@@ -15,6 +15,8 @@ import { catchError, forkJoin, map, of, timer } from 'rxjs';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { TerminalsService } from '@core/services/terminals.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import {
   FLEET_STATUS_LABELS,
   currentFleetIds,
@@ -125,9 +127,10 @@ interface HostInstall {
           />
           <app-metric-card
             label="Active EAs"
-            [value]="b.activeEas"
+            [value]="canSeeEas() ? b.activeEas : null"
             format="number"
-            [dotColor]="b.disconnectedEas > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="!canSeeEas() ? '' : b.disconnectedEas > 0 ? '#FF3B30' : '#34C759'"
+            [caption]="canSeeEas() ? null : 'not available to your role'"
           />
           <app-metric-card
             label="Balance (active accounts)"
@@ -244,9 +247,15 @@ interface HostInstall {
           <section class="card">
             <header class="card-head">
               <h3>EA fleet</h3>
-              <span class="muted">{{ b.eaInstances.length }} instance(s)</span>
+              @if (canSeeEas()) {
+                <span class="muted">{{ b.eaInstances.length }} instance(s)</span>
+              }
             </header>
-            <div class="fleet-pills">
+            @if (!canSeeEas()) {
+              <!-- GET admin/ea needs access.operator (review O5): not "no EAs registered". -->
+              <p class="muted note">EA instances are not available to your role.</p>
+            }
+            <div class="fleet-pills" [hidden]="!canSeeEas()">
               <span class="pill active" [class.empty]="b.activeEas === 0">
                 ● {{ b.activeEas }} active
               </span>
@@ -260,7 +269,7 @@ interface HostInstall {
                 <span class="pill">no EAs registered</span>
               }
             </div>
-            <dl class="facts">
+            <dl class="facts" [hidden]="!canSeeEas()">
               <div>
                 <dt>Newest heartbeat</dt>
                 <dd class="mono">
@@ -301,14 +310,18 @@ interface HostInstall {
             <header class="card-head">
               <h3>Hosts &amp; installs</h3>
               <span class="muted">
-                @if (hostsUnavailable()) {
+                @if (!canSeeEas()) {
+                  not available to your role
+                } @else if (hostsUnavailable()) {
                   terminal daemons not reachable
                 } @else {
                   {{ hostInstalls().length }} MT5 install(s) across {{ hostCount() }} host(s)
                 }
               </span>
             </header>
-            @if (hostsUnavailable()) {
+            @if (!canSeeEas()) {
+              <p class="muted note">Host and install data is not available to your role.</p>
+            } @else if (hostsUnavailable()) {
               <p class="muted note">
                 Host and install data comes from the terminal supervisor, which did not answer.
                 Everything above is still live from the engine.
@@ -418,7 +431,7 @@ interface HostInstall {
                       {{ a.marginUsed | currency: a.currency ?? 'USD' : 'symbol' : '1.2-2' }}
                     </td>
                     <td class="num mono">{{ accountUtilPct(a).toFixed(1) }}%</td>
-                    <td class="num mono">{{ eaCountFor(a.id) }}</td>
+                    <td class="num mono">{{ canSeeEas() ? eaCountFor(a.id) : '—' }}</td>
                     <td>
                       <span
                         class="status-pill"
@@ -916,6 +929,9 @@ export class BrokerDetailPageComponent implements OnInit {
   private readonly accountsService = inject(TradingAccountsService);
   private readonly eaAdmin = inject(EAAdminService);
   private readonly terminals = inject(TerminalsService);
+  private readonly auth = inject(AuthService);
+  /** `GET admin/ea` + `admin/terminals/*` need access.operator (review O5). */
+  protected readonly canSeeEas = computed(() => this.auth.hasPermission(Permission.AccessOperator));
   private readonly destroyRef = inject(DestroyRef);
 
   /** Raw `:id` segment — a slug from the list page or a numeric account id. */
@@ -1089,11 +1105,16 @@ export class BrokerDetailPageComponent implements OnInit {
       accounts: this.accountsService
         .list({ currentPage: 1, itemCountPerPage: 200 })
         .pipe(catchError(() => of(null))),
-      eas: this.eaAdmin.listFleet().pipe(catchError(() => of(null))),
+      // admin/ea and admin/terminals/* need access.operator: never polled without it (review O5).
+      eas: this.canSeeEas() ? this.eaAdmin.listFleet().pipe(catchError(() => of(null))) : of(null),
       // Terminal endpoints are admin-scoped and optional: their failure
       // degrades the hosts card, never the page.
-      daemons: this.terminals.listDaemons().pipe(catchError(() => of(null))),
-      sessions: this.terminals.listSessions().pipe(catchError(() => of(null))),
+      daemons: this.canSeeEas()
+        ? this.terminals.listDaemons().pipe(catchError(() => of(null)))
+        : of(null),
+      sessions: this.canSeeEas()
+        ? this.terminals.listSessions().pipe(catchError(() => of(null)))
+        : of(null),
     })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(({ accounts, eas, daemons, sessions }) => {

@@ -266,6 +266,74 @@ describe('OrderTicketComponent (SP-I4)', () => {
     expect(closed).toHaveBeenCalledTimes(1);
   });
 
+  it('never confirms or sends from a stale preview: an edit waits for the engine to check it', () => {
+    render({ accountId: 17, stop: 1.0971, target: 1.1061, mode: 'Live' });
+    answerPreview(preview({ mode: 'Live' }));
+    expect(byId<HTMLButtonElement>('ticket-submit').disabled).toBe(false);
+    // Edit inside the 350 ms debounce: the old preview is still on screen but answers another ticket.
+    fixture.componentInstance.setPrice('target', '1.107');
+    fixture.detectChanges();
+    expect(byId<HTMLButtonElement>('ticket-submit').disabled).toBe(true);
+    fixture.componentInstance.askSubmit();
+    fixture.detectChanges();
+    expect(byId('ticket-live-confirm')).toBeNull();
+    // The engine's answer for the edited ticket re-opens the way.
+    const sent = answerPreview(preview({ mode: 'Live', takeProfit: 1.107 }));
+    expect(sent['takeProfit']).toBe(1.107);
+    expect(byId<HTMLButtonElement>('ticket-submit').disabled).toBe(false);
+  });
+
+  it('a live confirm is void once the ticket changes: Send does nothing until re-checked', () => {
+    render({ accountId: 17, stop: 1.0971, target: 1.1061, mode: 'Live' });
+    answerPreview(preview({ mode: 'Live' }));
+    byId<HTMLButtonElement>('ticket-submit').click();
+    fixture.detectChanges();
+    expect(byId('ticket-live-confirm')).not.toBeNull();
+    // Change the ticket without letting change detection close the confirm first, then send.
+    fixture.componentInstance.setPrice('stop', '1.0961');
+    fixture.componentInstance.submit();
+    http.expectNone(`${BASE}/trade-signal/manual`);
+    fixture.detectChanges();
+    expect(byId('ticket-live-confirm')).toBeNull();
+    answerPreview(preview({ mode: 'Live', stopLoss: 1.0961 }));
+  });
+
+  it('an "at price" ticket without an entry is never asked about or sent (it would be a market order)', () => {
+    render({ accountId: 17, atMarket: false, entry: null, stop: 1.0971, target: 1.1061 });
+    vi.advanceTimersByTime(400);
+    http.expectNone(`${BASE}/trade-signal/preview`);
+    fixture.detectChanges();
+    expect(byId('ticket-why').textContent).toContain('Set the entry price');
+    expect(byId<HTMLButtonElement>('ticket-submit').disabled).toBe(true);
+    fixture.componentInstance.submit();
+    http.expectNone(`${BASE}/trade-signal/manual`);
+  });
+
+  it('a four-eyes hold (-202-approval) is not a refusal: no error, and the ticket resets', () => {
+    render({ accountId: 17, stop: 1.0971, target: 1.1061 });
+    answerPreview(preview());
+    byId<HTMLButtonElement>('ticket-submit').click();
+    const req = http.expectOne(`${BASE}/trade-signal/manual`);
+    req.flush(
+      {
+        data: { approvalId: 41, expiresAtUtc: '2026-11-17T10:00:00Z' },
+        status: false,
+        message: 'Awaiting approval',
+        responseCode: '-202-approval',
+      },
+      { status: 202, statusText: 'Accepted' },
+    );
+    fixture.detectChanges();
+    expect(notify.error).not.toHaveBeenCalled();
+    const st = fixture.componentInstance.state();
+    expect(st.stop).toBeNull();
+    expect(st.target).toBeNull();
+    expect(st.accountId).toBe(17);
+    // The reset ticket is checked afresh.
+    answerPreview(preview({ stopLoss: null, takeProfit: null }));
+    answerPreview(preview());
+  });
+
   it('mirrors the brackets when the side flips', () => {
     render({ accountId: 17, stop: 1.0971, target: 1.1061 });
     answerPreview(preview());

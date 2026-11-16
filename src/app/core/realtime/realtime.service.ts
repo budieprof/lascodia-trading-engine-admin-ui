@@ -5,7 +5,7 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { Observable, Subject, filter, map, share, takeUntil } from 'rxjs';
+import { Observable, Subject, filter, map, share } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
@@ -146,7 +146,6 @@ export class RealtimeService {
 
   private connection: HubConnection | null = null;
   private readonly messages = new Subject<RealtimeMessage>();
-  private readonly stop = new Subject<void>();
 
   readonly events$: Observable<RealtimeMessage> = this.messages.pipe(share());
 
@@ -162,6 +161,13 @@ export class RealtimeService {
 
   /** True only when the operator signed out or the app is being torn down. */
   private manualStop = false;
+
+  /**
+   * Bumped by every {@link disconnect}. An {@link openConnection} still awaiting its ticket or its
+   * `start()` when the generation moves on belongs to a session that has ended: it must neither
+   * start a hub nor keep one it already started.
+   */
+  private generation = 0;
 
   constructor() {
     // When the auth token disappears (logout/idle-timeout) we tear the
@@ -193,13 +199,24 @@ export class RealtimeService {
     // One attempt at a time: the ticket round trip (BFF) or the legacy cookie-ticket fetch is an
     // await between "no connection yet" and "connection assigned", and two overlapping calls
     // (sign-in effect + wake-up) would otherwise open two hubs.
-    this.connecting ??= this.openConnection().finally(() => (this.connecting = null));
+    if (!this.connecting) {
+      const attempt: Promise<void> = this.openConnection(this.generation).finally(() => {
+        // Only clear OUR attempt: a disconnect + connect may already have started the next one.
+        if (this.connecting === attempt) this.connecting = null;
+      });
+      this.connecting = attempt;
+    }
     return this.connecting;
   }
 
   private connecting: Promise<void> | null = null;
 
-  private async openConnection(): Promise<void> {
+  /** True when the attempt of generation `gen` no longer belongs to a live session. */
+  private superseded(gen: number): boolean {
+    return this.manualStop || gen !== this.generation;
+  }
+
+  private async openConnection(gen: number): Promise<void> {
     if (!this.auth.isAuthenticated()) return;
     if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
 
@@ -208,6 +225,8 @@ export class RealtimeService {
     // (re)connect. Legacy bearer-token sessions return the real token and
     // skip the round trip. A session with nothing to present does not connect.
     if (this.auth.mode === 'legacy' && !(await legacyHubToken(this.auth))) return;
+    // Signed out while the ticket was on its way: start nothing.
+    if (this.superseded(gen)) return;
 
     const base = this.runtime.apiBaseUrl.replace(/\/$/, '');
     // BFF: a single-use ticket in the URL, WebSockets only, no negotiation (hub-auth.ts).
@@ -216,6 +235,7 @@ export class RealtimeService {
     // ticket and was refused — so a connection that dropped after the ticket aged out could
     // never come back, however many times it tried.
     const plan = await hubConnectPlan(this.auth, `${base}/api/hubs/trading`);
+    if (this.superseded(gen)) return;
     if (!plan) {
       // No ticket (engine unreachable, or the session just ended): try again later.
       this.scheduleRestart();
@@ -256,6 +276,9 @@ export class RealtimeService {
     // refuses outright, closes without ever entering Reconnecting. This is the outer loop that
     // makes "connected" the steady state rather than a phase the page passes through once.
     connection.onclose(() => {
+      // A connection this service no longer holds (replaced, or stopped by a sign-out) says
+      // nothing about the current one.
+      if (this.connection !== connection) return;
       this.state.set(HubConnectionState.Disconnected);
       this.scheduleRestart();
     });
@@ -263,10 +286,18 @@ export class RealtimeService {
     this.connection = connection;
     try {
       await connection.start();
+      if (this.superseded(gen) || this.connection !== connection) {
+        // Signed out (or replaced) while the handshake was in flight: never keep a hub the
+        // session no longer owns.
+        if (this.connection === connection) this.connection = null;
+        await connection.stop().catch(() => undefined);
+        return;
+      }
       this.state.set(connection.state);
       this.restartAttempt = 0;
       await this.replayStanding();
     } catch {
+      if (this.superseded(gen) || this.connection !== connection) return;
       // A failed FIRST start never reaches withAutomaticReconnect — that only covers a
       // connection that was established and then lost. Without its own retry, opening the
       // console a moment before the engine is ready left it offline until a manual reload.
@@ -295,9 +326,9 @@ export class RealtimeService {
     const delay = backoffMs(this.restartAttempt++);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      // Drop the dead instance so `connect()` builds a new one rather than seeing a stale
-      // non-Disconnected state and returning immediately.
-      this.connection = null;
+      // Drop the dead instance so `connect()` builds a new one. Only a Disconnected one: a live
+      // reference is never dropped without stop(), or it would keep running unseen.
+      if (this.connection?.state === HubConnectionState.Disconnected) this.connection = null;
       void this.connect();
     }, delay);
   }
@@ -305,12 +336,17 @@ export class RealtimeService {
   /** Come back immediately when the machine does, instead of waiting out the backoff. */
   private retryNow(): void {
     if (this.manualStop || this.isConnected()) return;
+    // An attempt is already under way (ticket fetch, handshake, or SignalR's own reconnect).
+    // Starting another — and dropping the reference to the one in flight — used to leave the
+    // console "Connected" on an orphaned hub that had joined no rooms.
+    if (this.connecting) return;
+    if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.restartAttempt = 0;
-    this.connection = null;
+    if (this.connection?.state === HubConnectionState.Disconnected) this.connection = null;
     void this.connect();
   }
 
@@ -318,19 +354,22 @@ export class RealtimeService {
     // Signing out is the one close that must NOT be retried: the server no longer trusts this
     // session, and an outer loop would sit there being refused.
     this.manualStop = true;
+    // Any attempt still in flight belongs to the ended session (see openConnection).
+    this.generation++;
+    this.connecting = null;
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.restartAttempt = 0;
-    this.stop.next();
-    if (this.connection) {
+    const connection = this.connection;
+    this.connection = null;
+    if (connection) {
       try {
-        await this.connection.stop();
+        await connection.stop();
       } catch {
         /* best-effort */
       }
-      this.connection = null;
     }
     this.state.set(HubConnectionState.Disconnected);
   }
@@ -376,10 +415,14 @@ export class RealtimeService {
   /**
    * Typed subscription for a single event name. Emits payloads only; callers
    * that care about message metadata can use `events$` directly.
+   *
+   * Never completed by a sign-out: it used to be cut by a service-wide `takeUntil(stop)`, which
+   * ended every ROOT subscriber for good on the first legacy logout, so after signing back in
+   * those services never heard another event. Nothing flows while disconnected anyway; each
+   * subscriber ends with its own lifetime (takeUntilDestroyed / unsubscribe).
    */
   on<T = unknown>(name: RealtimeEventName): Observable<T> {
     return this.events$.pipe(
-      takeUntil(this.stop),
       filter((m): m is RealtimeMessage<T> => m.name === name),
       map((m) => m.payload),
     );

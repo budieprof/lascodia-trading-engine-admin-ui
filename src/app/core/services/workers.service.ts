@@ -1,11 +1,23 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
-import { ApiService } from '@core/api/api.service';
+import { ApiService, type ApiCallOptions } from '@core/api/api.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { WorkerHealthDto, WorkerHealthSnapshot, WorkerHealthStatus } from '@core/api/api.types';
 
 @Injectable({ providedIn: 'root' })
 export class WorkersService {
   private readonly api = inject(ApiService);
+  private readonly auth = inject(AuthService);
+
+  /**
+   * `GET health/workers` carries every worker's last error text, so the engine serves it to
+   * platform staff / House only (`platform.infrastructure.manage`). Callers gate their call AND
+   * their panel on this: polling it without the key is a refusal (and a toast) every cycle.
+   */
+  canRead(): boolean {
+    return this.auth.hasPermission(Permission.PlatformInfrastructureManage);
+  }
 
   /**
    * Returns enriched health rows for every registered background worker.
@@ -15,9 +27,9 @@ export class WorkersService {
    * and the snapshot it returns has *no* status field — status, category, error
    * rate, and staleness are derived client-side from the raw counters.
    */
-  list(): Observable<WorkerHealthDto[]> {
+  list(opts?: ApiCallOptions): Observable<WorkerHealthDto[]> {
     return this.api
-      .get<WorkerHealthSnapshot[]>(`/health/workers`)
+      .get<WorkerHealthSnapshot[]>(`/health/workers`, opts)
       .pipe(map((rows) => (rows ?? []).map(enrichSnapshot)));
   }
 }

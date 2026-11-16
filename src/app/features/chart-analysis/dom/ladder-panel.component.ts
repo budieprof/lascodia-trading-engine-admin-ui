@@ -205,7 +205,7 @@ type LadderAction =
         <button
           type="button"
           class="lp-mkt buy"
-          [disabled]="!canPlace()"
+          [disabled]="!canPlace() || inFlight()"
           (click)="market('Buy')"
           data-testid="ladder-buy-mkt"
         >
@@ -214,7 +214,7 @@ type LadderAction =
         <button
           type="button"
           class="lp-mkt sell"
-          [disabled]="!canPlace()"
+          [disabled]="!canPlace() || inFlight()"
           (click)="market('Sell')"
           data-testid="ladder-sell-mkt"
         >
@@ -905,6 +905,12 @@ export class LadderPanelComponent {
   readonly action = signal<LadderAction | null>(null);
   readonly actionError = signal<string | null>(null);
   readonly busy = signal(false);
+  /**
+   * A click is being turned into an order (ATR lookup, then — armed — the send itself). Set
+   * BEFORE the first await so a double click, or a second click while the engine answers, can
+   * never send a second live order; cleared when that click has fully settled.
+   */
+  readonly inFlight = signal(false);
   private readonly tickCounts = new Map<number, number>();
   readonly tickNote = signal('tick count per price since the panel opened');
   private atr: { key: string; value: number; at: number } | null = null;
@@ -1387,7 +1393,25 @@ export class LadderPanelComponent {
 
   // ── Clicks ────────────────────────────────────────────────────────────────
 
+  /** Runs one order-producing click at a time; a click while one is in flight is ignored. */
+  private async exclusive(fn: () => Promise<void>): Promise<void> {
+    if (this.inFlight()) {
+      this.hint.set('Still sending the previous click — wait for the engine to answer.');
+      return;
+    }
+    this.inFlight.set(true);
+    try {
+      await fn();
+    } finally {
+      this.inFlight.set(false);
+    }
+  }
+
   async onCell(e: MouseEvent, column: LadderColumn, row: LadderRow): Promise<void> {
+    if (this.inFlight()) {
+      this.hint.set('Still sending the previous click — wait for the engine to answer.');
+      return;
+    }
     this.hint.set(null);
     if (this.resolving()) {
       this.hint.set(RESOLVING_HINT);
@@ -1434,18 +1458,20 @@ export class LadderPanelComponent {
       }
       this.ocoFirst.set(null);
       this.ocoMode.set(false);
-      await this.prepareOco(first, intent);
+      await this.exclusive(() => this.prepareOco(first, intent));
       return;
     }
 
-    const request = await this.requestFor(intent.direction, intent.price);
-    if (!request) return;
-    if (this.armedNow()) {
-      await this.sendPlace(request);
-      return;
-    }
-    this.openAction({ type: 'place', request, intent, preview: null });
-    await this.loadPlacePreview();
+    await this.exclusive(async () => {
+      const request = await this.requestFor(intent.direction, intent.price);
+      if (!request) return;
+      if (this.armedNow()) {
+        await this.sendPlace(request);
+        return;
+      }
+      this.openAction({ type: 'place', request, intent, preview: null });
+      await this.loadPlacePreview();
+    });
   }
 
   /** Enter on a focused cell = a click there (Shift+Enter = the stop modifier). */
@@ -1489,14 +1515,16 @@ export class LadderPanelComponent {
       return;
     }
     if (!this.canPlace()) return;
-    const request = await this.requestFor(direction, null);
-    if (!request) return;
-    if (request.mode === 'Live' && this.armedNow()) {
-      await this.sendPlace(request);
-      return;
-    }
-    this.openAction({ type: 'place', request, intent: null, preview: null });
-    await this.loadPlacePreview();
+    await this.exclusive(async () => {
+      const request = await this.requestFor(direction, null);
+      if (!request) return;
+      if (request.mode === 'Live' && this.armedNow()) {
+        await this.sendPlace(request);
+        return;
+      }
+      this.openAction({ type: 'place', request, intent: null, preview: null });
+      await this.loadPlacePreview();
+    });
   }
 
   /** The ticket for a click: the account, the side, the price (null = market) and the default brackets from the ATR. */
@@ -1636,7 +1664,7 @@ export class LadderPanelComponent {
       return;
     }
     if (this.armedNow()) {
-      await this.sendMove(d.order, row.price);
+      await this.exclusive(() => this.sendMove(d.order, row.price));
       return;
     }
     const action: LadderAction = { type: 'move', order: d.order, to: row.price, preview: null };
@@ -1672,7 +1700,7 @@ export class LadderPanelComponent {
       return;
     }
     if (this.armedNow()) {
-      void this.sendCancel(o);
+      void this.exclusive(() => this.sendCancel(o));
       return;
     }
     this.openAction({ type: 'cancel', order: o });
@@ -1722,6 +1750,17 @@ export class LadderPanelComponent {
       const res = await firstValueFrom(this.trading.submit(request));
       if (res?.status) {
         this.notify.success(res.data?.message || res.message || 'Sent.');
+        this.closeActionNow();
+        this.refreshOrders();
+      } else if (res?.responseCode === '-202-approval') {
+        // A four-eyes hold: accepted, waiting for a second authorised person — not a refusal,
+        // and not something to send again. The approval interceptor announces a well-formed
+        // hold; say it here only when it could not (no approvalId).
+        const hold = res.data as unknown as { approvalId?: number | string } | null;
+        if (hold?.approvalId === undefined || hold?.approvalId === null)
+          this.notify.info(
+            'Sent for approval: the order waits for a second authorised person, and the engine judges it again when it is approved.',
+          );
         this.closeActionNow();
         this.refreshOrders();
       } else this.fail(res?.message || 'The engine refused the order.');

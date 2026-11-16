@@ -21,6 +21,7 @@ import {
   distinctUntilChanged,
   forkJoin,
   map,
+  Observable,
   of,
   throttleTime,
 } from 'rxjs';
@@ -30,6 +31,7 @@ import { TradingAccountsService } from '@core/services/trading-accounts.service'
 import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type {
+  ResponseData,
   TradeSignalDto,
   TradingAccountDto,
   PagedData,
@@ -608,7 +610,7 @@ type DirectionChip = 'all' | TradeDirection;
                   <button
                     type="button"
                     class="sd-btn sd-btn--approve"
-                    (click)="approveSignal(s)"
+                    (click)="requestBulkApprove([s])"
                     [disabled]="processing()"
                   >
                     Approve
@@ -1704,26 +1706,8 @@ export class SignalsPageComponent {
   };
 
   // ── Actions ──────────────────────────────────────────────────────────
-  approveSignal(s: TradeSignalDto): void {
-    this.processing.set(true);
-    this.signalsService.approve(s.id).subscribe({
-      next: (res) => {
-        this.processing.set(false);
-        if (res.status) {
-          this.notifications.success(`Signal #${s.id} approved`);
-          this.selectedDetail.set(null);
-          this.dataTable()?.loadData();
-          this.loadRecent();
-        } else {
-          this.notifications.error(res.message ?? 'Failed to approve signal');
-        }
-      },
-      error: () => {
-        this.processing.set(false);
-        this.notifications.error('Failed to approve signal');
-      },
-    });
-  }
+  // Approving releases a live signal for execution, so a single Approve goes through the same
+  // confirm dialog as bulk approve (requestBulkApprove([s])) — there is no one-click path.
 
   rejectSignal(s: TradeSignalDto): void {
     this.pendingRejectIds.set([s.id]);
@@ -1759,37 +1743,67 @@ export class SignalsPageComponent {
       return;
     }
     this.processing.set(true);
-    let remaining = pending.length;
-    let approved = 0;
-    pending.forEach((s) => {
-      this.signalsService.approve(s.id).subscribe({
+    this.runSignalBatch(
+      pending.map((s) => s.id),
+      (id) => this.signalsService.approve(id),
+      'Approved',
+      'approve',
+      () => {
+        done?.();
+      },
+    );
+  }
+
+  /**
+   * Run one engine call per signal and report once, when EVERY call has settled. Each answer is
+   * tallied as done (status:true), parked for a second approver ('-202-approval' — accepted, not
+   * refused), refused (status:false) or failed (transport error). Anything short of all-done is a
+   * warning/error, never a success toast, and the table + KPIs reload in every terminal branch.
+   */
+  private runSignalBatch(
+    ids: number[],
+    call: (id: number) => Observable<ResponseData<unknown>>,
+    doneVerb: string,
+    actionNoun: string,
+    finish: () => void,
+  ): void {
+    const total = ids.length;
+    let remaining = total;
+    let ok = 0;
+    let parked = 0;
+    let refused = 0;
+    let failed = 0;
+    let firstRefusal: string | null = null;
+    const settle = () => {
+      if (--remaining > 0) return;
+      this.processing.set(false);
+      finish();
+      if (ok > 0) this.selectedDetail.set(null);
+      const parts = [`${doneVerb} ${ok} of ${total}`];
+      if (parked) parts.push(`${parked} sent for a second approval`);
+      if (refused) parts.push(`${refused} refused${firstRefusal ? ` (${firstRefusal})` : ''}`);
+      if (failed) parts.push(`${failed} failed to reach the engine`);
+      const msg = parts.join(' — ');
+      if (ok === total) this.notifications.success(msg);
+      else if (ok === 0 && parked === 0) this.notifications.error(`Could not ${actionNoun}: ${msg}`);
+      else this.notifications.warning(msg);
+      this.dataTable()?.loadData();
+      this.loadRecent();
+    };
+    ids.forEach((id) => {
+      call(id).subscribe({
         next: (res) => {
-          if (res.status) approved++;
-          if (--remaining === 0) {
-            this.processing.set(false);
-            done?.();
-            // A partial result is not a success: say how many the engine refused.
-            if (approved === pending.length) {
-              this.notifications.success(`Approved ${approved} of ${pending.length}`);
-            } else {
-              this.notifications.warning(
-                `Approved ${approved} of ${pending.length} — the engine refused the rest`,
-              );
-            }
-            this.dataTable()?.loadData();
-            this.loadRecent();
+          if (res?.status) ok++;
+          else if (res?.responseCode === '-202-approval') parked++;
+          else {
+            refused++;
+            firstRefusal ??= res?.message ?? null;
           }
+          settle();
         },
         error: () => {
-          if (--remaining === 0) {
-            this.processing.set(false);
-            done?.();
-            this.notifications.error(
-              `Bulk approve failed — ${approved} of ${pending.length} approved`,
-            );
-            this.dataTable()?.loadData();
-            this.loadRecent();
-          }
+          failed++;
+          settle();
         },
       });
     });
@@ -1811,32 +1825,15 @@ export class SignalsPageComponent {
 
   confirmReject(): void {
     const ids = this.pendingRejectIds();
-    if (ids.length === 0) return;
+    if (ids.length === 0 || this.processing()) return;
     this.processing.set(true);
-    let remaining = ids.length;
-    let rejected = 0;
-    ids.forEach((id) => {
-      this.signalsService.reject(id, { reason: 'Manually rejected by admin' }).subscribe({
-        next: (res) => {
-          if (res.status) rejected++;
-          if (--remaining === 0) {
-            this.processing.set(false);
-            this.showRejectDialog.set(false);
-            this.selectedDetail.set(null);
-            this.notifications.success(`Rejected ${rejected} of ${ids.length}`);
-            this.dataTable()?.loadData();
-            this.loadRecent();
-          }
-        },
-        error: () => {
-          if (--remaining === 0) {
-            this.processing.set(false);
-            this.showRejectDialog.set(false);
-            this.notifications.error('Bulk reject failed');
-          }
-        },
-      });
-    });
+    this.runSignalBatch(
+      ids,
+      (id) => this.signalsService.reject(id, { reason: 'Manually rejected by admin' }),
+      'Rejected',
+      'reject',
+      () => this.showRejectDialog.set(false),
+    );
   }
 
   cancelSignal(s: TradeSignalDto): void {

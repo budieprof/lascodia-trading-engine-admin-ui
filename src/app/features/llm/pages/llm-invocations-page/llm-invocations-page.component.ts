@@ -14,7 +14,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, CurrencyPipe, DatePipe, DecimalPipe, SlicePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, of } from 'rxjs';
+import { Subscription, catchError, of } from 'rxjs';
 
 import { LlmService } from '@core/services/llm.service';
 import {
@@ -1006,11 +1006,15 @@ export class LlmInvocationsPageComponent implements OnInit {
    * dialog opens immediately with a placeholder frame — better than a half-
    * second of nothing while the network round-trips.
    */
+  /** The detail read in flight; opening another row cancels it so a late answer never lands. */
+  private detailSub: Subscription | null = null;
+
   openDetail(row: LlmInvocationDto): void {
+    this.detailSub?.unsubscribe();
     this.detail.set(null);
     this.detailError.set(null);
     this.detailLoading.set(true);
-    this.llm
+    this.detailSub = this.llm
       .invocationDetail(row.id)
       .pipe(
         catchError((err) => {
@@ -1031,6 +1035,7 @@ export class LlmInvocationsPageComponent implements OnInit {
   }
 
   closeDetail(): void {
+    this.detailSub?.unsubscribe();
     this.detail.set(null);
     this.detailError.set(null);
     this.detailLoading.set(false);

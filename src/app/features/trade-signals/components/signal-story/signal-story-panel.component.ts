@@ -145,7 +145,7 @@ import type { SignalStory } from './signal-story.types';
                 } @else {
                   <strong>{{ originHeading(o) }}</strong>
                 }
-                @if (o.confidence != null) {
+                @if ((o.confidence ?? null) !== null) {
                   <span class="pill">conf {{ o.confidence | number: '1.2-2' }}</span>
                 }
               </div>
@@ -199,7 +199,7 @@ import type { SignalStory } from './signal-story.types';
                 <dt>Review journal</dt>
                 <dd>
                   {{ rv.outcomeKind }} · {{ rv.closeReason }}
-                  @if (rv.realizedPips != null) {
+                  @if ((rv.realizedPips ?? null) !== null) {
                     · {{ rv.realizedPips | number: '1.1-1' }} pips
                   }
                 </dd>
@@ -210,7 +210,7 @@ import type { SignalStory } from './signal-story.types';
                 </dt>
                 <dd>
                   {{ st.ghostOutcome }}
-                  @if (st.ghostPnLPips != null) {
+                  @if ((st.ghostPnLPips ?? null) !== null) {
                     · {{ st.ghostPnLPips | number: '1.1-1' }} pips
                   }
                 </dd>

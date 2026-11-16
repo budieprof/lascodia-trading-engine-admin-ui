@@ -9,7 +9,7 @@ import {
 import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type { EChartsOption } from 'echarts';
-import { catchError, of } from 'rxjs';
+import { Subscription, catchError, of } from 'rxjs';
 
 import { SpotAnalysisService } from '@core/services/spot-analysis.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
@@ -1561,23 +1561,30 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     ).length;
   }
 
+  /** The detail read in flight; a newer row's click cancels it so a late answer never lands. */
+  private detailSub: Subscription | null = null;
+
   openDetail(row: SpotAnalysisListItemDto): void {
+    this.detailSub?.unsubscribe();
     this.selectedRow.set(row);
     this.detail.set(null);
     this.detailError.set(null);
     this.detailLoading.set(true);
     this.reapproveStatus.set(null);
-    this.service
+    this.detailSub = this.service
       .getDetail(row.id)
       .pipe(
         catchError((err) => {
-          this.detailError.set(
-            err?.error?.message ?? err?.message ?? 'Failed to load analysis detail.',
-          );
+          if (this.selectedRow()?.id === row.id)
+            this.detailError.set(
+              err?.error?.message ?? err?.message ?? 'Failed to load analysis detail.',
+            );
           return of(null);
         }),
       )
       .subscribe((res) => {
+        // Belt and braces with the unsubscribe: only the row still selected may fill the drawer.
+        if (this.selectedRow()?.id !== row.id) return;
         this.detailLoading.set(false);
         if (res?.status && res.data) {
           this.detail.set(res.data);
@@ -1653,6 +1660,8 @@ export class SpotAnalysisReportPageComponent implements OnInit {
   }
 
   closeDetail(): void {
+    this.detailSub?.unsubscribe();
+    this.detailLoading.set(false);
     this.selectedRow.set(null);
     this.detail.set(null);
     this.detailError.set(null);

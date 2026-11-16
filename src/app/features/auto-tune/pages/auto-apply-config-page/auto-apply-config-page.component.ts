@@ -5,6 +5,8 @@ import { RouterLink } from '@angular/router';
 import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { AutoApplyConfigDto, UpsertAutoApplyConfigRequest } from '@core/api/api.types';
@@ -58,7 +60,7 @@ interface EditForm {
         <!-- Bound to the first-load flag, the old button never changed on a click. -->
         <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
         <!-- The empty state carries its own "New config" CTA; two buttons for one action is noise. -->
-        @if (configs().length > 0) {
+        @if (configs().length > 0 && canManage()) {
           <button type="button" class="btn btn-primary" (click)="openEditor(null)">
             New config
           </button>
@@ -103,7 +105,7 @@ interface EditForm {
             <app-empty-state
               title="No per-knob configs"
               description="Every auto-tune proposal waits for a person. A config names one knob, the bounds it may move within, how many consecutive matching proposals it needs and the quiet period between changes."
-              actionLabel="New config"
+              [actionLabel]="canManage() ? 'New config' : ''"
               (actionClick)="openEditor(null)"
             />
           </section>
@@ -158,15 +160,19 @@ interface EditForm {
                       {{ c.lastUpdatedAt | relativeTime }}
                     </td>
                     <td class="actions">
-                      <button type="button" class="link" (click)="openEditor(c)">Edit</button>
-                      <button
-                        type="button"
-                        class="link warn"
-                        (click)="askDelete(c)"
-                        [disabled]="submitting()"
-                      >
-                        Delete
-                      </button>
+                      @if (canManage()) {
+                        <button type="button" class="link" (click)="openEditor(c)">Edit</button>
+                        <button
+                          type="button"
+                          class="link warn"
+                          (click)="askDelete(c)"
+                          [disabled]="submitting()"
+                        >
+                          Delete
+                        </button>
+                      } @else {
+                        <span class="muted" title="Needs platform.engine.manage">Read-only</span>
+                      }
                     </td>
                   </tr>
                 }
@@ -577,6 +583,9 @@ interface EditForm {
 })
 export class AutoApplyConfigPageComponent {
   private readonly autoTune = inject(AutoTuneService);
+  private readonly auth = inject(AuthService);
+  /** Upsert/delete need platform.engine.manage on the engine; without it the page is read-only. */
+  readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
   private readonly auditTrail = inject(AuditTrailService);
   private readonly notifications = inject(NotificationService);
 
@@ -635,6 +644,7 @@ export class AutoApplyConfigPageComponent {
   }
 
   protected openEditor(c: AutoApplyConfigDto | null): void {
+    if (!this.canManage()) return;
     this.saveError.set(null);
     this.editingExisting.set(c !== null);
     this.form = c

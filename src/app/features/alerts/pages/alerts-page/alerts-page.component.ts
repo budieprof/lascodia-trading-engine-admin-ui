@@ -10,7 +10,9 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { catchError, forkJoin, of } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
-import { ConfigService, isQueuedForCoolingOff } from '@core/services/config.service';
+import { ConfigService, type ConfigUpsertResponse } from '@core/services/config.service';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
   AlertChannel,
@@ -102,6 +104,56 @@ export interface ChannelField {
   options?: readonly string[];
   /** The engine's compiled default, shown while the key has no saved value. */
   defaultValue?: string;
+  /**
+   * The engine treats the key as a secret (SecretConfigKeys: *Password, *Secret, *Token, and every
+   * `*AlertOptions:Url`): reads come back masked as `***SET` / `***UNSET`, a write needs
+   * platform.engine.secrets, and the mask is refused as a value. The input starts empty with a
+   * set / not set badge; leaving it blank keeps the stored value.
+   */
+  secret?: boolean;
+}
+
+/** The two placeholders a masked secret read returns (engine SecretConfigKeys.MaskedSet/Unset). */
+export const SECRET_MASK_SET = '***SET';
+export const SECRET_MASK_UNSET = '***UNSET';
+
+/** True for a masked placeholder — never a real value, never sent back. */
+export function isSecretMask(value: string | null | undefined): boolean {
+  return !!value && value.startsWith('***');
+}
+
+/**
+ * Whether a field has a value on the engine, from the config read. A masked `***SET` counts; a
+ * masked `***UNSET` (or an empty value) does not.
+ */
+export function storedValuePresent(stored: string | null | undefined): boolean {
+  if (!stored) return false;
+  if (stored === SECRET_MASK_UNSET) return false;
+  return stored.trim().length > 0;
+}
+
+/**
+ * The value a field's draft is compared against. A secret's input starts EMPTY (its stored value
+ * is never shown), so its baseline is '' — typing makes it dirty, an empty input changes nothing.
+ */
+export function fieldBaseline(f: ChannelField, configValues: Record<string, string>): string {
+  return f.secret ? '' : (configValues[f.key] ?? '');
+}
+
+/** How one field's save came back. */
+export type FieldSaveOutcome = 'applied' | 'queued' | 'pending-approval' | 'refused';
+
+export function fieldSaveOutcome(res: {
+  status?: boolean;
+  responseCode?: string | null;
+  outcome?: string | null;
+  message?: string | null;
+}): FieldSaveOutcome {
+  if (res.responseCode === '-202-approval') return 'pending-approval';
+  if (!res.status) return 'refused';
+  if (res.outcome === 'QueuedForCoolingOff' || /cooling-off/i.test(res.message ?? ''))
+    return 'queued';
+  return 'applied';
 }
 
 /**
@@ -191,7 +243,12 @@ export const CHANNEL_DEFS: ChannelDef[] = [
         hint: '587 for STARTTLS, 465 for TLS',
       },
       { key: 'EmailAlertOptions:Username', label: 'Username', type: 'text' },
-      { key: 'EmailAlertOptions:Password', label: 'Password / API key', type: 'password' },
+      {
+        key: 'EmailAlertOptions:Password',
+        label: 'Password / API key',
+        type: 'password',
+        secret: true,
+      },
       { key: 'EmailAlertOptions:EnableSsl', label: 'Enable SSL/TLS', type: 'checkbox' },
       { key: 'EmailAlertOptions:ToAddress', label: 'To address', type: 'text', required: true },
       { key: 'EmailAlertOptions:FromAddress', label: 'From address', type: 'text', required: true },
@@ -213,7 +270,10 @@ export const CHANNEL_DEFS: ChannelDef[] = [
       {
         key: 'WebhookAlertOptions:Url',
         label: 'Webhook URL',
-        type: 'text',
+        // The URL is a bearer credential (Slack/Discord/Teams post as whoever holds it): the
+        // engine masks it on reads like any other secret.
+        type: 'password',
+        secret: true,
         required: true,
         hint: 'https://… — the address that should receive alerts',
       },
@@ -222,6 +282,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
         key: 'WebhookAlertOptions:SharedSecret',
         label: 'Signing secret',
         type: 'password',
+        secret: true,
         hint: 'Signs every request (X-Lascodia-Timestamp + X-Lascodia-Signature). Leave blank to send unsigned.',
       },
       ...deliveryPolicyFields('Webhook', { min: 'Info', immediate: 'Info', digest: 0, perHour: 0 }),
@@ -237,6 +298,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
         key: 'TelegramAlertOptions:BotToken',
         label: 'Bot token',
         type: 'password',
+        secret: true,
         required: true,
         hint: 'Issued by @BotFather (e.g. 123456:ABC-DEF…)',
       },
@@ -668,7 +730,21 @@ export const CHANNEL_DEFS: ChannelDef[] = [
         @if (activeTab() === 'channels') {
           @if (channelsLoading()) {
             <app-card-skeleton [lines]="6" />
+          } @else if (channelsError(); as ce) {
+            <!-- A failed read is not "nothing configured": an empty form here would invite the
+                 operator to re-enter (and overwrite) settings that are in fact stored. -->
+            <app-error-state
+              title="Could not read the alert channels"
+              [message]="ce"
+              (retry)="reloadChannels()"
+            />
           } @else {
+            @if (!canManageChannels()) {
+              <p class="muted ch-readonly">
+                Read-only — changing, testing or switching channels needs the platform.engine.manage
+                permission.
+              </p>
+            }
             <!-- 6-card KPI strip — channel + outbound-alert posture.
                  "Enabled" is the number that matters for delivery: a channel
                  can be fully configured and switched off. -->
@@ -792,7 +868,9 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                         <input
                           type="checkbox"
                           [checked]="channelStatus(def.channel)?.isEnabled !== false"
-                          [disabled]="busy() || togglingChannel() === def.channel"
+                          [disabled]="
+                            busy() || togglingChannel() === def.channel || !canManageChannels()
+                          "
                           (change)="toggleChannelEnabled(def.channel, $event)"
                         />
                         <span class="ch-toggle-track" aria-hidden="true">
@@ -855,16 +933,45 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                             <span class="req">*</span>
                           }
                         </span>
-                        @if (f.type === 'checkbox') {
+                        @if (f.secret) {
+                          <!-- Write-only: the stored value is never shown (the engine masks it).
+                               Blank keeps what is stored; typing replaces it. -->
+                          <span class="secret-row">
+                            <input
+                              class="input"
+                              type="password"
+                              [value]="draftValues()[f.key] ?? ''"
+                              (input)="setField(f.key, $event)"
+                              [disabled]="!canEditSecrets()"
+                              [attr.placeholder]="
+                                !canEditSecrets()
+                                  ? 'Changing it needs platform.engine.secrets'
+                                  : secretIsSet(f.key)
+                                    ? 'Set — type a new value to replace it'
+                                    : (f.hint ?? 'Not set')
+                              "
+                              autocomplete="new-password"
+                              [attr.aria-label]="f.label"
+                            />
+                            <span
+                              class="secret-badge"
+                              [attr.data-set]="secretIsSet(f.key) ? 'true' : 'false'"
+                            >
+                              {{ secretIsSet(f.key) ? 'set' : 'not set' }}
+                            </span>
+                          </span>
+                        } @else if (f.type === 'checkbox') {
                           <input
                             type="checkbox"
                             [checked]="getBool(f.key, f.defaultValue)"
+                            [disabled]="!canManageChannels()"
                             (change)="setField(f.key, $event)"
                           />
                         } @else if (f.type === 'select') {
                           <select
                             class="input"
                             [value]="getValue(f.key)"
+                            [disabled]="!canManageChannels()"
                             (change)="setField(f.key, $event)"
                             [attr.aria-label]="f.label"
                           >
@@ -880,6 +987,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                             class="input"
                             [type]="f.type"
                             [value]="getValue(f.key)"
+                            [disabled]="!canManageChannels()"
                             (input)="setField(f.key, $event)"
                             [attr.placeholder]="
                               f.defaultValue !== undefined
@@ -901,7 +1009,10 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                     <button
                       class="btn btn-primary"
                       (click)="saveChannel(def)"
-                      [disabled]="!isChannelDirty(def) || busy()"
+                      [disabled]="!isChannelDirty(def) || busy() || !canManageChannels()"
+                      [title]="
+                        canManageChannels() ? '' : 'Changing channels needs platform.engine.manage'
+                      "
                     >
                       Save settings
                     </button>
@@ -909,6 +1020,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                       class="btn btn-ghost"
                       (click)="testChannel(def.channel)"
                       [disabled]="
+                        !canManageChannels() ||
                         !channelStatus(def.channel)?.isConfigured ||
                         channelStatus(def.channel)?.isEnabled === false ||
                         busy()
@@ -1064,6 +1176,16 @@ export class AlertsPageComponent {
   private readonly configService = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
+  private readonly auth = inject(AuthService);
+
+  /** PUT /config, channel test and channel on/off all need platform.engine.manage on the engine. */
+  readonly canManageChannels = computed(() =>
+    this.auth.hasPermission(Permission.PlatformEngineManage),
+  );
+  /** A secret key's write additionally needs platform.engine.secrets (EngineConfigurationController). */
+  readonly canEditSecrets = computed(
+    () => this.canManageChannels() && this.auth.hasPermission(Permission.PlatformEngineSecrets),
+  );
 
   readonly tabs: TabItem[] = [
     { label: 'Rules', value: 'rules' },
@@ -1443,6 +1565,8 @@ export class AlertsPageComponent {
   readonly configValues = signal<Record<string, string>>({});
   readonly draftValues = signal<Record<string, string>>({});
   readonly channelsLoading = signal(true);
+  /** The channel status or config read failed — shown instead of an empty, editable form. */
+  readonly channelsError = signal<string | null>(null);
   readonly lastTestResult = signal<{
     channel: AlertChannel;
     delivered: boolean;
@@ -1574,10 +1698,7 @@ export class AlertsPageComponent {
   } {
     const required = def.fields.filter((f) => f.required);
     let filled = 0;
-    for (const f of required) {
-      const v = this.getValue(f.key).trim();
-      if (v) filled++;
-    }
+    for (const f of required) if (this.fieldHasValue(f)) filled++;
     return {
       filled,
       requiredCount: required.length,
@@ -1815,7 +1936,26 @@ export class AlertsPageComponent {
   // ── Channels ─────────────────────────────────────────────────────────
 
   getValue(key: string): string {
-    return this.draftValues()[key] ?? this.configValues()[key] ?? '';
+    const v = this.draftValues()[key] ?? this.configValues()[key] ?? '';
+    // A masked placeholder is never a value to show or edit.
+    return isSecretMask(v) ? '' : v;
+  }
+
+  /** A secret is stored on the engine (its read came back `***SET`, or — old engines — a raw value). */
+  secretIsSet(key: string): boolean {
+    return storedValuePresent(this.configValues()[key]);
+  }
+
+  /** Counted as filled: a typed draft, or (no draft) a stored value — `***UNSET` is empty. */
+  private fieldHasValue(f: ChannelField): boolean {
+    const draft = this.draftValues()[f.key];
+    if (draft !== undefined && draft.trim() && !isSecretMask(draft)) return true;
+    if (draft !== undefined && !f.secret) return false; // a cleared non-secret draft is empty
+    return storedValuePresent(this.configValues()[f.key]);
+  }
+
+  reloadChannels(): void {
+    this.loadChannels();
   }
 
   getBool(key: string, defaultValue?: string): boolean {
@@ -1834,15 +1974,16 @@ export class AlertsPageComponent {
 
   isChannelDirty(def: ChannelDef): boolean {
     const drafts = this.draftValues();
-    return def.fields.some(
-      (f) => f.key in drafts && drafts[f.key] !== (this.configValues()[f.key] ?? ''),
-    );
+    const cv = this.configValues();
+    return def.fields.some((f) => f.key in drafts && drafts[f.key] !== fieldBaseline(f, cv));
   }
 
   saveChannel(def: ChannelDef): void {
+    if (!this.canManageChannels()) return;
     const drafts = this.draftValues();
+    const cv = this.configValues();
     const allDirty = def.fields.filter(
-      (f) => f.key in drafts && drafts[f.key] !== (this.configValues()[f.key] ?? ''),
+      (f) => f.key in drafts && drafts[f.key] !== fieldBaseline(f, cv),
     );
     if (allDirty.length === 0) return;
 
@@ -1850,8 +1991,10 @@ export class AlertsPageComponent {
     //   - Required field cleared → block save and tell the operator.
     //   - Optional field cleared (e.g. SMTP password for an open relay,
     //     webhook shared secret, telegram timeout) → silently skip the
-    //     upsert. Sending "" would 400 server-side and abort the whole
-    //     batch, which is worse than just leaving the prior value in place.
+    //     upsert. Sending "" would be refused server-side, which is worse than
+    //     just leaving the prior value in place.
+    // A secret's empty input is never dirty (its baseline is ''), so "blank" there always means
+    // "keep what is stored".
     const blankRequired = allDirty.filter((f) => f.required && !drafts[f.key]?.length);
     if (blankRequired.length > 0) {
       this.notifications.error(
@@ -1859,10 +2002,24 @@ export class AlertsPageComponent {
       );
       return;
     }
-    const dirty = allDirty.filter((f) => drafts[f.key]?.length);
+    // Never send a masked placeholder back as a value (the engine refuses it, and a hand-typed
+    // "***SET" would otherwise overwrite the real secret on an older engine).
+    const masked = allDirty.filter((f) => isSecretMask(drafts[f.key]));
+    if (masked.length > 0) {
+      this.notifications.error(
+        `${masked.map((m) => m.label).join(', ')}: type the new value — a masked placeholder cannot be saved.`,
+      );
+      return;
+    }
+    const secretWithoutRight = allDirty.filter((f) => f.secret && !this.canEditSecrets());
+    const dirty = allDirty.filter(
+      (f) => drafts[f.key]?.length && !(f.secret && !this.canEditSecrets()),
+    );
     if (dirty.length === 0) {
       this.notifications.warning(
-        'Nothing to save — optional fields cleared without other changes are ignored.',
+        secretWithoutRight.length > 0
+          ? 'Nothing saved — changing a secret needs the platform.engine.secrets permission.'
+          : 'Nothing to save — optional fields cleared without other changes are ignored.',
       );
       return;
     }
@@ -1874,56 +2031,81 @@ export class AlertsPageComponent {
       t === 'number' ? 'Int' : t === 'checkbox' ? 'Bool' : 'String';
 
     this.busy.set(true);
+    // One request per key, each with its OWN error handling: a 403 on one secret (or any HTTP
+    // failure) used to abort the whole forkJoin, so the operator could not tell which of the
+    // other fields had been written.
     const ops = dirty.map((f) =>
-      this.configService.upsert({
-        key: f.key,
-        value: drafts[f.key] ?? '',
-        dataType: dtFor(f.type),
-        isHotReloadable: true,
-      }),
+      this.configService
+        .upsert({
+          key: f.key,
+          value: drafts[f.key] ?? '',
+          dataType: dtFor(f.type),
+          isHotReloadable: true,
+        })
+        .pipe(
+          catchError((err: unknown) => {
+            const body = (err as { error?: { message?: string; responseCode?: string } })?.error;
+            return of({
+              status: false,
+              data: 0,
+              message:
+                body?.message ??
+                (err instanceof Error && err.message ? err.message : 'the request failed'),
+              responseCode: body?.responseCode ?? 'HTTP',
+            } as ConfigUpsertResponse);
+          }),
+        ),
     );
-    forkJoin(ops).subscribe({
-      next: (results) => {
-        this.busy.set(false);
-        // HTTP 200 does not mean applied: a row can be refused (status false) or queued for the
-        // cooling-off period. Saying "saved" for those left the form claiming a change the engine
-        // never made.
-        const refused = results.filter((r) => !r.status);
-        if (refused.length > 0) {
-          this.notifications.error(
-            `${def.title}: ${refused.length} of ${results.length} change(s) refused — ` +
-              (refused[0].message ?? 'the engine did not accept them'),
-          );
-          return;
-        }
-        const queued = results.filter((r) => isQueuedForCoolingOff(r));
-        if (queued.length > 0) {
-          this.notifications.info(queued[0].message ?? `${def.title}: queued for cooling-off`);
-        } else {
-          this.notifications.success(`${def.title} saved — changes apply on next worker cycle`);
-        }
-        // Adopt the APPLIED drafts as the new baseline (a queued one is not live until its
-        // cooling-off elapses, so its field keeps the live value) + drop *all* dirty entries
-        // (including the optional-blank ones we silently skipped, so the form stops flagging
-        // them dirty). Then refetch masked status.
-        this.configValues.update((cv) => {
-          const next = { ...cv };
-          dirty.forEach((f, i) => {
-            if (!isQueuedForCoolingOff(results[i])) next[f.key] = drafts[f.key] ?? '';
-          });
-          return next;
+    forkJoin(ops).subscribe((results) => {
+      this.busy.set(false);
+      const outcomes = results.map((r) => fieldSaveOutcome(r));
+      const labelsOf = (o: FieldSaveOutcome) =>
+        dirty.filter((_, i) => outcomes[i] === o).map((f) => f.label);
+      const applied = labelsOf('applied');
+      const queued = labelsOf('queued');
+      const pending = labelsOf('pending-approval');
+      const refusedIdx = outcomes.map((o, i) => (o === 'refused' ? i : -1)).filter((i) => i >= 0);
+
+      // Applied → the new baseline (a secret becomes "set"; its value is never kept on screen).
+      // Queued for cooling-off / parked for approval → not live yet: keep the live value, but drop
+      // the draft so the form does not invite sending the same change again.
+      // Refused → keep the draft so the operator can correct it.
+      this.configValues.update((cvNow) => {
+        const next = { ...cvNow };
+        dirty.forEach((f, i) => {
+          if (outcomes[i] === 'applied')
+            next[f.key] = f.secret ? SECRET_MASK_SET : (drafts[f.key] ?? '');
         });
-        this.draftValues.update((d) => {
-          const next = { ...d };
-          for (const f of allDirty) delete next[f.key];
-          return next;
-        });
-        this.refreshChannelStatuses();
-      },
-      error: () => {
-        this.busy.set(false);
-        this.notifications.error('Failed to save channel settings');
-      },
+        return next;
+      });
+      this.draftValues.update((d) => {
+        const next = { ...d };
+        const refusedKeys = new Set(refusedIdx.map((i) => dirty[i].key));
+        const keptSecrets = new Set(secretWithoutRight.map((f) => f.key));
+        for (const f of allDirty)
+          if (!refusedKeys.has(f.key) && !keptSecrets.has(f.key)) delete next[f.key];
+        return next;
+      });
+
+      const parts: string[] = [];
+      if (applied.length) parts.push(`applied: ${applied.join(', ')}`);
+      if (queued.length) parts.push(`queued for cooling-off: ${queued.join(', ')}`);
+      if (pending.length) parts.push(`sent for approval: ${pending.join(', ')}`);
+      if (refusedIdx.length)
+        parts.push(
+          `refused: ${refusedIdx
+            .map((i) => `${dirty[i].label} (${results[i].message || 'not accepted'})`)
+            .join('; ')}`,
+        );
+      if (secretWithoutRight.length)
+        parts.push(
+          `not sent (needs platform.engine.secrets): ${secretWithoutRight.map((f) => f.label).join(', ')}`,
+        );
+      const text = `${def.title} — ${parts.join(' · ')}`;
+      if (refusedIdx.length > 0) this.notifications.error(text);
+      else if (queued.length || pending.length) this.notifications.info(text);
+      else this.notifications.success(`${text}. Changes apply on the next worker cycle.`);
+      this.refreshChannelStatuses();
     });
   }
 
@@ -1963,13 +2145,23 @@ export class AlertsPageComponent {
 
   private loadChannels(): void {
     this.channelsLoading.set(true);
+    this.channelsError.set(null);
     forkJoin({
       status: this.alertsService.getChannelStatus().pipe(catchError(() => of(null))),
       configs: this.configService.getAll().pipe(catchError(() => of(null))),
     }).subscribe(({ status, configs }) => {
       this.channelsLoading.set(false);
-      this.channelStatuses.set(status?.data ?? []);
-      this.configValues.set(buildConfigMap(configs?.data ?? []));
+      const failed: string[] = [];
+      if (!status?.status) failed.push(`channel status (${status?.message || 'request failed'})`);
+      if (!configs?.status)
+        failed.push(`channel settings (${configs?.message || 'request failed'})`);
+      if (failed.length > 0) {
+        // Not [] / {}: an empty form would read as "nothing configured".
+        this.channelsError.set(`Could not read ${failed.join(' and ')}.`);
+        return;
+      }
+      this.channelStatuses.set(status!.data ?? []);
+      this.configValues.set(buildConfigMap(configs!.data ?? []));
     });
   }
 

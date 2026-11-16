@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { AccountScopeService } from './account-scope.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
@@ -27,12 +27,17 @@ function eaInstance(tradingAccountId: number, status = 'Active'): EAInstanceDto 
 }
 
 /** Build the service with stubbed transports and no live polling. */
-function makeService(): AccountScopeService {
+function makeService(
+  over: { accounts?: unknown; ea?: unknown; hasPermission?: (k: string) => boolean } = {},
+): AccountScopeService {
   const injector = Injector.create({
     providers: [
-      { provide: TradingAccountsService, useValue: { list: () => of({ data: { data: [] } }) } },
-      { provide: EAInstancesService, useValue: { list: () => of({ data: [] }) } },
-      { provide: AuthService, useValue: { hasPermission: () => true } },
+      {
+        provide: TradingAccountsService,
+        useValue: { list: over.accounts ?? (() => of({ data: { data: [] } })) },
+      },
+      { provide: EAInstancesService, useValue: { list: over.ea ?? (() => of({ data: [] })) } },
+      { provide: AuthService, useValue: { hasPermission: over.hasPermission ?? (() => true) } },
     ],
   });
   return runInInjectionContext(injector, () => new AccountScopeService());
@@ -141,5 +146,49 @@ describe('AccountScopeService', () => {
     svc.select(22);
     const revived = makeService();
     expect(revived.selected()).toBe(22);
+  });
+
+  // ── Review A13 / O6 (2026-11-16) ──
+
+  it('keeps the previous EA list when a poll fails, instead of widening scope to the fleet', async () => {
+    vi.useFakeTimers();
+    let fail = false;
+    const s2 = makeService({
+      ea: () => (fail ? throwError(() => new Error('down')) : of({ status: true, data: [eaInstance(17)] })),
+      accounts: () => of({ status: true, data: { data: [account(17), account(22)], pager: { totalItemCount: 2, itemCountPerPage: 100 } } }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(Array.from(s2.accountIds())).toEqual([17]);
+
+    fail = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(Array.from(s2.accountIds())).toEqual([17]);
+    vi.useRealTimers();
+  });
+
+  it('applies an EMPTY account list from a good answer', async () => {
+    vi.useFakeTimers();
+    let rows = [account(17)];
+    const s2 = makeService({
+      ea: () => of({ status: true, data: [eaInstance(17)] }),
+      accounts: () => of({ status: true, data: { data: rows, pager: { totalItemCount: rows.length, itemCountPerPage: 100 } } }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s2.accounts().length).toBe(1);
+    rows = [];
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(s2.accounts()).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('without access.operator, judges liveness from the accounts themselves', () => {
+    vi.useFakeTimers();
+    const s2 = makeService({ hasPermission: (k) => k !== 'access.operator' });
+    vi.useRealTimers();
+    s2.accounts.set([account(17), { ...account(22), isActive: false }, account(99, true)]);
+    expect(s2.eaLivenessKnown()).toBe(false);
+    expect(s2.liveAccounts().map((a) => a.id)).toEqual([17, 99]);
+    s2.select(AGG_REAL);
+    expect(Array.from(s2.accountIds())).toEqual([17]);
   });
 });

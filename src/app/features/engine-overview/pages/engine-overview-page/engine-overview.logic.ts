@@ -43,6 +43,11 @@ export interface AttentionInput {
   idle: number;
   /** null = the operator cannot see the dead-letter queue. */
   dlqTotal: number | null;
+  /**
+   * When the last status read FAILED, the time of the last good one (or '' when there never was
+   * one); null while status reads succeed. Every figure on the page is then stale (review O3).
+   */
+  unreachableSince?: string | null;
 }
 
 /**
@@ -52,7 +57,17 @@ export interface AttentionInput {
 export function attentionItems(i: AttentionInput): AttentionItem[] {
   const out: AttentionItem[] = [];
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-  if (i.running === false) out.push({ text: 'Engine is not running', tone: 'bad', target: null });
+  if (i.unreachableSince !== undefined && i.unreachableSince !== null) {
+    out.push({
+      text: i.unreachableSince
+        ? `Engine unreachable — figures are stale since ${new Date(i.unreachableSince).toLocaleTimeString()}`
+        : 'Engine unreachable — no status read has succeeded yet',
+      tone: 'bad',
+      target: null,
+    });
+  } else if (i.running === false) {
+    out.push({ text: 'Engine is not running', tone: 'bad', target: null });
+  }
   if (i.failed > 0)
     out.push({
       text: plural(i.failed, 'failed worker', 'failed workers'),

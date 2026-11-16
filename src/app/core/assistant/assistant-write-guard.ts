@@ -22,6 +22,15 @@ let installedAdmit: ((method: string, url: string) => string | null) | null = nu
  * fails like any other error, so the page shows its normal failure, and the command's result
  * names what was refused so the model can propose the change through the engine instead.</p>
  *
+ * <p>The operator is never locked out of their own console by it (review A10, 2026-11-16): a write
+ * that follows a TRUSTED gesture — a real pointer press or key press, `isTrusted`, within
+ * {@link AssistantWriteGuard.GESTURE_WINDOW_MS} — is the operator's, and goes. The assistant cannot
+ * forge one: everything it does to a page is a synthetic event (`dispatchEvent`, `el.click()`),
+ * which browsers mark `isTrusted: false`. Gestures inside the assistant's own dock (typing the
+ * question, pressing Send) do not count, so asking a question never opens the gate for the command
+ * that answers it. An emergency (kill switch, flatten) pressed while a command runs therefore goes
+ * through. A URL allow-list was rejected: the same `PUT admin/kill-switch/…` engages AND releases.</p>
+ *
  * <p>Covers HttpClient (the interceptor below, registered first so nothing retries or toasts a
  * refusal), `fetch` and `navigator.sendBeacon` (the chart's keep-alive saves use those). SignalR
  * hub messages are not covered; every hub method the console invokes is a (un)subscribe.</p>
@@ -30,6 +39,11 @@ let installedAdmit: ((method: string, url: string) => string | null) | null = nu
 export class AssistantWriteGuard {
   /** How long the guard stays up after a command's action returns. */
   static readonly TAIL_MS = 3000;
+  /** A write this soon after a trusted operator gesture is the operator's own. */
+  static readonly GESTURE_WINDOW_MS = 1500;
+
+  /** When the operator last pressed something on the page (trusted, outside the dock); 0 = never. */
+  private lastTrustedGestureAt = 0;
 
   private depth = 0;
   private until = 0;
@@ -43,6 +57,35 @@ export class AssistantWriteGuard {
     // The patched transports ask whichever guard was created last (the app has exactly one).
     installedAdmit = (method, url) => this.admit(method, url);
     patchBrowserTransports();
+    this.trackTrustedGestures();
+  }
+
+  /**
+   * Records a real operator gesture. Exposed for the listener below and for tests; a synthetic
+   * (`isTrusted: false`) event, or one inside the assistant's dock, is ignored.
+   */
+  noteGesture(event: Pick<Event, 'isTrusted' | 'target'>, now = Date.now()): void {
+    if (!event.isTrusted) return;
+    const target = event.target as Element | null;
+    if (target && typeof target.closest === 'function' && target.closest(ASSISTANT_UI)) return;
+    this.lastTrustedGestureAt = now;
+  }
+
+  /** True when the operator pressed something within the gesture window. */
+  private operatorActing(now: number): boolean {
+    return (
+      this.lastTrustedGestureAt > 0 &&
+      now - this.lastTrustedGestureAt <= AssistantWriteGuard.GESTURE_WINDOW_MS
+    );
+  }
+
+  private trackTrustedGestures(): void {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    const note = (e: Event) => this.noteGesture(e);
+    // Capture phase: seen before any handler can stop it, and before the request it triggers.
+    for (const type of ['pointerdown', 'keydown']) {
+      window.addEventListener(type, note, { capture: true, passive: true });
+    }
   }
 
   /** True while a command runs or within its tail. */
@@ -63,6 +106,8 @@ export class AssistantWriteGuard {
       if (!SECRET_PATH.test(path)) for (const s of this.sessions) push(s.requests, what);
       return null;
     }
+    // The operator's own press (kill switch, flatten, a save) — never the assistant's.
+    if (this.operatorActing(this.lastRequestAt)) return null;
     if (this.sessions.size === 0) push(this.late, what);
     for (const s of this.sessions) push(s.blocked, what);
     console.warn(`[assistant] blocked a write while driving the page: ${what}`);
@@ -208,6 +253,9 @@ export function describeBlocked(report: { blocked: string[]; blockedEarlier: str
 /** Engine paths of credential surfaces are never echoed into the assistant's context. */
 const SECRET_PATH =
   /(^|\/)(auth|login|logout|refresh|register|token|tokens|ws-ticket|password|credentials|api-key|secret|bff|machine)(\/|$)/i;
+
+/** The assistant's own UI: gestures there (the question, Send) are not page actions. */
+const ASSISTANT_UI = 'app-assistant-dock';
 
 const API_PREFIX = '/api/v1/lascodia-trading-engine';
 const MAX_LISTED = 12;

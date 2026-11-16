@@ -58,10 +58,22 @@ export class AccountScopeService {
   readonly accounts = signal<TradingAccountDto[]>([]);
   readonly eaInstances = signal<EAInstanceDto[]>([]);
 
-  /** Live accounts = accounts with at least one Active EA attached. */
+  /**
+   * Whether this person may read EA instances (`GET /ea/instances` needs `access.operator`), and so
+   * whether "live" can be judged at all. Without it every account was judged dormant, the scope
+   * resolved to NO accounts, and every scoped query went out unfiltered — fleet-wide numbers under
+   * an account-scope label. Without it, liveness falls back to the account's own `isActive`.
+   */
+  readonly eaLivenessKnown = computed(() => this.auth.hasPermission(Permission.AccessOperator));
+
+  /**
+   * Live accounts = accounts with at least one Active EA attached (or, when EA instances cannot be
+   * read, the accounts the engine reports active — see {@link eaLivenessKnown}).
+   */
   readonly liveAccounts = computed<TradingAccountDto[]>(() => {
     const all = this.accounts();
     if (all.length === 0) return [];
+    if (!this.eaLivenessKnown()) return all.filter((a) => a.isActive !== false);
     const liveIds = new Set(
       this.eaInstances()
         .filter((e) => e.status === 'Active')
@@ -220,8 +232,10 @@ export class AccountScopeService {
       take(1),
       catchError(() => of(null)),
       switchMap((list) => {
-        if (list && list.length > 0) this.accounts.set(list);
-        return of(list ?? []);
+        // A successful answer is the truth, EMPTY included (the last account was removed, or the
+        // person lost access to it). Only a failure keeps the previous list.
+        if (list) this.accounts.set(list);
+        return of(list ?? this.accounts());
       }),
     );
   }
@@ -236,8 +250,12 @@ export class AccountScopeService {
       take(1),
       catchError(() => of(null)),
       switchMap((res) => {
-        const list = res?.data ?? [];
-        // Allow empty list to propagate — "no live EAs" is genuine state.
+        // A failed poll (transport error, or an envelope refusal) keeps the previous list. Setting
+        // [] here made every account look dormant, the scope resolve to nothing, and every scoped
+        // query silently widen to the whole fleet until the next good poll (review O6).
+        const list = res && (res as { status?: unknown }).status !== false ? res.data : null;
+        if (!Array.isArray(list)) return of(this.eaInstances());
+        // An empty list from a good answer is genuine state: "no live EAs".
         this.eaInstances.set(list);
         return of(list);
       }),
