@@ -20,7 +20,9 @@ on:
 jobs:
   refresh-baselines:
     name: Refresh visual baselines
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became 26.04 (Nov 2026) and Playwright 1.59 cannot install chromium there;
+    # visual baselines are rendered on 24.04 too. Move with a Playwright upgrade + baseline refresh.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
