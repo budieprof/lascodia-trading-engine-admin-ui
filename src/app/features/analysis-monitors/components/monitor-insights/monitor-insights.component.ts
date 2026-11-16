@@ -1,9 +1,18 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import type { EChartsOption } from 'echarts';
 
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ThemeService } from '@core/theme/theme.service';
+import { fmtProfitFactor, profitFactorTitle } from '@shared/utils/metric-format';
 import type {
   MonitorInsights,
   MonitorSegmentInsight,
@@ -49,7 +58,16 @@ const VERDICT_LABELS: Record<string, string> = {
   Error: 'Errored',
 };
 
-type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf' | 'signals' | 'pnl' | 'last';
+type SymbolSortKey =
+  | 'symbol'
+  | 'live'
+  | 'created'
+  | 'fires'
+  | 'fireRate'
+  | 'ttf'
+  | 'signals'
+  | 'pnl'
+  | 'last';
 
 /**
  * The cockpit's analytics panel: is any of what we arm worth arming?
@@ -74,8 +92,8 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
           <header class="cell-head">
             <h3>Daily outcomes</h3>
             <span class="hint"
-              >Watches armed (line) against how they ended, per UTC day · {{ ins.totals.created }} armed,
-              {{ ins.totals.fires }} fires</span
+              >Watches armed (line) against how they ended, per UTC day ·
+              {{ ins.totals.created }} armed, {{ ins.totals.fires }} fires</span
             >
           </header>
           <app-chart-card
@@ -115,9 +133,22 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
           } @else {
             <div class="hist">
               @for (b of ins.timeToFire; track b.key) {
-                <div class="hist-col" [title]="b.count + ' watch' + (b.count === 1 ? '' : 'es') + ' fired ' + b.key + ' after arming'">
+                <div
+                  class="hist-col"
+                  [title]="
+                    b.count +
+                    ' watch' +
+                    (b.count === 1 ? '' : 'es') +
+                    ' fired ' +
+                    b.key +
+                    ' after arming'
+                  "
+                >
                   <span class="hist-val mono">{{ b.count || '' }}</span>
-                  <span class="hist-bar" [style.height.%]="ttfMax() ? (b.count / ttfMax()) * 100 : 0"></span>
+                  <span
+                    class="hist-bar"
+                    [style.height.%]="ttfMax() ? (b.count / ttfMax()) * 100 : 0"
+                  ></span>
                   <span class="hist-key">{{ b.key }}</span>
                 </div>
               }
@@ -138,16 +169,48 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
               <table class="sym-table">
                 <thead>
                   <tr>
-                    <th (click)="sortBy('symbol')" [class.sorted]="symSort() === 'symbol'">Instrument</th>
-                    <th class="num" (click)="sortBy('live')" [class.sorted]="symSort() === 'live'">Live</th>
-                    <th class="num" (click)="sortBy('created')" [class.sorted]="symSort() === 'created'">Armed</th>
-                    <th class="num" (click)="sortBy('fires')" [class.sorted]="symSort() === 'fires'">Fires</th>
-                    <th (click)="sortBy('fireRate')" [class.sorted]="symSort() === 'fireRate'">Fire rate</th>
-                    <th class="num" title="Thesis broke / expired / cancelled">Broke · Exp · Cxl</th>
-                    <th class="num" (click)="sortBy('ttf')" [class.sorted]="symSort() === 'ttf'">Med. to fire</th>
-                    <th class="num" (click)="sortBy('signals')" [class.sorted]="symSort() === 'signals'">Signals</th>
-                    <th class="num" (click)="sortBy('pnl')" [class.sorted]="symSort() === 'pnl'">Net P&amp;L</th>
-                    <th class="num" (click)="sortBy('last')" [class.sorted]="symSort() === 'last'">Last fire</th>
+                    <th (click)="sortBy('symbol')" [class.sorted]="symSort() === 'symbol'">
+                      Instrument
+                    </th>
+                    <th class="num" (click)="sortBy('live')" [class.sorted]="symSort() === 'live'">
+                      Live
+                    </th>
+                    <th
+                      class="num"
+                      (click)="sortBy('created')"
+                      [class.sorted]="symSort() === 'created'"
+                    >
+                      Armed
+                    </th>
+                    <th
+                      class="num"
+                      (click)="sortBy('fires')"
+                      [class.sorted]="symSort() === 'fires'"
+                    >
+                      Fires
+                    </th>
+                    <th (click)="sortBy('fireRate')" [class.sorted]="symSort() === 'fireRate'">
+                      Fire rate
+                    </th>
+                    <th class="num" title="Thesis broke / expired / cancelled">
+                      Broke · Exp · Cxl
+                    </th>
+                    <th class="num" (click)="sortBy('ttf')" [class.sorted]="symSort() === 'ttf'">
+                      Med. to fire
+                    </th>
+                    <th
+                      class="num"
+                      (click)="sortBy('signals')"
+                      [class.sorted]="symSort() === 'signals'"
+                    >
+                      Signals
+                    </th>
+                    <th class="num" (click)="sortBy('pnl')" [class.sorted]="symSort() === 'pnl'">
+                      Net P&amp;L
+                    </th>
+                    <th class="num" (click)="sortBy('last')" [class.sorted]="symSort() === 'last'">
+                      Last fire
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -179,7 +242,9 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
                           <span class="muted small">none finished</span>
                         }
                       </td>
-                      <td class="num muted">{{ s.invalidated }} · {{ s.expired }} · {{ s.cancelled }}</td>
+                      <td class="num muted">
+                        {{ s.invalidated }} · {{ s.expired }} · {{ s.cancelled }}
+                      </td>
                       <td class="num">{{ hours(s.medianHoursToFire) }}</td>
                       <td class="num">{{ s.signalsFiled || '—' }}</td>
                       <td class="num" [class.pos]="s.netPnl > 0" [class.neg]="s.netPnl < 0">
@@ -191,7 +256,9 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
                         }
                       </td>
                       <td class="num muted">
-                        {{ s.lastFiredAtUtc ? (s.lastFiredAtUtc | date: 'MMM d HH:mm' : 'UTC') : '—' }}
+                        {{
+                          s.lastFiredAtUtc ? (s.lastFiredAtUtc | date: 'MMM d HH:mm' : 'UTC') : '—'
+                        }}
                       </td>
                     </tr>
                   }
@@ -213,15 +280,23 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
               @for (s of group.rows; track s.key) {
                 <li
                   [title]="
-                    s.firedAtLeastOnce + ' of ' + s.created + ' armed fired; ' + s.ended + ' finished, ' +
-                    s.invalidated + ' broke their thesis'
+                    s.firedAtLeastOnce +
+                    ' of ' +
+                    s.created +
+                    ' armed fired; ' +
+                    s.ended +
+                    ' finished, ' +
+                    s.invalidated +
+                    ' broke their thesis'
                   "
                 >
                   <span class="bar-label">{{ s.key }}</span>
                   <span class="bar-track"
                     ><span class="bar-fill" [style.width.%]="(s.fireRate ?? 0) * 100"></span
                   ></span>
-                  <span class="bar-val mono">{{ has(s.fireRate) ? (s.fireRate | percent: '1.0-0') : '—' }}</span>
+                  <span class="bar-val mono">{{
+                    has(s.fireRate) ? (s.fireRate | percent: '1.0-0') : '—'
+                  }}</span>
                   <span class="bar-pct mono muted">n={{ s.created }}</span>
                 </li>
               }
@@ -248,31 +323,43 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
         <section class="cell">
           <header class="cell-head">
             <h3>What the fires traded</h3>
-            <span class="hint">Signals filed by fires in this window, followed to their positions</span>
+            <span class="hint"
+              >Signals filed by fires in this window, followed to their positions</span
+            >
           </header>
           @if (ins.trades.signalsFiled === 0) {
             <p class="empty">No fire in this window filed a signal.</p>
           } @else {
             <div class="funnel">
               <div class="funnel-step">
-                <span class="f-val">{{ ins.trades.signalsFiled }}</span><span class="f-key">filed</span>
+                <span class="f-val">{{ ins.trades.signalsFiled }}</span
+                ><span class="f-key">filed</span>
               </div>
               <span class="f-arrow">→</span>
               <div class="funnel-step">
-                <span class="f-val">{{ ins.trades.executed }}</span><span class="f-key">traded</span>
+                <span class="f-val">{{ ins.trades.executed }}</span
+                ><span class="f-key">traded</span>
               </div>
               <span class="f-arrow">→</span>
               <div class="funnel-step">
-                <span class="f-val">{{ ins.trades.closedTrades }}</span><span class="f-key">closed positions</span>
+                <span class="f-val">{{ ins.trades.closedTrades }}</span
+                ><span class="f-key">closed positions</span>
               </div>
             </div>
             <p class="muted small">
               {{ ins.trades.rejected }} rejected · {{ ins.trades.expired }} expired ·
-              {{ ins.trades.pending }} pending · {{ ins.trades.openTrades }} position{{ ins.trades.openTrades === 1 ? '' : 's' }} still open · a signal can open several
+              {{ ins.trades.pending }} pending · {{ ins.trades.openTrades }} position{{
+                ins.trades.openTrades === 1 ? '' : 's'
+              }}
+              still open · a signal can open several
             </p>
             <dl class="trade-facts">
               <dt>Net P&amp;L</dt>
-              <dd class="mono" [class.pos]="ins.trades.netPnl > 0" [class.neg]="ins.trades.netPnl < 0">
+              <dd
+                class="mono"
+                [class.pos]="ins.trades.netPnl > 0"
+                [class.neg]="ins.trades.netPnl < 0"
+              >
                 {{ ins.trades.netPnl > 0 ? '+' : '' }}{{ ins.trades.netPnl | number: '1.2-2' }}
               </dd>
               <dt>Win rate</dt>
@@ -286,11 +373,13 @@ type SymbolSortKey = 'symbol' | 'live' | 'created' | 'fires' | 'fireRate' | 'ttf
                 {{ has(ins.trades.avgLoss) ? (ins.trades.avgLoss | number: '1.2-2') : '—' }}
               </dd>
               <dt>Profit factor</dt>
-              <dd class="mono">
-                {{ has(ins.trades.profitFactor) ? (ins.trades.profitFactor | number: '1.2-2') : '—' }}
+              <dd class="mono" [attr.title]="pfTitle(ins.trades.profitFactor) || null">
+                {{ pf(ins.trades.profitFactor) }}
               </dd>
             </dl>
-            <p class="muted tiny">P&amp;L is net of swap and commission, in each account's own currency.</p>
+            <p class="muted tiny">
+              P&amp;L is net of swap and commission, in each account's own currency.
+            </p>
           }
         </section>
       </div>
@@ -592,6 +681,15 @@ export class MonitorInsightsComponent {
     return v !== null && v !== undefined;
   }
 
+  /** Profit factor for display: the no-loss sentinel reads "∞", never "9,999.00". */
+  protected pf(v: number | null | undefined): string {
+    return fmtProfitFactor(v);
+  }
+
+  protected pfTitle(v: number | null | undefined): string {
+    return profitFactorTitle(v);
+  }
+
   private readonly theme = inject(ThemeService);
 
   readonly insights = input<MonitorInsights | null>(null);
@@ -601,7 +699,9 @@ export class MonitorInsightsComponent {
 
   protected readonly symSort = signal<SymbolSortKey>('live');
 
-  private readonly pal = computed(() => (this.theme.theme() === 'dark' ? PALETTE.dark : PALETTE.light));
+  private readonly pal = computed(() =>
+    this.theme.theme() === 'dark' ? PALETTE.dark : PALETTE.light,
+  );
 
   protected readonly hasDaily = computed(() =>
     (this.insights()?.daily ?? []).some(
@@ -629,7 +729,11 @@ export class MonitorInsightsComponent {
 
   protected readonly segmentGroups = computed(() => {
     const segs = this.insights()?.segments ?? [];
-    const labels: Record<string, string> = { origin: 'Who armed it', mode: 'How it is checked', kind: 'Watch type' };
+    const labels: Record<string, string> = {
+      origin: 'Who armed it',
+      mode: 'How it is checked',
+      kind: 'Watch type',
+    };
     return ['kind', 'mode', 'origin']
       .map((dimension) => ({
         dimension,
@@ -735,10 +839,30 @@ export class MonitorInsightsComponent {
         axisLabel: { color: p.muted, fontSize: 10 },
       },
       series: [
-        bar('Fired', ins.daily.map((d) => d.fired), p.series[0], false),
-        bar('Thesis broke', ins.daily.map((d) => d.invalidated), p.series[1], false),
-        bar('Expired', ins.daily.map((d) => d.expired), p.series[2], false),
-        bar('Cancelled', ins.daily.map((d) => d.cancelled), p.series[3], true),
+        bar(
+          'Fired',
+          ins.daily.map((d) => d.fired),
+          p.series[0],
+          false,
+        ),
+        bar(
+          'Thesis broke',
+          ins.daily.map((d) => d.invalidated),
+          p.series[1],
+          false,
+        ),
+        bar(
+          'Expired',
+          ins.daily.map((d) => d.expired),
+          p.series[2],
+          false,
+        ),
+        bar(
+          'Cancelled',
+          ins.daily.map((d) => d.cancelled),
+          p.series[3],
+          true,
+        ),
         {
           name: 'Armed',
           type: 'line',

@@ -44,7 +44,12 @@ function tick(r: () => number, b: Ohlc): Ohlc {
 const same = (a: Maybe | undefined, b: Maybe | undefined): boolean =>
   (a === null || a === undefined) && (b === null || b === undefined) ? true : Object.is(a, b);
 
-function expectIdentical(id: string, got: Record<string, Maybe[]>, want: Record<string, Maybe[]>, step: number): void {
+function expectIdentical(
+  id: string,
+  got: Record<string, Maybe[]>,
+  want: Record<string, Maybe[]>,
+  step: number,
+): void {
   for (const key of Object.keys(want)) {
     const g = got[key];
     const w = want[key];
@@ -96,60 +101,70 @@ describe('US01 study tail path', () => {
     for (const id of Object.keys(TAIL_KERNELS)) expect(covered.has(id), id).toBe(true);
   });
 
-  it('every kernel equals the full computation to the last bit over random tick sequences', () => {
-    for (let seed = 1; seed <= 12; seed++) {
-      const r = rng(seed);
-      let bars: Ohlc[] = [];
-      let t = Date.UTC(2026, 0, 5);
-      let price = r() < 0.2 ? 0.0001 : 1.1;
-      // Start anywhere from no bars to a few hundred (warm-up edges included).
-      const start = Math.floor(r() * 300);
-      for (let i = 0; i < start; i++) {
-        const b = makeBar(r, t, price);
-        bars.push(b);
-        price = b.close;
-        t += H1;
-      }
-      const engine = new StudyTailEngine();
-      for (let step = 0; step < 220; step++) {
-        const roll = r();
-        let from: number;
-        if (roll < 0.6 && bars.length) {
-          // A tick on the forming bar.
-          from = bars.length - 1;
-          bars = [...bars.slice(0, -1), tick(r, bars[bars.length - 1])];
-        } else if (roll < 0.85) {
-          // A new bar opens.
-          from = bars.length;
-          const b = makeBar(r, t, bars[bars.length - 1]?.close ?? price);
+  // Exhaustive by design (12 seeds × 220 steps × every kernel, full recompute each step): ~2 s locally, but
+  // past vitest's 5 s default on a busy shared CI runner. Keep the coverage, give it room.
+  it(
+    'every kernel equals the full computation to the last bit over random tick sequences',
+    { timeout: 30_000 },
+    () => {
+      for (let seed = 1; seed <= 12; seed++) {
+        const r = rng(seed);
+        let bars: Ohlc[] = [];
+        let t = Date.UTC(2026, 0, 5);
+        let price = r() < 0.2 ? 0.0001 : 1.1;
+        // Start anywhere from no bars to a few hundred (warm-up edges included).
+        const start = Math.floor(r() * 300);
+        for (let i = 0; i < start; i++) {
+          const b = makeBar(r, t, price);
+          bars.push(b);
+          price = b.close;
           t += H1;
-          bars = [...bars, b];
-        } else if (roll < 0.93 && bars.length >= 2) {
-          // A resync rewrites the last two bars.
-          from = bars.length - 2;
-          bars = [...bars.slice(0, -2), tick(r, bars[bars.length - 2]), tick(r, bars[bars.length - 1])];
-        } else if (roll < 0.97 && bars.length >= 1) {
-          // Replay stepping back: the newest bar taken off.
-          from = bars.length - 1;
-          bars = bars.slice(0, -1);
-        } else {
-          // A deeper rewrite (history reloaded): everything from somewhere in the middle.
-          from = Math.floor(r() * bars.length);
-          bars = [...bars.slice(0, from), ...bars.slice(from).map((b) => tick(r, b))];
         }
-        engine.barsChanged(from);
-        for (const [n, c] of CASES.entries()) {
-          const key = `${n}:${c.id}`;
-          const got = engine.compute(key, c.id, c.params, bars, c.ctx);
-          expect(got, key).not.toBeNull();
-          const want = indicatorById(c.id)!.compute(bars, c.params, c.ctx);
-          expectIdentical(key, got!.values, want, step);
-          // Nothing before `from` was rewritten: the caller may write from there on.
-          expect(got!.from).toBeLessThanOrEqual(Math.min(from, bars.length));
+        const engine = new StudyTailEngine();
+        for (let step = 0; step < 220; step++) {
+          const roll = r();
+          let from: number;
+          if (roll < 0.6 && bars.length) {
+            // A tick on the forming bar.
+            from = bars.length - 1;
+            bars = [...bars.slice(0, -1), tick(r, bars[bars.length - 1])];
+          } else if (roll < 0.85) {
+            // A new bar opens.
+            from = bars.length;
+            const b = makeBar(r, t, bars[bars.length - 1]?.close ?? price);
+            t += H1;
+            bars = [...bars, b];
+          } else if (roll < 0.93 && bars.length >= 2) {
+            // A resync rewrites the last two bars.
+            from = bars.length - 2;
+            bars = [
+              ...bars.slice(0, -2),
+              tick(r, bars[bars.length - 2]),
+              tick(r, bars[bars.length - 1]),
+            ];
+          } else if (roll < 0.97 && bars.length >= 1) {
+            // Replay stepping back: the newest bar taken off.
+            from = bars.length - 1;
+            bars = bars.slice(0, -1);
+          } else {
+            // A deeper rewrite (history reloaded): everything from somewhere in the middle.
+            from = Math.floor(r() * bars.length);
+            bars = [...bars.slice(0, from), ...bars.slice(from).map((b) => tick(r, b))];
+          }
+          engine.barsChanged(from);
+          for (const [n, c] of CASES.entries()) {
+            const key = `${n}:${c.id}`;
+            const got = engine.compute(key, c.id, c.params, bars, c.ctx);
+            expect(got, key).not.toBeNull();
+            const want = indicatorById(c.id)!.compute(bars, c.params, c.ctx);
+            expectIdentical(key, got!.values, want, step);
+            // Nothing before `from` was rewritten: the caller may write from there on.
+            expect(got!.from).toBeLessThanOrEqual(Math.min(from, bars.length));
+          }
         }
       }
-    }
-  });
+    },
+  );
 
   it('resumes from the checkpoint on a tick (one bar of work), and starts over on a deeper change', () => {
     const r = rng(99);
@@ -172,7 +187,14 @@ describe('US01 study tail path', () => {
 
   it('mirrors the plotted bars from the first change, reusing the bars before it', () => {
     const mirror = new StudyBarsMirror();
-    const plotted = [0, 1, 2].map((i) => ({ time: i, open: 1, high: 2, low: 0, close: 1, volume: i }));
+    const plotted = [0, 1, 2].map((i) => ({
+      time: i,
+      open: 1,
+      high: 2,
+      low: 0,
+      close: 1,
+      volume: i,
+    }));
     const utc = plotted.map((b) => ({ ...b, time: b.time + 10 }));
     mirror.update(plotted, utc, 0);
     const first = mirror.ohlc;
