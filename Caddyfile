@@ -43,6 +43,10 @@
 }
 
 :8080 {
+	# LOOPBACK ONLY (ops review 2026-11-17): cloudflared and host scripts are the only clients. Caddy runs on the host,
+	# so this is a real socket bind. Same change as the engine repo's deploy/caddy/Caddyfile.bluegreen.
+	bind 127.0.0.1 ::1
+
 	# ── Security headers at the edge (multi-tenancy f1-prod P1.5, 2026-10-20) ─────────────────────────
 	# HSTS for the public console host; browsers honour it only on HTTPS (via Cloudflare), so one
 	# site-wide line is safe on http://localhost:8080 too. The engine never sends HSTS itself. Started at
