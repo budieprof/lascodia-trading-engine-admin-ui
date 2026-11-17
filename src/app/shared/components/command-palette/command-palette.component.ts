@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { Router } from '@angular/router';
+import { CommandPaletteService } from './command-palette.service';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import {
@@ -218,6 +219,7 @@ export class CommandPaletteComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly globalSearch = inject(GlobalSearchService);
+  private readonly paletteRequests = inject(CommandPaletteService);
 
   readonly open = signal(false);
   readonly query = signal('');
@@ -246,6 +248,11 @@ export class CommandPaletteComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    // The header's search box (and anything else) opens the palette through the root service.
+    this.paletteRequests.openRequested$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.openPalette());
+
     fromEvent<KeyboardEvent>(document, 'keydown')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((event) => {

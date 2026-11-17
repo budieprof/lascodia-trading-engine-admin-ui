@@ -3,7 +3,7 @@ import { Location } from '@angular/common';
 import { AuthService } from '@core/auth/auth.service';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
 import { filter } from 'rxjs';
-import { CommandPaletteComponent } from '@shared/components/command-palette/command-palette.component';
+import { CommandPaletteService } from '@shared/components/command-palette/command-palette.service';
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AccountScopePillComponent } from '@core/scope/account-scope-pill.component';
 import { NotificationBellComponent } from './notification-bell.component';
@@ -369,7 +369,7 @@ export class HeaderComponent {
   readonly wallMode = inject(WallModeService);
   private router = inject(Router);
   private location = inject(Location);
-  private palette = inject(CommandPaletteComponent, { optional: true });
+  private palette = inject(CommandPaletteService);
 
   openMobileNav = output<void>();
 
@@ -410,8 +410,9 @@ export class HeaderComponent {
   }
 
   onSearch() {
-    // Falls through gracefully if the palette isn't mounted (e.g. in isolated previews).
-    this.palette?.openPalette();
+    // The palette is this header's sibling in the layout, so it is reached through a root
+    // service: injecting the component directly always resolved to null and the click did nothing.
+    this.palette.open();
   }
 
   onLogout() {
