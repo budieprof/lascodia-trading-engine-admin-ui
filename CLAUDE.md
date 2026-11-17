@@ -30,6 +30,23 @@ every save hot-reloaded the console someone was trading from.
 
 `npm run release`, `release:status`, `release:list`, `release:rollback` are the same thing.
 
+**Production (mac2) never builds the bundle (since 2026-11-17).** `ng build` there peaks at ~3.6 GB of node and mac2
+kernel-panics under memory pressure. The dev laptop builds and ships, mac2 only publishes — the engine's
+`ship-image.sh` / `deploy-engine.sh` pattern:
+
+```bash
+scripts/ship-release.sh                  # laptop: clean worktree of origin/main → npm ci → ng build --configuration production
+                                         # (heavy lock) → lascodia-admin-<sha8>.tar.gz + .sha256 → mac2:~/lascodia-prod/state/ui-bundles
+scripts/ship-release.sh HEAD --unpushed  # build BEFORE pushing; the deploy then publishes at once
+```
+
+Push to `main` → mac2's runner runs `scripts/deploy-ui.sh <sha>` (copied out of that commit): skips commits that change
+no bundle input since the live one, waits ≤ 30 min for the bundle (none → exit 1, live untouched), checks the commit out
+(feature flags come from its `public/config.json`) and runs `release.sh publish --bundle <file> --expect-sha <sha>`
+(checksum + manifest sha checked; stamp → swap → verify → auto-restore exactly as before). Rollback is unchanged
+(`release.sh rollback`, or workflow_dispatch action `rollback`). Fallback, OFF by default: workflow_dispatch
+`build_on_host`, or repository variable `UI_BUILD_ON_HOST=true` (builds on mac2 the old way).
+
 ### Topology
 
 ```

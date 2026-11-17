@@ -33,8 +33,16 @@
 # whole old release or the whole new one — never a half-copied directory.  Caddy
 # resolves the symlink per request, so no reload is needed to go live.
 #
+# BUILT ON THE LAPTOP (ops review 2026-11-17): production (mac2) no longer runs `ng build` — the ~3.6 GB node spike
+# under memory pressure is what kernel-panics it. scripts/ship-release.sh builds the bundle on the dev laptop and
+# copies it to mac2; scripts/deploy-ui.sh (run by .github/workflows/deploy-prod.yml) waits for it and calls
+# `publish --bundle <file> --expect-sha <sha>`, which stamps + stages + swaps + verifies exactly as before but skips
+# the build. Building here (no --bundle) still works — the explicit fallback, off by default on mac2.
+#
 # USAGE
 #   scripts/release.sh publish [--no-verify]   build → stamp → stage → swap → verify
+#   scripts/release.sh publish --bundle <lascodia-admin-<sha>.tar.gz> [--expect-sha <sha>] [--no-verify]
+#                                              a bundle built by ship-release.sh: no build, same stamp/swap/verify
 #   scripts/release.sh rollback [<release>]    swap back (default: previous)
 #   scripts/release.sh list                    releases on disk, newest first
 #   scripts/release.sh status                  what is LIVE vs what is checked out
@@ -185,25 +193,71 @@ verify_live() {
 
 # ── publish ──────────────────────────────────────────────────────────────────
 
-cmd_publish() {
-  local do_verify=1
-  for a in "$@"; do
-    case "$a" in
-      --no-verify) do_verify=0 ;;
-      *) die "unknown option: $a" ;;
+# Unpack a ship-release.sh bundle into a temp dir and print the path of its browser/ tree. Refuses a bundle whose
+# checksum file disagrees, whose manifest names another commit than --expect-sha, or that has no index.html.
+# Sets BUNDLE_SHA (the full commit sha the bundle was built from).
+unpack_bundle() {
+  local file="$1" expect="$2" dir
+  [ -f "$file" ] || die "no such bundle: $file"
+  if [ -f "$file.sha256" ]; then
+    local want got
+    want="$(cut -d' ' -f1 < "$file.sha256")"
+    got="$(shasum -a 256 "$file" | cut -d' ' -f1)"
+    [ "$want" = "$got" ] || die "bundle checksum mismatch: $file ($got, expected $want) — reship it"
+  else
+    die "bundle has no checksum file $file.sha256 — reship it with scripts/ship-release.sh"
+  fi
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/lascodia-ui-bundle.XXXXXX")"
+  tar -xzf "$file" -C "$dir" || die "could not unpack $file"
+  BUNDLE_SHA="$(node -e '
+    const fs = require("fs");
+    try { process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).sha ?? "")) } catch {}
+  ' "$dir/manifest.json")"
+  [ -n "$BUNDLE_SHA" ] || die "bundle $file has no manifest.json sha"
+  if [ -n "$expect" ]; then
+    case "$BUNDLE_SHA" in
+      "$expect"*) ;;
+      *) die "bundle $file was built from $BUNDLE_SHA, not $expect" ;;
     esac
+  fi
+  [ -f "$dir/browser/index.html" ] || die "bundle $file has no browser/index.html"
+  printf '%s' "$dir"
+}
+
+cmd_publish() {
+  local do_verify=1 bundle="" expect_sha=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-verify) do_verify=0 ;;
+      --bundle) bundle="${2:-}"; shift ;;
+      --bundle=*) bundle="${1#--bundle=}" ;;
+      --expect-sha) expect_sha="${2:-}"; shift ;;
+      --expect-sha=*) expect_sha="${1#--expect-sha=}" ;;
+      *) die "unknown option: $1" ;;
+    esac
+    shift
   done
 
   cd "$REPO_ROOT"
 
-  local sha dirty=""
-  sha="$(git rev-parse --short HEAD)"
-  # Record uncommitted state in the release identity rather than refusing it.
-  # A release you cannot trace back to a commit is worse than one labelled
-  # honestly as untraceable.
-  # `git status --porcelain`, not `git diff HEAD`: an UNTRACKED source file (a new component not
-  # yet added) changes the bundle too, and `git diff` never sees it (review A14).
-  [ -z "$(git status --porcelain -- .)" ] || dirty="-dirty"
+  local sha dirty="" bundle_dir=""
+  if [ -n "$bundle" ]; then
+    bundle_dir="$(unpack_bundle "$bundle" "$expect_sha")" || exit 1
+    BUNDLE_SHA="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).sha))' "$bundle_dir/manifest.json")"
+    # Built from a clean export of that commit on the laptop — never dirty.
+    sha="$(git rev-parse --short "$BUNDLE_SHA" 2>/dev/null || printf '%s' "$BUNDLE_SHA" | cut -c1-7)"
+    BUILD_OUT="$bundle_dir/browser"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$bundle_dir'" EXIT
+  else
+    sha="$(git rev-parse --short HEAD)"
+    # Record uncommitted state in the release identity rather than refusing it.
+    # A release you cannot trace back to a commit is worse than one labelled
+    # honestly as untraceable.
+    # `git status --porcelain`, not `git diff HEAD`: an UNTRACKED source file (a new component not
+    # yet added) changes the bundle too, and `git diff` never sees it (review A14).
+    [ -z "$(git status --porcelain -- .)" ] || dirty="-dirty"
+  fi
   local build_sha="${sha}${dirty}"
   local build_time stamp release
   build_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -212,8 +266,12 @@ cmd_publish() {
 
   [ -n "$dirty" ] && warn "working tree is dirty — publishing as $release"
 
-  log "building production bundle (this is the gate that catches budget/AOT errors)"
-  npm run build -- --configuration production
+  if [ -n "$bundle" ]; then
+    log "using the laptop-built bundle $(basename "$bundle") (commit $BUNDLE_SHA) — no build on this host"
+  else
+    log "building production bundle (this is the gate that catches budget/AOT errors)"
+    npm run build -- --configuration production
+  fi
 
   [ -f "$BUILD_OUT/index.html" ] || die "build produced no $BUILD_OUT/index.html"
 

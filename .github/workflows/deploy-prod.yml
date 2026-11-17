@@ -1,8 +1,13 @@
 name: Deploy to production (mac2)
 
-# Continuous deployment of the console to the hosting Mac (mac2): every push to main is
-# published by mac2's self-hosted runner with scripts/release.sh (build → stamp → atomic swap →
-# verify by releaseId). Runbook: lascodia-trading-engine deploy/prod-host/README.md.
+# Continuous deployment of the console to the hosting Mac (mac2). The bundle is NOT built here: the dev laptop
+# builds it and copies it to mac2 (scripts/ship-release.sh <commit>), because `ng build` on mac2 (~3.6 GB node
+# spike) is what pushes the host into its memory-pressure kernel panic. On every push to main the runner runs
+# scripts/deploy-ui.sh, which waits (up to 30 min) for that commit's bundle, then publishes it with
+# scripts/release.sh (stamp → atomic swap → verify by releaseId). No bundle → nothing changes live.
+# Commits that change no bundle input (scripts, tests, docs) publish nothing.
+# Fallback (off by default): workflow_dispatch build_on_host, or repository variable UI_BUILD_ON_HOST=true.
+# Runbook: lascodia-trading-engine deploy/prod-host/README.md.
 #
 # This repository is PUBLIC and the runner is a production machine. Therefore:
 #   * only `push` and `workflow_dispatch` trigger this workflow — never pull_request;
@@ -18,6 +23,14 @@ on:
       - 'docs/**'
   workflow_dispatch:
     inputs:
+      build_on_host:
+        description: 'FALLBACK: run ng build on mac2 instead of waiting for the laptop bundle (~3.6 GB node peak)'
+        type: boolean
+        default: false
+      force:
+        description: 'publish even if that commit is live / changes no bundle input'
+        type: boolean
+        default: false
       action:
         description: 'publish (latest main), rollback (previous release) or status'
         type: choice
@@ -35,37 +48,26 @@ jobs:
   deploy:
     if: vars.PROD_DEPLOY_ENABLED == 'true' && github.repository == 'budieprof/lascodia-trading-engine-admin-ui' && github.event_name != 'pull_request'
     runs-on: [self-hosted, lascodia-prod]
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Publish
         shell: bash
         env:
           ACTION: ${{ inputs.action || 'publish' }}
-          TARGET: ${{ github.sha }}
+          TARGET: ${{ github.event_name == 'push' && github.sha || '' }}
+          BUILD_ON_HOST: ${{ (inputs.build_on_host || vars.UI_BUILD_ON_HOST == 'true') && '--build-on-host' || '' }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
         run: |
           set -euo pipefail
           export PATH="/opt/homebrew/opt/node@24/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
           UI="$HOME/lascodia-prod/lascodia-trading-engine-admin-ui"
-          cd "$UI"
+          git -C "$UI" fetch --quiet --prune origin
+          # Run the deploy script as it is in the commit being deployed, from a copy outside the checkout: the
+          # script checks that commit out, and bash must not read a file that is being rewritten under it.
+          REF="${TARGET:-origin/main}"
+          git -C "$UI" show "$REF:scripts/deploy-ui.sh" > "$RUNNER_TEMP/deploy-ui.sh"
           case "$ACTION" in
-            status)   scripts/release.sh status; exit 0 ;;
-            rollback) scripts/release.sh rollback; scripts/release.sh status; exit 0 ;;
+            status)   bash "$RUNNER_TEMP/deploy-ui.sh" --status ;;
+            rollback) bash "$RUNNER_TEMP/deploy-ui.sh" --rollback ;;
+            *)        bash "$RUNNER_TEMP/deploy-ui.sh" "$REF" $FORCE $BUILD_ON_HOST ;;
           esac
-          git fetch --quiet --prune origin
-          [ "${{ github.event_name }}" = push ] || TARGET=$(git rev-parse origin/main)
-          git merge-base --is-ancestor "$TARGET" origin/main || { echo "$TARGET is not on main"; exit 2; }
-          # a newer push already published? (out-of-order runs)
-          LIVE=$(curl -fsS -m 5 http://localhost:8080/config.json | sed -n 's/.*"buildSha": *"\([0-9a-f]*\).*/\1/p' || true)
-          if [ -n "$LIVE" ] && git cat-file -e "$LIVE^{commit}" 2>/dev/null \
-             && git merge-base --is-ancestor "$TARGET" "$LIVE" && [ "$(git rev-parse "$LIVE")" != "$(git rev-parse "$TARGET")" ]; then
-            echo "live $LIVE is newer than $TARGET — nothing to do"; exit 0
-          fi
-          git checkout --quiet --detach "$TARGET"
-          git reset --quiet --hard && git clean -fdq -e node_modules -e dist
-          LOCK_HASH=$(shasum package-lock.json | cut -c1-40)
-          if [ "$(cat node_modules/.lock-hash 2>/dev/null)" != "$LOCK_HASH" ]; then
-            npm ci --no-audit --no-fund
-            echo "$LOCK_HASH" > node_modules/.lock-hash
-          fi
-          scripts/release.sh publish
-          scripts/release.sh status
