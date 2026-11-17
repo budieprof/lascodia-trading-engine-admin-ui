@@ -969,6 +969,12 @@ export class KillSwitchesPageComponent implements OnInit {
   readonly loadError = signal<string | null>(null);
   readonly busyGlobal = signal(false);
   readonly busyStrategyIds = signal(new Set<number>());
+
+  /** A toggle for this dialog's target is already on its way to the engine. */
+  private toggleInFlight(p: { scope: string; strategyId?: number | null }): boolean {
+    if (p.scope === 'global') return this.busyGlobal();
+    return p.strategyId != null && this.busyStrategyIds().has(p.strategyId);
+  }
   /** Strategies the engine holds — more than `rows()` only when the 200-row fetch truncated. */
   readonly strategiesTotal = signal(0);
 
@@ -1192,6 +1198,9 @@ export class KillSwitchesPageComponent implements OnInit {
   submitToggle(): void {
     const p = this.pending();
     if (!p) return;
+    // The buttons are disabled while a toggle is in flight; the ⌘/Ctrl+Enter shortcut must be too
+    // (review 2026-11-17: it sent the same change twice, with two audit entries).
+    if (this.toggleInFlight(p)) return;
     if (this.reasonForm.invalid) {
       this.reasonForm.controls.reason.markAsTouched();
       return;

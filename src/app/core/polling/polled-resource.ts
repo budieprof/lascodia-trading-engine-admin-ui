@@ -194,21 +194,19 @@ export function createPolledResource<T>(
     }
   });
 
-  manualRefresh$
-    .pipe(takeUntilDestroyed(destroyRef))
-    .subscribe(() => {
-      if (stopped) {
-        // An explicit refresh of a stopped resource fetches once and starts nothing.
-        runOnce();
-        return;
-      }
-      if (shouldRun()) {
-        runOnce();
-        startInterval();
-      } else {
-        stopInterval();
-      }
-    });
+  manualRefresh$.pipe(takeUntilDestroyed(destroyRef)).subscribe(() => {
+    if (stopped) {
+      // An explicit refresh of a stopped resource fetches once and starts nothing.
+      runOnce();
+      return;
+    }
+    if (shouldRun()) {
+      runOnce();
+      startInterval();
+    } else {
+      stopInterval();
+    }
+  });
 
   // Push-driven invalidation. `auditTime` coalesces a burst (a flurry of fills
   // on one position) into a single refetch on the trailing edge.
@@ -240,9 +238,11 @@ export function createPolledResource<T>(
     lastUpdated: computed(() => lastUpdated()),
     refresh: () => manualRefresh$.next(),
     stop: () => {
+      // Stops future fetches only. The one in flight is allowed to settle: cancelling it left
+      // `loading` true for good when stop() came during the first fetch (review 2026-11-17).
+      // Teardown (destroyRef) still cancels it.
       stopped = true;
       stopInterval();
-      if (inflight) inflight.unsubscribe();
     },
   };
 }

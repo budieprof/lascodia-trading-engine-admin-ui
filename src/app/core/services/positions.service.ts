@@ -71,6 +71,14 @@ export interface EventExposureDto {
   basis: string;
 }
 
+/**
+ * Statuses an "open positions" read asks for (engine `PositionQueryFilter.Statuses`, preferred over
+ * `status`). A full close parks a position in Closing until the EA confirms it; until then it is still
+ * live at the broker and must stay visible and counted (review 2026-11-17). Send it alongside
+ * `status: 'Open'` so an engine without `statuses` keeps the previous behaviour.
+ */
+export const OPEN_POSITION_STATUSES: readonly string[] = ['Open', 'Closing'];
+
 @Injectable({ providedIn: 'root' })
 export class PositionsService {
   private readonly api = inject(ApiService);

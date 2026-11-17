@@ -5,6 +5,7 @@ import { ApiService } from '@core/api/api.service';
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ResponseData } from '@core/api/api.types';
+import { expectedTenantHeaders } from '@core/auth/expected-tenant.interceptor';
 
 /** One chart workspace as the engine stores it (`chart/layouts`). `state` is absent on list rows. */
 export interface ChartLayoutDto {
@@ -103,6 +104,8 @@ export class ChartLayoutsService {
       // BFF sign-in: no token, the session cookie rides `credentials` and an unsafe request
       // needs the session's CSRF token (it bypasses HttpClient, so no interceptor adds it).
       ...this.auth.csrfHeaders(),
+      // …and the organisation this tab shows, so a stale tab's last write is refused, not misfiled.
+      ...expectedTenantHeaders(this.auth),
     };
     if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
     void fetch(`${this.baseUrl}${path}`, {

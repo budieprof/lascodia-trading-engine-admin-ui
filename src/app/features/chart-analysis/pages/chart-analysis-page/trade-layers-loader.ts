@@ -8,6 +8,7 @@ import type { TradeSignalsService } from '@core/services/trade-signals.service';
 import type { MartingaleService } from '@core/services/martingale.service';
 import type { ChartMarker } from '../../chart/chart-host.component';
 import type { ChartPosition } from '../../overlays/trade-layer';
+import { OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 
 /** The order statuses that can still fill (the ones `orderLines` draws). */
 const WORKING_ORDER_STATUSES = ['Pending', 'Submitted', 'PartialFill'] as const;
@@ -74,8 +75,7 @@ export class TradeLayersLoader {
     const accountIds = Array.from(d.accountScope.accountIds());
     const accountKey = d.accountScope.accountIdsKey();
     /** The chart still shows what this request was for. */
-    const current = () =>
-      symbol === d.symbol() && accountKey === d.accountScope.accountIdsKey();
+    const current = () => symbol === d.symbol() && accountKey === d.accountScope.accountIdsKey();
     const loads = this.loads;
 
     if (!d.showPositions()) {
@@ -87,7 +87,12 @@ export class TradeLayersLoader {
         .list({
           currentPage: 1,
           itemCountPerPage: 50,
-          filter: { symbol, status: 'Open', tradingAccountIds: accountIds },
+          filter: {
+            symbol,
+            status: 'Open',
+            statuses: OPEN_POSITION_STATUSES,
+            tradingAccountIds: accountIds,
+          },
         })
         .pipe(takeUntilDestroyed(d.destroyRef))
         .subscribe((res) => {

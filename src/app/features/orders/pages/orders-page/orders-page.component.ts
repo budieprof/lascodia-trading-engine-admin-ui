@@ -32,6 +32,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { SavedViewsService, SavedView } from '@core/views/saved-views.service';
 import { CreateSignalDialogComponent } from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
+import { describeBatchCancel } from '../../utils/cancel-outcome';
 
 interface OrdersViewState {
   status: string;
@@ -2305,7 +2306,11 @@ export class OrdersPageComponent {
   readonly batchCancelPending = signal(false);
   readonly batchCancelOpen = signal(false);
   readonly batchCancelMessage = signal('');
-  private pendingBatchCancel: { ids: number[]; clear: () => void } | null = null;
+  private pendingBatchCancel: {
+    ids: number[];
+    ticketed: ReadonlySet<number>;
+    clear: () => void;
+  } | null = null;
 
   openBatchCancel(rows: OrderDto[], clear: () => void): void {
     if (rows.length === 0) return;
@@ -2331,7 +2336,11 @@ export class OrdersPageComponent {
         : `Cancel ${cancellable.length} of ${rows.length} selected? ${skipped} will be skipped (not in a cancellable state).`;
 
     this.batchCancelMessage.set(msg);
-    this.pendingBatchCancel = { ids: cancellable.map((o) => o.id), clear };
+    this.pendingBatchCancel = {
+      ids: cancellable.map((o) => o.id),
+      ticketed: new Set(cancellable.filter((o) => !!o.brokerOrderId).map((o) => o.id)),
+      clear,
+    };
     this.batchCancelOpen.set(true);
   }
 
@@ -2355,15 +2364,11 @@ export class OrdersPageComponent {
           this.batchCancelPending.set(false);
           const r = res?.data;
           if (res?.status && r) {
-            if (r.failed === 0) {
-              this.notifications.success(
-                `Cancelled ${r.cancelled} order${r.cancelled === 1 ? '' : 's'}.`,
-              );
-            } else {
-              this.notifications.warning(
-                `Cancelled ${r.cancelled}, ${r.failed} failed. See order list for details.`,
-              );
-            }
+            // "Cancelled" only for what is done; a cancel handed to the EA leaves the order
+            // working at the broker until it confirms (review 2026-11-17).
+            const summary = describeBatchCancel(r, pending.ticketed);
+            if (summary.tone === 'success') this.notifications.success(summary.text);
+            else this.notifications.warning(summary.text);
             pending.clear();
             this.pendingBatchCancel = null;
             this.reloadTable();

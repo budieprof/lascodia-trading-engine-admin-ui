@@ -4,6 +4,7 @@ import { ApiService } from '@core/api/api.service';
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ResponseData } from '@core/api/api.types';
+import { expectedTenantHeaders } from '@core/auth/expected-tenant.interceptor';
 
 /** One drawing as the engine stores it. */
 export interface ChartDrawingDto {
@@ -106,6 +107,8 @@ export class ChartDrawingsService {
       // BFF sign-in: no token, the session cookie rides `credentials` and an unsafe request
       // needs the session's CSRF token (it bypasses HttpClient, so no interceptor adds it).
       ...this.auth.csrfHeaders(),
+      // …and the organisation this tab shows, so a stale tab's last write is refused, not misfiled.
+      ...expectedTenantHeaders(this.auth),
     };
     // The cookie sentinel is not a bearer token; the HttpOnly cookie travels via `credentials`.
     if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;

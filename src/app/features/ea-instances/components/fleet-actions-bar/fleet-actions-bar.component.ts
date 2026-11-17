@@ -20,6 +20,7 @@ import {
   DropdownMenuComponent,
   type DropdownMenuItem,
 } from '@shared/components/ui/dropdown-menu/dropdown-menu.component';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 /**
  * Fleet-bulk operations bar for the EA-instances list page.  Exposes seven
@@ -617,6 +618,11 @@ export class FleetActionsBarComponent {
               `Fleet ${key}: queued for ${queued} of ${targeted} live instance(s).`,
             );
             this.commandQueued.emit(key);
+            const el = this.dialogRef?.nativeElement;
+            if (el?.open) el.close();
+            else this.onDialogClose();
+          } else if (isApprovalPendingEnvelope(res)) {
+            // Parked for a second approver; the approval interceptor already said so.
             const el = this.dialogRef?.nativeElement;
             if (el?.open) el.close();
             else this.onDialogClose();

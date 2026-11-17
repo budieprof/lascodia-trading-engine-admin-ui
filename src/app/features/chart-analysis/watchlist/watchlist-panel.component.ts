@@ -23,7 +23,7 @@ import { firstValueFrom, map } from 'rxjs';
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { EconomicCalendarService } from '@core/services/economic-calendar.service';
 import { NewsIntelService } from '@core/services/news-intel.service';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { Ohlc } from '../indicators/math';
@@ -413,13 +413,12 @@ export class WatchlistPanelComponent {
     const session = this.marketSessions.stateOf(sym);
     return {
       symbol: sym,
-      name:
-        !fx
-          ? (instrumentDescription(inst) ?? sym)
-          : pair
-            ? (pairName(pair.baseCurrency, pair.quoteCurrency) ??
-              `${pair.baseCurrency} / ${pair.quoteCurrency}`)
-            : sym,
+      name: !fx
+        ? (instrumentDescription(inst) ?? sym)
+        : pair
+          ? (pairName(pair.baseCurrency, pair.quoteCurrency) ??
+            `${pair.baseCurrency} / ${pair.quoteCurrency}`)
+          : sym,
       // From the engine's asset class (SP-11): it said "Forex" for gold and indices alike.
       kind: fx ? instrumentKind(pair?.assetClass, sym, legs) : instrumentKindLabel(inst),
       quote: pair?.quoteCurrency ?? '',
@@ -616,7 +615,11 @@ export class WatchlistPanelComponent {
     try {
       const rows = await firstValueFrom(
         this.positions
-          .list({ currentPage: 1, itemCountPerPage: 500, filter: { status: 'Open' } })
+          .list({
+            currentPage: 1,
+            itemCountPerPage: 500,
+            filter: { status: 'Open', statuses: OPEN_POSITION_STATUSES },
+          })
           .pipe(map((r) => r?.data?.data ?? [])),
       );
       this.openPositions.set(

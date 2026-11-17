@@ -19,6 +19,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { EaOpsService } from '../../selfheal/ea-ops.service';
 import type { Observable } from 'rxjs';
 import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 /**
  * Per-instance operator control panel.  Surfaces all nine admin commands as
@@ -47,8 +48,8 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
       <header class="panel-head">
         <h3>Operator controls</h3>
         <span class="meta muted">
-          The EA picks each command up on its next poll (about 2 s); its answer appears under
-          “Your actions” and in Command history.
+          The EA picks each command up on its next poll (about 2 s); its answer appears under “Your
+          actions” and in Command history.
         </span>
       </header>
 
@@ -726,6 +727,11 @@ export class EAControlPanelComponent {
               this.notify.success(`${label} queued (id ${this.formatCommandId(res.data)}).`);
             }
             this.commandQueued.emit(key);
+            const el = this.dialogRef?.nativeElement;
+            if (el?.open) el.close();
+            else this.onDialogClose();
+          } else if (isApprovalPendingEnvelope(res)) {
+            // Parked for a second approver; the approval interceptor already said so.
             const el = this.dialogRef?.nativeElement;
             if (el?.open) el.close();
             else this.onDialogClose();

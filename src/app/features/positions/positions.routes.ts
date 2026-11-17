@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { canAccessPath } from '@core/auth/can-access.guard';
 import { PositionsPageComponent } from './pages/positions-page/positions-page.component';
 import { PositionDetailPageComponent } from './pages/position-detail-page/position-detail-page.component';
+import { REMOUNT_ON_PARAM_CHANGE } from '@core/routing/remount-on-param-change.strategy';
 
 export const POSITIONS_ROUTES: Routes = [
   { path: '', component: PositionsPageComponent, data: { breadcrumb: 'Positions' } },
@@ -24,5 +25,9 @@ export const POSITIONS_ROUTES: Routes = [
       ),
   },
   // Must stay last: ':id' would otherwise swallow every sibling path above it.
-  { path: ':id', component: PositionDetailPageComponent, data: { breadcrumb: 'Detail' } },
+  {
+    path: ':id',
+    component: PositionDetailPageComponent,
+    data: { breadcrumb: 'Detail', [REMOUNT_ON_PARAM_CHANGE]: true },
+  },
 ];

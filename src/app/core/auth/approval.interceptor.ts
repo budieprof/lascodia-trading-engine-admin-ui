@@ -17,8 +17,20 @@ export function approvalPending(res: HttpResponse<unknown>): ApprovalPendingData
   const body = res.body as { responseCode?: unknown; data?: Partial<ApprovalPendingData> } | null;
   if (!body || body.responseCode !== AuthResponseCode.ApprovalPending || !body.data) return null;
   const { approvalId, expiresAtUtc } = body.data;
-  if (approvalId === undefined || approvalId === null || typeof expiresAtUtc !== 'string') return null;
+  if (approvalId === undefined || approvalId === null || typeof expiresAtUtc !== 'string')
+    return null;
   return { approvalId, expiresAtUtc };
+}
+
+/**
+ * True for an envelope parked for a second approver (`-202-approval`, HTTP 202 with `status:false`).
+ * It is accepted, not refused: the approval interceptor has already told the operator, so a page must
+ * not show its own "failed" next to that note (review 2026-11-17).
+ */
+export function isApprovalPendingEnvelope(
+  res: { responseCode?: string | null } | null | undefined,
+): boolean {
+  return res?.responseCode === AuthResponseCode.ApprovalPending;
 }
 
 /**

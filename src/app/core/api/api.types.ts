@@ -1285,13 +1285,16 @@ export interface MLModelFeatureImportanceDto {
 
 export interface BatchCancelOrdersItem {
   id: number;
-  status: 'Cancelled' | 'Failed';
+  /** `Cancelling` = handed to the EA; the order stays working at the broker until it confirms. */
+  status: 'Cancelled' | 'Cancelling' | 'Failed';
   reason: string | null;
 }
 
 export interface BatchCancelOrdersResult {
   total: number;
   cancelled: number;
+  /** Cancels handed to the EA (absent on engines before 2026-11-17, which counted them as cancelled). */
+  cancelling?: number;
   failed: number;
   results: BatchCancelOrdersItem[];
 }

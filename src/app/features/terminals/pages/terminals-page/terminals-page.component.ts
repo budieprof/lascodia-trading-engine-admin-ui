@@ -35,6 +35,7 @@ import {
 } from '../../terminals-page.logic';
 import { EAInstancesService } from '@core/services/ea-instances.service';
 import type { EAInstanceDto } from '@core/api/api.types';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 /**
  * A daemon / session operation held until the operator confirms it. These used window.confirm(),
@@ -1160,9 +1161,25 @@ export class TerminalsPageComponent {
     }
   }
 
+  /**
+   * Launching starts a real MT5 terminal, and every EA saved on its charts starts trading with it —
+   * so it asks first, like close / restart / kill (review 2026-11-17).
+   */
   protected onLaunch(daemon: TerminalDaemonDto): void {
     const installId = this.launchInstallByDaemon[daemon.id];
-    if (!installId) return;
+    if (!installId || this.launchingForDaemon() !== null) return;
+    this.ask.set({
+      title: `Launch MT5 '${installId}' on ${daemon.name}?`,
+      message:
+        'Starts the terminal. Every EA saved on its charts starts with it and resumes trading on ' +
+        'its account.',
+      confirmLabel: 'Launch terminal',
+      variant: 'primary',
+      run: () => this.launch(daemon, installId),
+    });
+  }
+
+  private launch(daemon: TerminalDaemonDto, installId: string): void {
     this.launchingForDaemon.set(daemon.id);
     this.terminals
       .launch({ daemonId: daemon.id, installId })
@@ -1174,6 +1191,8 @@ export class TerminalsPageComponent {
               `Launch queued — daemon=${daemon.name} install=${installId} sessionId=${res.data?.id}`,
             );
             this.sessionsResource.refresh();
+          } else if (isApprovalPendingEnvelope(res)) {
+            // Parked for a second approver; the approval interceptor already said so.
           } else {
             this.notify.error(res.message ?? 'Launch failed at the daemon.');
           }
@@ -1206,6 +1225,8 @@ export class TerminalsPageComponent {
           if (res.status) {
             this.notify.success(`Close request sent to daemon (sessionId=${session.id}).`);
             this.sessionsResource.refresh();
+          } else if (isApprovalPendingEnvelope(res)) {
+            // Parked for a second approver; the approval interceptor already said so.
           } else {
             this.notify.error(res.message ?? 'Daemon refused the close request.');
           }

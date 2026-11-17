@@ -79,6 +79,9 @@ current_release() {
 
 # Releases on disk, NEWEST FIRST.  Names start with a sortable UTC timestamp, so
 # a reverse lexical sort is a reverse chronological sort.
+# Dropped into a release directory whose live verification failed (see cmd_publish).
+FAILED_MARKER=".failed-verify"
+
 list_releases() {
   [ -d "$RELEASES" ] || return 0
   find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null |
@@ -271,7 +274,10 @@ cmd_publish() {
         if [ -n "$prev_id" ]; then
           ( verify_live "$prev_id" ) || warn "the restored release $previous did not verify either — check Caddy / the origin"
         fi
-        die "publish of $release FAILED verification; $previous is live again ($release stays on disk for inspection)"
+        # Mark it so a bare `rollback` never picks it as "the previous release" (review 2026-11-17:
+        # it was the newest non-live release, so `rollback` rolled FORWARD onto the failed build).
+        : > "$RELEASES/$release/$FAILED_MARKER"
+        die "publish of $release FAILED verification; $previous is live again ($release stays on disk for inspection, marked $FAILED_MARKER)"
       fi
       die "publish of $release FAILED verification and there is no previous release to restore — it is live"
     fi
@@ -291,8 +297,15 @@ cmd_rollback() {
   local target="${1:-}" cur
   cur="$(current_release)"
   if [ -z "$target" ]; then
-    # Previous = the newest release that is not the current one.
-    target="$(list_releases | grep -v -x -F "$cur" | head -1 || true)"
+    # Previous = the newest release that is not the current one and did not fail verification.
+    local r
+    target=""
+    while read -r r; do
+      [ -n "$r" ] && [ "$r" != "$cur" ] || continue
+      [ -e "$RELEASES/$r/$FAILED_MARKER" ] && { log "skipping $r (failed verification)"; continue; }
+      target="$r"
+      break
+    done < <(list_releases)
     [ -n "$target" ] || die "no earlier release to roll back to"
   fi
   [ "$target" != "$cur" ] || die "$target is already live"

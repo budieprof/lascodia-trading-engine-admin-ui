@@ -25,6 +25,8 @@ import {
   SessionSyncService,
   TENANT_CHANGED_NOTICE,
   TENANT_CHANGED_RELOAD_DELAY_MS,
+  TENANT_RELOAD_CANCELLED_AFTER_MS,
+  TENANT_RELOAD_CANCELLED_NOTICE,
 } from './session-sync.service';
 
 ensureTestBed();
@@ -40,13 +42,22 @@ function setup(apiBaseUrl = '') {
     providers: [
       // The production order (app.config.ts): error wraps expected-tenant wraps retry.
       provideHttpClient(
-        withInterceptors([csrfInterceptor, errorInterceptor, expectedTenantInterceptor, retryInterceptor]),
+        withInterceptors([
+          csrfInterceptor,
+          errorInterceptor,
+          expectedTenantInterceptor,
+          retryInterceptor,
+        ]),
       ),
       provideHttpClientTesting(),
       { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl, featureFlags: { bffAuth: true } } },
       {
         provide: Router,
-        useValue: { url: '/orders', navigate: vi.fn(() => Promise.resolve(true)), events: new Subject() },
+        useValue: {
+          url: '/orders',
+          navigate: vi.fn(() => Promise.resolve(true)),
+          events: new Subject(),
+        },
       },
       { provide: BrowserLocation, useValue: browser },
       { provide: NotificationService, useValue: notify },
@@ -86,10 +97,14 @@ describe('isSameOriginEngineApi', () => {
   it('accepts same-origin /api/ calls only, never /bff/* or another origin', () => {
     expect(isSameOriginEngineApi('/api/v1/x', '', origin)).toBe(true);
     expect(isSameOriginEngineApi('https://app.test/api/v1/x', '', origin)).toBe(true);
-    expect(isSameOriginEngineApi('https://app.test/api/v1/x', 'https://app.test', origin)).toBe(true);
+    expect(isSameOriginEngineApi('https://app.test/api/v1/x', 'https://app.test', origin)).toBe(
+      true,
+    );
     expect(isSameOriginEngineApi('/bff/session', '', origin)).toBe(false);
     expect(isSameOriginEngineApi('/config.json', '', origin)).toBe(false);
-    expect(isSameOriginEngineApi('http://localhost:5081/api/v1/x', 'http://localhost:5081', origin)).toBe(false);
+    expect(
+      isSameOriginEngineApi('http://localhost:5081/api/v1/x', 'http://localhost:5081', origin),
+    ).toBe(false);
     expect(isSameOriginEngineApi('https://evil.test/api/v1/x', '', origin)).toBe(false);
     expect(isSameOriginEngineApi('/api/v1/x', '', undefined)).toBe(false);
   });
@@ -102,7 +117,10 @@ describe('expected-tenant interceptor (review A3)', () => {
 
     t.http.post(`${API_PATH}/order`, { a: 1 }).subscribe();
     t.http.get(`${API_PATH}/order/1`).subscribe();
-    for (const r of [t.ctl.expectOne(`${API_PATH}/order`), t.ctl.expectOne(`${API_PATH}/order/1`)]) {
+    for (const r of [
+      t.ctl.expectOne(`${API_PATH}/order`),
+      t.ctl.expectOne(`${API_PATH}/order/1`),
+    ]) {
       expect(r.request.headers.get(EXPECTED_TENANT_HEADER)).toBe('3');
       r.flush({ status: true, data: null });
     }
@@ -138,7 +156,12 @@ describe('expected-tenant interceptor (review A3)', () => {
     const errors: unknown[] = [];
     t.http.post(`${API_PATH}/order`, {}).subscribe({ error: (e) => errors.push(e) });
     t.http.post(`${API_PATH}/order/2`, {}).subscribe({ error: (e) => errors.push(e) });
-    const body = { status: false, responseCode: TENANT_CHANGED_CODE, message: 'changed', data: null };
+    const body = {
+      status: false,
+      responseCode: TENANT_CHANGED_CODE,
+      message: 'changed',
+      data: null,
+    };
     t.ctl.expectOne(`${API_PATH}/order`).flush(body, { status: 409, statusText: 'Conflict' });
     t.ctl.expectOne(`${API_PATH}/order/2`).flush(body, { status: 409, statusText: 'Conflict' });
 
@@ -157,7 +180,10 @@ describe('expected-tenant interceptor (review A3)', () => {
     t.http.post(`${API_PATH}/order`, {}).subscribe({ error: () => undefined });
     t.ctl
       .expectOne(`${API_PATH}/order`)
-      .flush({ status: false, responseCode: '-409', message: 'Duplicate.' }, { status: 409, statusText: 'Conflict' });
+      .flush(
+        { status: false, responseCode: '-409', message: 'Duplicate.' },
+        { status: 409, statusText: 'Conflict' },
+      );
     expect(t.notify.warning).not.toHaveBeenCalled();
     expect(t.notify.error).toHaveBeenCalledWith('Duplicate.');
   });
@@ -195,6 +221,23 @@ describe('SessionSyncService (cross-tab)', () => {
     expect(t.notify.warning).toHaveBeenCalledWith(TENANT_CHANGED_NOTICE);
     vi.advanceTimersByTime(TENANT_CHANGED_RELOAD_DELAY_MS);
     expect(t.browser.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('a cancelled reload is explained, and the next refused write tries again', async () => {
+    const t = setup();
+    await signIn(t);
+    vi.useFakeTimers();
+    t.sync.receive({ type: 'tenant-switched', tenantId: 1, userId: 12 });
+    vi.advanceTimersByTime(TENANT_CHANGED_RELOAD_DELAY_MS);
+    expect(t.browser.reload).toHaveBeenCalledTimes(1);
+    // The operator chose "Stay": the page is still alive.
+    vi.advanceTimersByTime(TENANT_RELOAD_CANCELLED_AFTER_MS);
+    expect(t.notify.error).toHaveBeenCalledWith(TENANT_RELOAD_CANCELLED_NOTICE);
+
+    t.sync.tenantChangedElsewhere();
+    expect(t.notify.warning).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(TENANT_CHANGED_RELOAD_DELAY_MS);
+    expect(t.browser.reload).toHaveBeenCalledTimes(2);
   });
 
   it('goes to the sign-in page when another tab signed out', async () => {

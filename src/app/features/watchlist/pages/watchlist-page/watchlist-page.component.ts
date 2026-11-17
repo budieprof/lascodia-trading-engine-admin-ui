@@ -16,7 +16,7 @@ import { map } from 'rxjs';
 
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { OrdersService } from '@core/services/orders.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
@@ -748,7 +748,11 @@ export class WatchlistPageComponent implements OnInit {
   private readonly positionsRes = createPolledResource(
     () =>
       this.positionsService
-        .list({ currentPage: 1, itemCountPerPage: 200, filter: { status: 'Open' } })
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 200,
+          filter: { status: 'Open', statuses: OPEN_POSITION_STATUSES },
+        })
         .pipe(map((r) => r?.data?.data ?? [])),
     { intervalMs: 15000 },
   );

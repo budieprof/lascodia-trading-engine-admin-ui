@@ -438,7 +438,7 @@ interface ConditionRow {
               class="btn btn-primary"
               data-testid="arm-anyway"
               (click)="save(true)"
-              [disabled]="saving()"
+              [disabled]="saving() || !intentText().trim()"
             >
               {{ saving() ? 'Arming…' : 'Arm anyway' }}
             </button>

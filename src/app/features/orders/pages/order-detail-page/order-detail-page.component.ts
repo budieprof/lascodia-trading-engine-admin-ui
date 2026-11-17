@@ -5,7 +5,9 @@ import {
   signal,
   computed,
   OnInit,
+  DestroyRef,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder } from '@angular/forms';
 import { DatePipe, DecimalPipe, formatDate } from '@angular/common';
@@ -39,6 +41,8 @@ import {
   type SignalPrefill,
 } from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 import { OrderSignalContextComponent } from '../../components/order-signal-context.component';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
+import { cancelWasHandedToEa, CANCEL_SENT_TO_EA_MESSAGE } from '../../utils/cancel-outcome';
 
 @Component({
   selector: 'app-order-detail-page',
@@ -205,9 +209,8 @@ import { OrderSignalContextComponent } from '../../components/order-signal-conte
                   />
                 </div>
                 <p class="form-hint">
-                  Removing a stop loss or take profit is not supported here — an empty field
-                  would leave the current level in place, so a field that has a level must keep a
-                  price.
+                  Removing a stop loss or take profit is not supported here — an empty field would
+                  leave the current level in place, so a field that has a level must keep a price.
                 </p>
                 @if (modifyProblem(); as mp) {
                   <p class="form-hint form-hint-error" role="alert">{{ mp }}</p>
@@ -673,6 +676,9 @@ export class OrderDetailPageComponent implements OnInit {
   private readonly positionsService = inject(PositionsService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
+  private readonly destroyRef = inject(DestroyRef);
+  /** Bumped on every route change: a reply for an order no longer shown is dropped. */
+  private loadSeq = 0;
 
   order = signal<OrderDto | null>(null);
   loading = signal(true);
@@ -859,23 +865,45 @@ export class OrderDetailPageComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (!id) {
-      this.loading.set(false);
-      return;
-    }
-    this.loadOrder(id);
+    // Follow the route, not a snapshot: the signal-context panel links to sibling orders on this
+    // same route, Angular reuses the component, and a snapshot read kept showing — and acting on —
+    // the first order while the URL named another (review 2026-11-17).
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const id = Number(params.get('id'));
+      this.resetForOrder();
+      if (!id) {
+        this.loading.set(false);
+        return;
+      }
+      this.loadOrder(id);
+    });
+  }
+
+  /** Clears everything that belonged to the previously shown order. */
+  private resetForOrder(): void {
+    this.loadSeq++;
+    this.order.set(null);
+    this.relatedPosition.set(null);
+    this.relatedPositionLoading.set(false);
+    this.showCancelDialog.set(false);
+    this.showDeleteDialog.set(false);
+    this.showModifyPanel.set(false);
+    this.manualSignalOpen.set(false);
+    this.actionLoading.set(false);
   }
 
   private loadOrder(id: number): void {
+    const seq = this.loadSeq;
     this.loading.set(true);
     this.ordersService.getById(id).subscribe({
       next: (response) => {
+        if (seq !== this.loadSeq) return;
         this.order.set(response.data);
         this.loading.set(false);
         if (response.data) this.resolvePosition(response.data);
       },
       error: () => {
+        if (seq !== this.loadSeq) return;
         this.loading.set(false);
         this.notifications.error('Failed to load order');
       },
@@ -886,6 +914,7 @@ export class OrderDetailPageComponent implements OnInit {
     const status = this.statusLabel();
     if (status !== 'Filled' && status !== 'PartialFill') return;
     this.relatedPositionLoading.set(true);
+    const seq = this.loadSeq;
     this.positionsService
       .list({
         currentPage: 1,
@@ -896,6 +925,7 @@ export class OrderDetailPageComponent implements OnInit {
       })
       .subscribe({
         next: (res) => {
+          if (seq !== this.loadSeq) return;
           this.relatedPositionLoading.set(false);
           const rows = res.data?.data ?? [];
           const sameScope = rows.filter(
@@ -921,6 +951,7 @@ export class OrderDetailPageComponent implements OnInit {
           this.relatedPosition.set(byTime ?? null);
         },
         error: () => {
+          if (seq !== this.loadSeq) return;
           this.relatedPositionLoading.set(false);
           this.relatedPosition.set(null);
         },
@@ -1002,7 +1033,14 @@ export class OrderDetailPageComponent implements OnInit {
         this.actionLoading.set(false);
         this.showCancelDialog.set(false);
         if (response.status) {
-          this.notifications.success('Order cancelled successfully');
+          if (cancelWasHandedToEa(response.data, o.brokerOrderId)) {
+            this.notifications.warning(CANCEL_SENT_TO_EA_MESSAGE);
+          } else {
+            this.notifications.success('Order cancelled');
+          }
+          this.loadOrder(o.id);
+        } else if (isApprovalPendingEnvelope(response)) {
+          // Parked for a second approver; the approval interceptor already said so.
           this.loadOrder(o.id);
         } else {
           this.notifications.error(response.message ?? 'Failed to cancel order');
@@ -1027,6 +1065,8 @@ export class OrderDetailPageComponent implements OnInit {
         if (response.status) {
           this.notifications.success('Order deleted successfully');
           this.router.navigate(['/orders']);
+        } else if (isApprovalPendingEnvelope(response)) {
+          // Parked for a second approver; the approval interceptor already said so.
         } else {
           this.notifications.error(response.message ?? 'Failed to delete order');
         }
@@ -1089,6 +1129,9 @@ export class OrderDetailPageComponent implements OnInit {
         this.showModifyPanel.set(false);
         if (response.status) {
           this.notifications.success('Order modified successfully');
+          this.loadOrder(o.id);
+        } else if (isApprovalPendingEnvelope(response)) {
+          // Parked for a second approver; the approval interceptor already said so.
           this.loadOrder(o.id);
         } else {
           this.notifications.error(response.message ?? 'Failed to modify order');

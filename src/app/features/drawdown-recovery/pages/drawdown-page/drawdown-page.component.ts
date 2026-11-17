@@ -267,7 +267,9 @@ function emptyChart(text: string): EChartsOption {
           <app-error-state
             title="Could not load per-account recovery state"
             [message]="
-              'The halt state of each account is unknown until this loads (' + accountsError() + ').'
+              'The halt state of each account is unknown until this loads (' +
+              accountsError() +
+              ').'
             "
             (retry)="retryAccounts()"
           />
@@ -1048,7 +1050,10 @@ export class DrawdownPageComponent {
   );
   /** The per-account read failed: with no rows yet that is "unknown", never "nobody halted". */
   readonly accountsError = computed(() => {
-    const e = this.accountsResource.error() as { error?: { message?: string }; message?: string } | null;
+    const e = this.accountsResource.error() as {
+      error?: { message?: string };
+      message?: string;
+    } | null;
     if (e === null || e === undefined) return null;
     return e?.error?.message ?? e?.message ?? 'request failed';
   });
@@ -1231,6 +1236,8 @@ export class DrawdownPageComponent {
         .listHistory({ currentPage: 1, itemCountPerPage: 1, filter: { fromDate } })
         .pipe(
           switchMap((probe) => {
+            if (probe?.status === false)
+              throw new Error(probe.message ?? 'Snapshot history refused');
             const total = probe.data?.pager?.totalItemCount ?? 0;
             const limit = Math.min(total, ANALYTICS_ROW_CAP);
             if (limit === 0) return of([] as SnapshotRow[]);
@@ -1240,9 +1247,15 @@ export class DrawdownPageComponent {
                 itemCountPerPage: limit,
                 filter: { fromDate },
               })
-              .pipe(map((r) => (r.data?.data ?? []) as SnapshotRow[]));
+              .pipe(
+                map((r) => {
+                  if (r?.status === false) throw new Error(r.message ?? 'Snapshot history refused');
+                  return (r.data?.data ?? []) as SnapshotRow[];
+                }),
+              );
           }),
-          catchError(() => of([] as SnapshotRow[])),
+          // No catchError: a failed load is the resource's error state, never an empty window
+          // that reads as "no drawdown" (review 2026-11-17).
         );
     },
     {
@@ -1252,6 +1265,16 @@ export class DrawdownPageComponent {
       refreshOn: ['positionClosed', 'vaRBreach', 'emergencyFlatten'],
     },
   );
+
+  /** The 7-day history could not be loaded and there is nothing earlier to show. */
+  readonly analyticsFailed = computed(
+    () => !!this.analyticsResource.error() && this.analyticsResource.value() === null,
+  );
+
+  /** Empty-chart text for the analytics charts: a failure is never shown as "no data". */
+  private analyticsEmpty(text: string): string {
+    return this.analyticsFailed() ? 'Could not load drawdown history — retrying' : text;
+  }
 
   /** Every loaded row, oldest first, all accounts interleaved. */
   readonly analyticsRows = computed(() => {
@@ -1291,7 +1314,7 @@ export class DrawdownPageComponent {
 
   readonly liveChartSubtitle = computed(() => {
     const w = this.windowCoverage();
-    if (!w) return 'No snapshots loaded';
+    if (!w) return this.analyticsEmpty('No snapshots loaded');
     const scope =
       this.liveAccountId() === null
         ? `one line per account`
@@ -1588,7 +1611,8 @@ export class DrawdownPageComponent {
       });
       i++;
     }
-    if (series.length === 0) return emptyChart('No drawdown samples in the window');
+    if (series.length === 0)
+      return emptyChart(this.analyticsEmpty('No drawdown samples in the window'));
     return {
       grid: { left: 44, right: 118, top: series.length > 1 ? 32 : 16, bottom: 28 },
       tooltip: {
@@ -1625,7 +1649,7 @@ export class DrawdownPageComponent {
       const total = totalSeconds(secs);
       if (total > 0) rows.push({ name: this.accountLabel(id), secs, total });
     }
-    if (rows.length === 0) return emptyChart(emptyText);
+    if (rows.length === 0) return emptyChart(this.analyticsEmpty(emptyText));
     return {
       tooltip: {
         trigger: 'axis',

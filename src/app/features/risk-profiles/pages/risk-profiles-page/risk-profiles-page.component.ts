@@ -16,7 +16,7 @@ import type { EChartsOption } from 'echarts';
 
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { StrategiesService } from '@core/services/strategies.service';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import {
   ConfigService,
@@ -2514,7 +2514,11 @@ export class RiskProfilesPageComponent implements OnInit {
     });
 
     this.positionsService
-      .list({ currentPage: 1, itemCountPerPage: 200, filter: { status: 'Open' } })
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 200,
+        filter: { status: 'Open', statuses: OPEN_POSITION_STATUSES },
+      })
       .subscribe({
         next: (res) => {
           this.monitorPositions.set(res?.data?.data ?? []);

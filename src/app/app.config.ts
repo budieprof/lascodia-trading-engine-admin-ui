@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import {
   provideRouter,
+  RouteReuseStrategy,
   withNavigationErrorHandler,
   withPreloading,
   withRouterConfig,
@@ -28,6 +29,7 @@ import { errorInterceptor } from '@core/auth/error.interceptor';
 import { expectedTenantInterceptor } from '@core/auth/expected-tenant.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
 import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
+import { RemountOnParamChangeStrategy } from '@core/routing/remount-on-param-change.strategy';
 import { GlobalErrorHandler } from '@core/errors/global-error-handler';
 import { reloadOnceForChunkError } from '@core/errors/chunk-reload';
 import { sentryProviders } from '@core/observability/sentry';
@@ -76,6 +78,8 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
   return {
     providers: [
       { provide: RUNTIME_CONFIG, useValue: runtimeConfig },
+      // Detail routes flagged `remountOnParamChange` get a fresh instance per id (review 2026-11-17).
+      { provide: RouteReuseStrategy, useClass: RemountOnParamChangeStrategy },
       provideZoneChangeDetection({ eventCoalescing: true }),
       provideRouter(
         routes,

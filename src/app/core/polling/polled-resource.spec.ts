@@ -169,7 +169,9 @@ describe('createPolledResource', () => {
 
   it('keeps the value across a failed refresh while the key is unchanged', () => {
     let fail = false;
-    const r = make(() => (fail ? throwError(() => new Error('x')) : of([1])), { key: () => ({ a: [1] }) });
+    const r = make(() => (fail ? throwError(() => new Error('x')) : of([1])), {
+      key: () => ({ a: [1] }),
+    });
     fail = true;
     r.refresh();
     expect(r.value()).toEqual([1]);
@@ -205,5 +207,15 @@ describe('createPolledResource', () => {
     expect(calls).toBe(2);
     vi.advanceTimersByTime(5_000);
     expect(calls).toBe(2);
+  });
+
+  it('a stop during the first fetch still lets it settle (no endless spinner)', () => {
+    const reply = new Subject<number[]>();
+    const r = make(() => reply);
+    expect(r.loading()).toBe(true);
+    r.stop();
+    reply.next([7]);
+    expect(r.loading()).toBe(false);
+    expect(r.value()).toEqual([7]);
   });
 });

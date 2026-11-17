@@ -68,14 +68,14 @@ describe('optimisation approve / reject (the engine answers a sentence, not the 
     started.page.selected.set(RUN);
     started.page.approve();
     expect(started.notifications.success).toHaveBeenCalledWith(
-      'Run #7 approved — Gradual rollout started at 25%.',
+      'Run #7: Gradual rollout started at 25%.',
     );
 
     const deferred = setup('Deferred: strategy 3 is mid-rollout (50%).');
     deferred.page.selected.set(RUN);
     deferred.page.approve();
     expect(deferred.notifications.success).toHaveBeenCalledWith(
-      'Run #7 approved — Deferred: strategy 3 is mid-rollout (50%).',
+      'Run #7: Deferred: strategy 3 is mid-rollout (50%).',
     );
   });
 
@@ -101,6 +101,6 @@ describe('approvalOutcome', () => {
     expect(approvalOutcome({ message: 'Successful', data: 'Rollout started' })).toBe(
       'Rollout started',
     );
-    expect(approvalOutcome({ message: null, data: null })).toBe('rollout scheduled');
+    expect(approvalOutcome({ message: null, data: null })).toBe('approved');
   });
 });

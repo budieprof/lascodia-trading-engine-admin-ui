@@ -707,7 +707,7 @@ const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
       <app-confirm-dialog
         [open]="showApprove()"
         title="Approve Optimization"
-        message="Starts a gradual rollout of the best parameters (25% of signals, then 50/75/100% by default — Optimization:RolloutTier1Pct/2Pct/3Pct). If the strategy already has a rollout in progress, this one is deferred until it settles."
+        message="Starts a gradual rollout of the best parameters (25% of signals, then 50/75/100% by default — Optimization:RolloutTier1Pct/2Pct/3Pct). If the strategy already has a rollout in progress, the engine refuses this approval — approve it again once that rollout completes or rolls back."
         confirmLabel="Approve"
         confirmVariant="primary"
         [loading]="detailBusy()"
@@ -1983,7 +1983,8 @@ export class OptimizationsPageComponent implements OnInit {
         if (res.status) {
           // The engine answers a sentence (rollout started vs deferred), not the run: say what it
           // said, then re-read the run so the detail panel never renders a string as a run.
-          this.notifications.success(`Run #${run.id} approved — ${approvalOutcome(res)}`);
+          // The engine's message is already the full sentence ("Optimization run approved — …").
+          this.notifications.success(`Run #${run.id}: ${approvalOutcome(res)}`);
           this.refreshSelected(run.id);
           this.table?.loadData();
         } else {
@@ -2049,7 +2050,7 @@ export class OptimizationsPageComponent implements OnInit {
 export function approvalOutcome(res: { message?: string | null; data?: string | null }): string {
   const message = res.message?.trim();
   if (message && !/^successful\.?$/i.test(message)) return message;
-  return res.data?.trim() || 'rollout scheduled';
+  return res.data?.trim() || 'approved';
 }
 
 function emptyPager() {

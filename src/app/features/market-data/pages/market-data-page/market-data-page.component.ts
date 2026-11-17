@@ -35,7 +35,7 @@ import { TradingChartComponent } from '@shared/components/trading-chart/trading-
 import { MarketDataService } from '@core/services/market-data.service';
 import { MarketRegimeService } from '@core/services/market-regime.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { WatchlistService } from '@features/chart-analysis/watchlist/watchlist.service';
@@ -3680,6 +3680,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
           filter: {
             symbol: symJoined,
             status: 'Open',
+            statuses: OPEN_POSITION_STATUSES,
             tradingAccountIds: Array.from(scopedIds),
           },
         })

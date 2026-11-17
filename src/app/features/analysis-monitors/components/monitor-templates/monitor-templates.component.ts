@@ -32,6 +32,9 @@ import type {
  * silently reverted; duplicating is the supported way to tune one, and the UI says so
  * rather than letting the operator discover it after a restart.</p>
  */
+/** What the panel shows: a warned-subject retry arms its own group, so a merged result lists every group. */
+type ShownInstantiation = MonitorInstantiationResult & { groupIds?: string[] };
+
 @Component({
   selector: 'app-monitor-templates',
   standalone: true,
@@ -149,9 +152,17 @@ import type {
               @if (result(); as r) {
                 <div class="result" [class.partial]="r.failures.length > 0">
                   <p>
-                    <strong>{{ r.created.length }}</strong> monitor(s) armed as group
-                    <code>{{ r.monitorGroupId }}</code
-                    >.
+                    <strong>{{ r.created.length }}</strong> monitor(s) armed as
+                    @if (r.groupIds && r.groupIds.length > 1) {
+                      groups
+                      @for (g of r.groupIds; track g; let last = $last) {
+                        <code>{{ g }}</code
+                        >{{ last ? '' : ', ' }}
+                      }
+                    } @else {
+                      group <code>{{ r.monitorGroupId }}</code>
+                    }
+                    .
                   </p>
                   @for (f of r.failures; track f) {
                     <p class="err">{{ f }}</p>
@@ -403,7 +414,7 @@ export class MonitorTemplatesComponent {
   protected readonly timeframe = signal('H1');
   protected readonly expiresInHours = signal(24);
   protected readonly working = signal(false);
-  protected readonly result = signal<MonitorInstantiationResult | null>(null);
+  protected readonly result = signal<ShownInstantiation | null>(null);
 
   constructor() {
     this.monitors
@@ -501,7 +512,7 @@ export class MonitorTemplatesComponent {
     templateId: number,
     subjectRefs: string[],
     acceptWarnings: boolean,
-    previous: MonitorInstantiationResult | null,
+    previous: ShownInstantiation | null,
   ): void {
     const t = this.selected();
     if (!t) return;
@@ -524,9 +535,17 @@ export class MonitorTemplatesComponent {
         if (res?.data) {
           // A retry of the warned subjects keeps the first run's armed watches and its other
           // (non-overridable) failures on screen.
-          const merged: MonitorInstantiationResult = previous
+          // The engine arms a retry as a NEW group (it cannot join an existing one), so both
+          // group ids are shown — never just the last (review 2026-11-17).
+          const merged: ShownInstantiation = previous
             ? {
                 monitorGroupId: res.data.monitorGroupId,
+                groupIds: [
+                  ...new Set([
+                    ...(previous.groupIds ?? [previous.monitorGroupId]),
+                    res.data.monitorGroupId,
+                  ]),
+                ],
                 created: [...previous.created, ...res.data.created],
                 failures: [
                   ...previous.failures.filter((f) => warnedSubjects([f]).length === 0),

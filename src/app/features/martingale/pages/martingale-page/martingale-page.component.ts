@@ -17,6 +17,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { ApiError } from '@core/api/api.types';
 
 /**
  * One question put to the operator before a write. Every risk-bearing change on this page goes
@@ -948,7 +949,10 @@ export class MartingalePageComponent {
         this.load();
       },
       error: (e: { message?: string }) => {
-        this.error.set(e?.message ?? 'Could not change the martingale mode.');
+        // A change parked for a second approver is accepted, not refused: the approval
+        // interceptor already said so, so no red banner (review 2026-11-17).
+        if (!(e instanceof ApiError && e.isApprovalPending))
+          this.error.set(e?.message ?? 'Could not change the martingale mode.');
         this.savingMode.set(false);
         this.load();
       },
@@ -1047,7 +1051,10 @@ export class MartingalePageComponent {
           this.load();
         },
         error: (e: { message?: string }) => {
-          this.error.set(e?.message ?? 'Could not save the profile defaults.');
+          // A change parked for a second approver is accepted, not refused: the approval
+          // interceptor already said so, so no red banner (review 2026-11-17).
+          if (!(e instanceof ApiError && e.isApprovalPending))
+            this.error.set(e?.message ?? 'Could not save the profile defaults.');
           this.savingProfile.set(false);
           this.load();
         },
@@ -1135,7 +1142,10 @@ export class MartingalePageComponent {
           this.load();
         },
         error: (e: { message?: string }) => {
-          this.error.set(e?.message ?? 'Could not save the overrides.');
+          // A change parked for a second approver is accepted, not refused: the approval
+          // interceptor already said so, so no red banner (review 2026-11-17).
+          if (!(e instanceof ApiError && e.isApprovalPending))
+            this.error.set(e?.message ?? 'Could not save the overrides.');
           this.saving.set(false);
           this.load();
         },
@@ -1208,7 +1218,10 @@ export class MartingalePageComponent {
           this.load();
         },
         error: (e: { message?: string }) => {
-          this.error.set(e?.message ?? 'Could not update the ladder.');
+          // A change parked for a second approver is accepted, not refused: the approval
+          // interceptor already said so, so no red banner (review 2026-11-17).
+          if (!(e instanceof ApiError && e.isApprovalPending))
+            this.error.set(e?.message ?? 'Could not update the ladder.');
           this.saving.set(false);
           this.load();
         },

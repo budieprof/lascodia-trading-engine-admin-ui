@@ -6,6 +6,7 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { StrategyVariantDto } from '@core/api/api.types';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 /**
  * The one confirm for promoting an A/B shadow variant (variants tab + analytics page). Promotion
@@ -208,6 +209,8 @@ export class PromoteVariantDialogComponent {
               })
               .subscribe({ error: () => undefined });
             this.promoted.emit(v);
+          } else if (isApprovalPendingEnvelope(res)) {
+            // Parked for a second approver; the approval interceptor already said so.
           } else {
             this.notify.error(res?.message ?? 'Variant promotion failed.');
           }

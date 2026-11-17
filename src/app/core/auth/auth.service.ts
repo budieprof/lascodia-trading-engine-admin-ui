@@ -15,11 +15,7 @@ import {
 import { ApiService } from '../api/api.service';
 import { RUNTIME_CONFIG } from '../config/runtime-config';
 import { BrowserLocation } from '../browser/browser-location';
-import {
-  HOUSE_TENANT_ID,
-  setStorageIdentity,
-  type StorageIdentity,
-} from '../storage/app-storage';
+import { HOUSE_TENANT_ID, setStorageIdentity, type StorageIdentity } from '../storage/app-storage';
 import { decodeJwt, rolesFromPayload, tenantFromPayload } from './jwt';
 import { DEFAULT_POST_LOGIN_ROUTE, returnUrlQueryParams, sanitizeReturnUrl } from './return-url';
 import { authModeFrom, type AuthMode } from './auth-mode';
@@ -262,7 +258,9 @@ export class AuthService {
   readonly mustChangePassword = this._mustChangePassword.asReadonly();
 
   /** The organisation the console acts in (BFF); null in legacy mode, which is always House. */
-  readonly activeTenant = computed<BffTenant | null>(() => this.bff.session()?.activeTenant ?? null);
+  readonly activeTenant = computed<BffTenant | null>(
+    () => this.bff.session()?.activeTenant ?? null,
+  );
   /** Organisations the person belongs to (BFF); empty in legacy mode. */
   readonly memberships = computed<readonly BffMembership[]>(
     () => this.bff.session()?.memberships ?? [],
@@ -397,6 +395,11 @@ export class AuthService {
     if (this.mode === 'bff') {
       await this.bff.load();
       this.afterBffSessionChange();
+      // A switch that needed a step-up sign-in completes on THIS load, with no tab left to announce
+      // it: tell any tab still showing the previous organisation (review 2026-11-17).
+      const s = this.bff.session();
+      if (s?.activeTenant)
+        this.sessionSync.noteSessionAtStartup(s.activeTenant.id, s.user?.id ?? null);
       return;
     }
     if (this.isAuthenticated() && this.isAdminToken() && this._adminPermissions().length === 0) {
@@ -470,9 +473,13 @@ export class AuthService {
   async switchTenant(tenantId: number): Promise<'switched' | 'stepUp'> {
     if (this.mode !== 'bff') throw new Error('Organisations are switched through the BFF session.');
     let switched: BffSession;
+    // Before the call: this tab's own in-flight requests can come back 409 for the old organisation
+    // while the switch is answered; they must not trigger an "another tab" reload.
+    this.sessionSync.markLeaving();
     try {
       switched = await this.bff.switchTenant(tenantId);
     } catch (err) {
+      this.sessionSync.markLeaving(false);
       if (isStepUpError(err)) {
         this.beginStepUp(DEFAULT_POST_LOGIN_ROUTE, tenantId);
         return 'stepUp';

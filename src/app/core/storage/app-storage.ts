@@ -34,11 +34,18 @@ export const HOUSE_TENANT_ID = 1;
 /** Marks that the one-time move of un-namespaced keys has happened in this browser. */
 export const STORAGE_MIGRATION_MARKER = 'lascodia.storage.migrated.v1';
 
+/**
+ * The organisation this browser's console last ran in. Global by nature: it is how a tab learns that
+ * the shared session moved to ANOTHER organisation (SessionSyncService).
+ */
+export const LAST_TENANT_KEY = 'lascodia.session.lastTenant';
+
 /** Keys that stay global to the browser. */
 export const GLOBAL_STORAGE_KEYS: ReadonlySet<string> = new Set([
   'lascodia.theme',
   'lascodia.idle.lastActivity',
   STORAGE_MIGRATION_MARKER,
+  LAST_TENANT_KEY,
 ]);
 
 const MANAGED_PREFIXES = ['lascodia.', 'tradingChart.'] as const;

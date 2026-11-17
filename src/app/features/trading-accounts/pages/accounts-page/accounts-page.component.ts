@@ -24,6 +24,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 /**
  * Where an account's money actually lives. `isPaper` alone is not enough:
@@ -855,6 +856,8 @@ export class AccountsPageComponent implements OnInit {
           this.notifications.success(`Account "${account.accountName}" activated`);
           this.dataTable()?.loadData();
           this.loadAnalyticsSample();
+        } else if (isApprovalPendingEnvelope(res)) {
+          // Parked for a second approver; the approval interceptor already said so.
         } else {
           this.notifications.error(res.message ?? 'Failed to activate account');
         }
@@ -883,6 +886,8 @@ export class AccountsPageComponent implements OnInit {
           this.notifications.success(`Account "${acct.accountName}" deleted`);
           this.dataTable()?.loadData();
           this.loadAnalyticsSample();
+        } else if (isApprovalPendingEnvelope(res)) {
+          // Parked for a second approver; the approval interceptor already said so.
         } else {
           this.notifications.error(res.message ?? 'Failed to delete account');
         }

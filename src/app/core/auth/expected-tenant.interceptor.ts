@@ -24,7 +24,11 @@ export function isTenantChangedError(error: unknown): boolean {
  * session endpoints (`/bff/*`). Cross-origin (the dev `localhost:5081` base) is skipped: a custom
  * header there would need a CORS pre-flight the engine does not allow for it.
  */
-export function isSameOriginEngineApi(url: string, apiBaseUrl: string, origin: string | undefined): boolean {
+export function isSameOriginEngineApi(
+  url: string,
+  apiBaseUrl: string,
+  origin: string | undefined,
+): boolean {
   if (!origin || !isEngineUrl(url, apiBaseUrl, origin)) return false;
   let abs: URL;
   try {
@@ -35,6 +39,21 @@ export function isSameOriginEngineApi(url: string, apiBaseUrl: string, origin: s
   if (abs.origin !== origin) return false;
   if (abs.pathname.startsWith('/bff/')) return false;
   return abs.pathname.startsWith('/api/');
+}
+
+/**
+ * The expected-tenant header for a write that bypasses HttpClient (`fetch` keepalive on page unload),
+ * so it gets the same "no header, no check" protection: without it a tab closing after another tab
+ * switched organisation saved its chart state into the new organisation (review 2026-11-17).
+ */
+export function expectedTenantHeaders(
+  auth: Pick<AuthService, 'mode' | 'activeTenant'>,
+): Record<string, string> {
+  if (auth.mode !== 'bff') return {};
+  const tenantId = auth.activeTenant()?.id;
+  return tenantId === undefined || tenantId === null
+    ? {}
+    : { [EXPECTED_TENANT_HEADER]: String(tenantId) };
 }
 
 /**
@@ -50,7 +69,8 @@ export const expectedTenantInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
   if (auth.mode !== 'bff') return next(req);
   const tenantId = auth.activeTenant()?.id;
-  if (tenantId === undefined || tenantId === null || req.headers.has(EXPECTED_TENANT_HEADER)) return next(req);
+  if (tenantId === undefined || tenantId === null || req.headers.has(EXPECTED_TENANT_HEADER))
+    return next(req);
 
   const origin = typeof location === 'undefined' ? undefined : location.origin;
   if (!isSameOriginEngineApi(req.url, inject(RUNTIME_CONFIG).apiBaseUrl, origin)) return next(req);

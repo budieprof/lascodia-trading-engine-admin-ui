@@ -21,7 +21,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { OrdersService } from '@core/services/orders.service';
@@ -463,61 +463,61 @@ interface ActivityEntry {
         </section>
 
         @if (canSeeWorkers()) {
-        <section class="card ops-workers">
-          <header class="card-head row">
-            <h3>Worker Health</h3>
-            <a routerLink="/worker-health" class="link">All workers →</a>
-          </header>
-          @if (totalWorkerCount() > 0) {
-            <div class="worker-headline">
-              <span class="tile-figure">{{ healthyWorkerCount() }}</span>
-              <span class="muted">of {{ totalWorkerCount() }} healthy</span>
-            </div>
-            <!-- Every worker sits in exactly one bucket, so the segments sum to the total. -->
-            <div class="seg-bar" role="img" [attr.aria-label]="workerSummaryLabel()">
-              @for (s of workerSegments(); track s.label) {
-                @if (s.count > 0) {
-                  <span
-                    class="seg"
-                    [attr.data-status]="s.label"
-                    [style.flex-grow]="s.count"
-                    [title]="s.count + ' ' + s.label"
-                  ></span>
+          <section class="card ops-workers">
+            <header class="card-head row">
+              <h3>Worker Health</h3>
+              <a routerLink="/worker-health" class="link">All workers →</a>
+            </header>
+            @if (totalWorkerCount() > 0) {
+              <div class="worker-headline">
+                <span class="tile-figure">{{ healthyWorkerCount() }}</span>
+                <span class="muted">of {{ totalWorkerCount() }} healthy</span>
+              </div>
+              <!-- Every worker sits in exactly one bucket, so the segments sum to the total. -->
+              <div class="seg-bar" role="img" [attr.aria-label]="workerSummaryLabel()">
+                @for (s of workerSegments(); track s.label) {
+                  @if (s.count > 0) {
+                    <span
+                      class="seg"
+                      [attr.data-status]="s.label"
+                      [style.flex-grow]="s.count"
+                      [title]="s.count + ' ' + s.label"
+                    ></span>
+                  }
                 }
-              }
-            </div>
-            <ul class="legend">
-              @for (s of workerSegments(); track s.label) {
-                <li [class.dim]="s.count === 0">
-                  <span class="status-dot" [attr.data-status]="s.label"></span>
-                  <span class="mono">{{ s.count }}</span> {{ s.label }}
-                </li>
-              }
-            </ul>
-            @if (problemWorkers().length > 0) {
-              <ul class="worker-list">
-                @for (w of problemWorkers(); track w.name) {
-                  <li class="worker-row">
-                    <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
-                    <span class="worker-name mono" [title]="w.name">{{ w.name }}</span>
-                    <span class="worker-meta" [attr.data-status]="w.statusLabel">{{
-                      w.statusLabel
-                    }}</span>
-                    @if (w.lastErrorMessage) {
-                      <span class="worker-err" [title]="w.lastErrorMessage">{{
-                        w.lastErrorMessage
-                      }}</span>
-                    }
+              </div>
+              <ul class="legend">
+                @for (s of workerSegments(); track s.label) {
+                  <li [class.dim]="s.count === 0">
+                    <span class="status-dot" [attr.data-status]="s.label"></span>
+                    <span class="mono">{{ s.count }}</span> {{ s.label }}
                   </li>
                 }
               </ul>
+              @if (problemWorkers().length > 0) {
+                <ul class="worker-list">
+                  @for (w of problemWorkers(); track w.name) {
+                    <li class="worker-row">
+                      <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
+                      <span class="worker-name mono" [title]="w.name">{{ w.name }}</span>
+                      <span class="worker-meta" [attr.data-status]="w.statusLabel">{{
+                        w.statusLabel
+                      }}</span>
+                      @if (w.lastErrorMessage) {
+                        <span class="worker-err" [title]="w.lastErrorMessage">{{
+                          w.lastErrorMessage
+                        }}</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <div class="all-good">✓ All {{ totalWorkerCount() }} workers nominal</div>
+              }
             } @else {
-              <div class="all-good">✓ All {{ totalWorkerCount() }} workers nominal</div>
+              <div class="empty">No worker data yet</div>
             }
-          } @else {
-            <div class="empty">No worker data yet</div>
-          }
-        </section>
+          </section>
         }
 
         <section class="card flush ops-alerts">
@@ -2624,7 +2624,7 @@ export class DashboardPageComponent implements OnInit {
           this.scopedRequest({
             currentPage: 1,
             itemCountPerPage: 500,
-            filter: { status: 'Open' },
+            filter: { status: 'Open', statuses: OPEN_POSITION_STATUSES },
           }),
         )
         .pipe(

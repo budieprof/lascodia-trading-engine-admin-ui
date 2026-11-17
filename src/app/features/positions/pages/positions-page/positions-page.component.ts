@@ -27,7 +27,7 @@ import { configHashColumn } from '@features/strategies/util/config-hash-column';
 import type { EChartsOption } from 'echarts';
 
 import { MarketDataService } from '@core/services/market-data.service';
-import { PositionsService } from '@core/services/positions.service';
+import { PositionsService, OPEN_POSITION_STATUSES } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
@@ -48,6 +48,7 @@ import {
   EATradeChartModalComponent,
   type TradeChartSelection,
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
+import { isApprovalPendingEnvelope } from '@core/auth/approval.interceptor';
 
 @Component({
   selector: 'app-positions-page',
@@ -1125,6 +1126,9 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           this.notifications.success(`Close requested for #${p.id}. EA command queued for MT5.`);
           // Trigger an immediate refresh; the realtime channel will also push
           // when the EA acknowledges and the engine closes the position.
+          this.openTable?.loadData();
+        } else if (isApprovalPendingEnvelope(res)) {
+          // Parked for a second approver; the approval interceptor already said so.
           this.openTable?.loadData();
         } else if (res) {
           this.notifications.error(res.message ?? 'Close refused.');
@@ -2504,6 +2508,10 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const filter = {
       ...((params.filter as object | null) ?? {}),
       status,
+      // "Open" also means Closing: a full close parks the row there until the EA confirms, and a
+      // position still live at the broker must not vanish from the page while it waits. `statuses`
+      // wins on engines that know it; `status` keeps older engines on the previous behaviour.
+      ...(status === 'Open' ? { statuses: OPEN_POSITION_STATUSES } : {}),
       ...(scopedIds.length > 0 ? { tradingAccountIds: Array.from(scopedIds) } : {}),
     };
     return { ...params, filter };
@@ -2830,7 +2838,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     this.analyticsLoading.set(true);
     forkJoin({
       open: this.positionsService
-        .list({ currentPage: 1, itemCountPerPage: 500, filter: { ...base, status: 'Open' } })
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 500,
+          filter: { ...base, status: 'Open', statuses: OPEN_POSITION_STATUSES },
+        })
         .pipe(rows(), recover('open')),
       closed: this.positionsService
         .list({

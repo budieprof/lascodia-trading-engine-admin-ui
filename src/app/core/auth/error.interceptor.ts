@@ -8,6 +8,7 @@ import { SUPPRESS_ERROR_TOAST } from '../api/api.service';
 import { AuthResponseCode, CSRF_HEADER } from './bff.types';
 import { CSRF_RETRIED, SKIP_SESSION_HANDLING } from './http-context';
 import { StepUpService } from './step-up.service';
+import { SessionSyncService } from './session-sync.service';
 import { isTenantChangedError } from './expected-tenant.interceptor';
 import { quotaRefusalLink, quotaRefusalMessage } from '../plans/quota-refusal';
 import { entitlementRefusalMessage } from '../market-data/entitlement-refusal';
@@ -36,6 +37,7 @@ function handleBffAuthError(
   auth: AuthService,
   notify: NotificationService,
   stepUp: StepUpService,
+  onTenantChanged: () => void,
 ): Observable<HttpEvent<unknown>> | null {
   if (req.context.get(SKIP_SESSION_HANDLING)) return null;
 
@@ -56,9 +58,18 @@ function handleBffAuthError(
     responseCodeOf(error) === AuthResponseCode.Csrf &&
     !req.context.get(CSRF_RETRIED)
   ) {
+    // The organisation this request was made for. Another tab may switch it between the refusal
+    // and the refresh; the replay would then be stamped with — and land in — the new one while
+    // this tab still shows the old one (review 2026-11-17). Never replay across that change.
+    const tenantBefore = auth.activeTenant()?.id ?? null;
     return from(auth.refreshSession()).pipe(
       switchMap((session) => {
         if (!session?.csrfToken) return throwError(() => error);
+        const tenantAfter = session.activeTenant?.id ?? null;
+        if (tenantBefore !== null && tenantAfter !== tenantBefore) {
+          onTenantChanged();
+          return throwError(() => error);
+        }
         // Through the whole error handling again (a second refusal is explained, not retried).
         return retry(
           req.clone({
@@ -102,6 +113,7 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
   const authService = inject(AuthService);
   const notificationService = inject(NotificationService);
   const stepUp = authService.mode === 'bff' ? inject(StepUpService) : null;
+  const sessionSync = authService.mode === 'bff' ? inject(SessionSyncService) : null;
 
   const run = (req: HttpRequest<unknown>): Observable<HttpEvent<unknown>> =>
     next(req).pipe(
@@ -117,6 +129,7 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
             authService,
             notificationService,
             stepUp,
+            () => sessionSync?.tenantChangedElsewhere(),
           );
           if (handled) return handled;
           // A 401 the BFF branch passed over (a session probe) is the caller's to explain.

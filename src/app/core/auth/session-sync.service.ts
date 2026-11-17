@@ -3,6 +3,7 @@ import { Injectable, OnDestroy, inject } from '@angular/core';
 import { BrowserLocation } from '@core/browser/browser-location';
 import { NotificationService } from '@core/notifications/notification.service';
 import { BffSessionService } from './bff-session.service';
+import { appStorage, LAST_TENANT_KEY } from '@core/storage/app-storage';
 
 /** The channel every console tab of this origin listens on. */
 export const SESSION_CHANNEL = 'lascodia-session';
@@ -16,6 +17,16 @@ export type SessionSyncMessage =
   | { type: 'signed-out' };
 
 export const TENANT_CHANGED_NOTICE = 'Your organisation changed in another tab — reloading.';
+
+/**
+ * How long after asking for the reload this tab assumes it was cancelled (the operator chose "Stay"
+ * on an unsaved-changes prompt). A real reload tears the page down long before this fires.
+ */
+export const TENANT_RELOAD_CANCELLED_AFTER_MS = 5000;
+
+export const TENANT_RELOAD_CANCELLED_NOTICE =
+  'This tab still shows your previous organisation, so it cannot save anything. Copy any unsaved ' +
+  'work, then reload the page.';
 
 /**
  * Keeps every tab of the console on the session the cookie actually carries (BFF mode).
@@ -54,7 +65,42 @@ export class SessionSyncService implements OnDestroy {
 
   /** This tab moved the session to `tenantId`; the others must not keep acting in the old one. */
   announceTenantSwitch(tenantId: number, userId: number | null): void {
+    this.rememberTenant(tenantId);
     this.post({ type: 'tenant-switched', tenantId, userId });
+  }
+
+  /**
+   * The session this load started with. When the browser last ran the console in a different
+   * organisation, the switch happened without an announcement (a step-up sign-in finishes it on a
+   * fresh load), so announce it now; tabs already in this organisation ignore it.
+   */
+  noteSessionAtStartup(tenantId: number, userId: number | null): void {
+    let last: string | null = null;
+    try {
+      last = appStorage.getItem(LAST_TENANT_KEY);
+    } catch {
+      /* storage unavailable: the 409 path still protects the other tabs */
+    }
+    this.rememberTenant(tenantId);
+    if (last !== null && last !== String(tenantId))
+      this.post({ type: 'tenant-switched', tenantId, userId });
+  }
+
+  /**
+   * This tab is leaving on purpose (it switched organisation or signed out). Its own in-flight
+   * requests may come back 409 for the old organisation; that is not "changed in another tab", and a
+   * reload must not race the navigation already under way (review 2026-11-17).
+   */
+  markLeaving(leaving = true): void {
+    this.leaving = leaving;
+  }
+
+  private rememberTenant(tenantId: number): void {
+    try {
+      appStorage.setItem(LAST_TENANT_KEY, String(tenantId));
+    } catch {
+      /* best effort */
+    }
   }
 
   /** This tab ended the session; the others go to the sign-in page. */
@@ -70,7 +116,16 @@ export class SessionSyncService implements OnDestroy {
     if (this.leaving) return;
     this.leaving = true;
     this.notify.warning(TENANT_CHANGED_NOTICE);
-    setTimeout(() => this.browser.reload(), TENANT_CHANGED_RELOAD_DELAY_MS);
+    setTimeout(() => {
+      this.browser.reload();
+      // Still here: the reload was cancelled (unsaved-changes prompt → Stay). Say what that means,
+      // and re-arm so the next refused write says it again instead of failing silently
+      // (review 2026-11-17: `leaving` used to latch for the life of the tab).
+      setTimeout(() => {
+        this.leaving = false;
+        this.notify.error(TENANT_RELOAD_CANCELLED_NOTICE);
+      }, TENANT_RELOAD_CANCELLED_AFTER_MS);
+    }, TENANT_CHANGED_RELOAD_DELAY_MS);
   }
 
   /** Exposed for tests: handles one message from another tab. */

@@ -52,7 +52,11 @@ export class OrdersService {
     return this.api.put(`/order/${id}`, data);
   }
 
-  cancel(id: number): Observable<ResponseData<OrderDto>> {
+  /**
+   * `data` is the order's resulting status: `Cancelled` (done) or `Cancelling` (handed to the EA — the
+   * order is still working at the broker until it confirms). Older engines answer `null`.
+   */
+  cancel(id: number): Observable<ResponseData<'Cancelled' | 'Cancelling' | null>> {
     return this.api.post(`/order/${id}/cancel`);
   }
 
