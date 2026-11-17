@@ -1,10 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 
 import { AuthService } from '@core/auth/auth.service';
 import type { BffMembership } from '@core/auth/bff.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { LucideDynamicIcon } from '@lucide/angular';
+import { navIcon } from '../sidebar/nav-icons';
 
 /** Memberships in the order the menu lists them: the active one first, then by name. */
 export function orderedMemberships(
@@ -16,6 +25,17 @@ export function orderedMemberships(
     if (b.tenantId === activeTenantId) return 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+/** Up to two initials for an organisation's tile: "Lascodia House" → "LH", "acme" → "AC". */
+export function orgInitials(name: string | null | undefined): string {
+  const words = (name ?? '')
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
 /** Plain reason a membership cannot be switched to, or null when it can. */
@@ -44,13 +64,14 @@ export function unavailableReason(m: BffMembership): string | null {
   selector: 'app-org-switcher',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ModalA11yDirective],
+  imports: [ModalA11yDirective, LucideDynamicIcon],
+  host: { '(document:click)': 'onDocumentClick($event)' },
   template: `
     @if (visible()) {
       <div class="org">
         <button
           type="button"
-          class="org-pill"
+          class="lx-pill org-pill"
           [attr.aria-expanded]="open()"
           aria-haspopup="menu"
           [disabled]="switching() || locked()"
@@ -61,44 +82,80 @@ export function unavailableReason(m: BffMembership): string | null {
           "
           (click)="open.set(!open())"
         >
-          <span class="org-label">Org:</span>
-          <span class="org-name">{{ switching() ? 'Switching…' : active()?.name }}</span>
+          <span class="lx-tile" aria-hidden="true">{{ initials(active()?.name) }}</span>
+          <span class="lx-pill-value org-name">{{
+            switching() ? 'Switching…' : active()?.name
+          }}</span>
           @if (choices().length > 1) {
-            <span class="caret" aria-hidden="true">▾</span>
+            <svg
+              class="lx-pill-caret"
+              [lucideIcon]="icons.ChevronDown"
+              [size]="14"
+              [strokeWidth]="2.25"
+              aria-hidden="true"
+            ></svg>
           }
         </button>
         @if (open()) {
           <div
-            class="menu"
+            class="lx-menu"
             role="menu"
             aria-label="Switch organisation"
             appModalA11y
             [appModalA11yTrap]="false"
             (dismiss)="open.set(false)"
           >
+            <div class="lx-menu-heading" aria-hidden="true">Organisations</div>
             @for (m of choices(); track m.tenantId) {
               @let reason = unavailable(m);
+              @let current = m.tenantId === active()?.id;
               <button
                 type="button"
                 role="menuitemradio"
-                class="item"
-                [attr.aria-checked]="m.tenantId === active()?.id"
-                [disabled]="reason !== null || m.tenantId === active()?.id"
+                class="lx-menu-item"
+                [attr.aria-checked]="current"
+                [disabled]="reason !== null || current"
                 (click)="choose(m)"
               >
-                <span class="item-name">{{ m.name }}</span>
-                <span class="item-meta">
-                  @if (m.tenantId === active()?.id) {
-                    Current
-                  } @else if (reason) {
-                    {{ reason }}
-                  } @else {
-                    {{ m.slug }}
-                  }
+                <span
+                  class="lx-tile lx-tile-lg"
+                  [class.lx-tile-muted]="!current"
+                  aria-hidden="true"
+                  >{{ initials(m.name) }}</span
+                >
+                <span class="lx-menu-text">
+                  <span class="lx-menu-title">
+                    {{ m.name }}
+                    @if (m.status === 'Invited') {
+                      <span class="lx-badge lx-badge-warn">Invited</span>
+                    } @else if (m.status === 'Suspended') {
+                      <span class="lx-badge">Suspended</span>
+                    }
+                  </span>
+                  <span class="lx-menu-meta">
+                    @if (current) {
+                      Current organisation
+                    } @else if (reason) {
+                      {{ reason }}
+                    } @else {
+                      {{ m.slug }}
+                    }
+                  </span>
                 </span>
+                @if (current) {
+                  <svg
+                    class="lx-menu-check"
+                    [lucideIcon]="icons.Check"
+                    [size]="16"
+                    [strokeWidth]="2.5"
+                    aria-hidden="true"
+                  ></svg>
+                }
               </button>
             }
-            <p class="hint">Switching reloads the console in the chosen organisation.</p>
+            <p class="lx-menu-footnote">
+              Switching reloads the console in the chosen organisation.
+            </p>
           </div>
         }
       </div>
@@ -110,106 +167,20 @@ export function unavailableReason(m: BffMembership): string | null {
         position: relative;
       }
       .org-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 32px;
-        padding: 0 12px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        cursor: pointer;
         max-width: 240px;
       }
-      .org-pill:hover:not(:disabled) {
-        border-color: var(--accent);
-      }
-      .org-pill:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-      .org-label {
-        color: var(--text-secondary);
-      }
-      .org-name {
-        font-weight: var(--font-medium);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .caret {
-        color: var(--text-tertiary);
-        font-size: 11px;
-      }
-      .menu {
-        position: absolute;
-        top: calc(100% + 6px);
-        right: 0;
-        min-width: 260px;
-        max-height: 60vh;
-        overflow-y: auto;
-        padding: 6px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-lg);
-        z-index: 300;
-      }
-      .item {
-        width: 100%;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-        padding: 8px 10px;
-        border: none;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--text-primary);
-        font-family: inherit;
-        text-align: left;
-        cursor: pointer;
-      }
-      .item:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .item:disabled {
-        cursor: default;
-      }
-      .item[aria-checked='true'] {
-        box-shadow: inset 3px 0 0 var(--accent);
-      }
-      .item:disabled:not([aria-checked='true']) .item-name {
-        color: var(--text-tertiary);
-      }
-      .item-name {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-      }
-      .item-meta {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .hint {
-        margin: 6px 10px 2px;
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
       @media (max-width: 1279.98px) {
-        .org-label {
-          display: none;
-        }
         .org-pill {
-          max-width: 160px;
+          max-width: 170px;
         }
       }
       @media (max-width: 600px) {
         .org-pill {
           max-width: 7rem;
-          padding: 0 10px;
+          padding-right: 8px;
+        }
+        .org-pill .lx-tile {
+          display: none;
         }
       }
     `,
@@ -218,6 +189,10 @@ export function unavailableReason(m: BffMembership): string | null {
 export class OrgSwitcherComponent {
   private readonly auth = inject(AuthService);
   private readonly notify = inject(NotificationService);
+  private readonly host: HTMLElement = inject(ElementRef<HTMLElement>).nativeElement;
+
+  // Named one by one: scripts/generate-nav-icons.mjs bundles only the `navIcon.<Name>` it can see.
+  protected readonly icons = { ChevronDown: navIcon.ChevronDown, Check: navIcon.Check };
 
   readonly open = signal(false);
   readonly switching = signal(false);
@@ -229,6 +204,15 @@ export class OrgSwitcherComponent {
   readonly choices = computed(() =>
     orderedMemberships(this.auth.memberships(), this.active()?.id ?? null),
   );
+
+  initials(name: string | null | undefined): string {
+    return orgInitials(name);
+  }
+
+  /** A click anywhere outside the switcher closes its menu, as every drop-down does. */
+  onDocumentClick(event: MouseEvent): void {
+    if (this.open() && !this.host.contains(event.target as Node)) this.open.set(false);
+  }
 
   unavailable(m: BffMembership): string | null {
     return unavailableReason(m);

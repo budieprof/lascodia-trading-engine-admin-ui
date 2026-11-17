@@ -1,0 +1,269 @@
+// Header pop-over menus (organisation, account scope): one look for every drop-down in the shell
+// chrome. Global rather than per-component so each menu is the same panel, row, check and heading.
+//
+//   <button class="lx-pill" aria-haspopup="listbox" [attr.aria-expanded]="open()">…</button>
+//   <div class="lx-menu" role="listbox">
+//     <div class="lx-menu-heading">Organisations</div>
+//     <button class="lx-menu-item" role="option" aria-selected="true">…</button>
+//   </div>
+
+.lx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+
+  &:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: var(--bg-primary);
+  }
+  &[aria-expanded='true'] {
+    border-color: var(--accent);
+    background: var(--bg-primary);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+  &.lx-pill-static {
+    cursor: default;
+  }
+}
+
+// The small rounded tile at the start of a pill or menu row (initials or an icon).
+.lx-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(
+    140deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 60%, #7c3aed)
+  );
+
+  &.lx-tile-lg {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    font-size: 12px;
+  }
+  &.lx-tile-muted {
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+  }
+}
+
+.lx-pill-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.lx-pill-value {
+  font-weight: var(--font-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lx-pill-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-base) var(--ease-out-soft);
+}
+.lx-pill[aria-expanded='true'] .lx-pill-caret {
+  transform: rotate(180deg);
+  color: var(--accent);
+}
+
+.lx-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 300;
+  min-width: 300px;
+  max-width: min(380px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text-primary) 4%, transparent),
+    0 18px 48px -12px rgba(0, 0, 0, 0.28),
+    0 6px 14px -6px rgba(0, 0, 0, 0.14);
+  transform-origin: top right;
+  animation: lx-menu-in var(--dur-base) var(--ease-press);
+  outline: none;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+.lx-menu-heading {
+  padding: 8px 10px 6px;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.lx-menu-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.lx-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+
+  &:hover:not(:disabled),
+  &.lx-active {
+    background: var(--bg-secondary);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  &:disabled {
+    cursor: default;
+  }
+  &:disabled:not([aria-selected='true']):not([aria-checked='true']) {
+    .lx-menu-title {
+      color: var(--text-tertiary);
+    }
+    .lx-tile {
+      opacity: 0.5;
+    }
+  }
+  &[aria-selected='true'],
+  &[aria-checked='true'] {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+}
+
+.lx-menu-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.lx-menu-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lx-menu-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lx-menu-check {
+  flex: none;
+  color: var(--accent);
+}
+
+// A small status word beside a title: "paper", "demo", "invited".
+.lx-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+
+  &.lx-badge-real {
+    color: color-mix(in srgb, var(--profit) 80%, var(--text-primary));
+    background: color-mix(in srgb, var(--profit) 14%, transparent);
+  }
+  &.lx-badge-warn {
+    color: color-mix(in srgb, var(--warning) 80%, var(--text-primary));
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+  }
+}
+
+.lx-menu-footnote {
+  margin: 4px 4px 2px;
+  padding: 8px 6px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+@keyframes lx-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+// Dark theme: --bg-primary is pure black, so a pop-over drawn on it disappears into the page.
+// Menus sit one step up, on the raised surface, and their hover/tiles one step above that.
+[data-theme='dark'] {
+  .lx-menu {
+    background: var(--bg-secondary);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .lx-menu-item:hover:not(:disabled),
+  .lx-menu-item.lx-active {
+    background: var(--bg-tertiary);
+  }
+  .lx-tile.lx-tile-muted {
+    background: color-mix(in srgb, var(--bg-tertiary) 70%, #fff 6%);
+  }
+  .lx-pill:hover:not(:disabled),
+  .lx-pill[aria-expanded='true'] {
+    background: var(--bg-tertiary);
+  }
+}

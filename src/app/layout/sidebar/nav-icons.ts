@@ -319,6 +319,12 @@ export const navIcon = {
       ['path', { d: 'M7 16c.5-2 1.5-7 4-7 2 0 2 3 4 3 2.5 0 4.5-5 5-7', key: 'lw07rv' }],
     ],
   },
+  Check: { name: 'check', size: 24, node: [['path', { d: 'M20 6 9 17l-5-5', key: '1gmf2c' }]] },
+  ChevronDown: {
+    name: 'chevron-down',
+    size: 24,
+    node: [['path', { d: 'm6 9 6 6 6-6', key: 'qrunsl' }]],
+  },
   ChevronsUp: {
     name: 'chevrons-up',
     size: 24,
@@ -407,6 +413,14 @@ export const navIcon = {
       ['path', { d: 'M12 3v18', key: '108xh3' }],
     ],
     aliases: ['columns'],
+  },
+  CornerDownLeft: {
+    name: 'corner-down-left',
+    size: 24,
+    node: [
+      ['path', { d: 'M20 4v7a4 4 0 0 1-4 4H4', key: '6o5b7l' }],
+      ['path', { d: 'm9 10-5 5 5 5', key: '1kshq7' }],
+    ],
   },
   Cpu: {
     name: 'cpu',
@@ -1255,11 +1269,29 @@ export const navIcon = {
       ],
     ],
   },
+  Search: {
+    name: 'search',
+    size: 24,
+    node: [
+      ['path', { d: 'm21 21-4.34-4.34', key: '14j7rj' }],
+      ['circle', { cx: '11', cy: '11', r: '8', key: '4ej97u' }],
+    ],
+  },
   SearchCheck: {
     name: 'search-check',
     size: 24,
     node: [
       ['path', { d: 'm8 11 2 2 4-4', key: '1sed1v' }],
+      ['circle', { cx: '11', cy: '11', r: '8', key: '4ej97u' }],
+      ['path', { d: 'm21 21-4.3-4.3', key: '1qie3q' }],
+    ],
+  },
+  SearchX: {
+    name: 'search-x',
+    size: 24,
+    node: [
+      ['path', { d: 'm13.5 8.5-5 5', key: '1cs55j' }],
+      ['path', { d: 'm8.5 8.5 5 5', key: 'a8mexj' }],
       ['circle', { cx: '11', cy: '11', r: '8', key: '4ej97u' }],
       ['path', { d: 'm21 21-4.3-4.3', key: '1qie3q' }],
     ],
@@ -1659,6 +1691,14 @@ export const navIcon = {
           key: '1ngwbx',
         },
       ],
+    ],
+  },
+  X: {
+    name: 'x',
+    size: 24,
+    node: [
+      ['path', { d: 'M18 6 6 18', key: '1bl5f8' }],
+      ['path', { d: 'm6 6 12 12', key: 'd8bk6v' }],
     ],
   },
   Zap: {

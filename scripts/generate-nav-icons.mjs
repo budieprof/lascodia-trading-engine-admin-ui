@@ -25,7 +25,17 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const docs = process.argv.includes('--docs');
 const sources = docs
   ? ['src/app/features/docs/docs-icons.ts']
-  : ['src/app/layout/sidebar/nav-items.ts', 'src/app/layout/sidebar/sidebar.component.ts'];
+  : [
+      'src/app/layout/sidebar/nav-items.ts',
+      'src/app/layout/sidebar/sidebar.component.ts',
+      // The header chrome (search box, organisation and account menus) and the ⌘K palette draw from
+      // the same set: one icon look across the shell.
+      'src/app/layout/header/header.component.ts',
+      'src/app/layout/header/org-switcher.component.ts',
+      'src/app/core/scope/account-scope-pill.component.ts',
+      'src/app/shared/components/command-palette/command-palette.component.ts',
+      'src/app/shared/components/command-palette/command-palette.logic.ts',
+    ];
 const out = join(
   root,
   docs ? 'src/app/features/docs/doc-icon-data.ts' : 'src/app/layout/sidebar/nav-icons.ts',
@@ -80,4 +90,6 @@ ${body}
 );
 // Formatted like the rest of the repo, so a re-run with unchanged icons leaves no diff.
 execFileSync(join(root, 'node_modules/.bin/prettier'), ['--write', out], { stdio: 'ignore' });
-console.log(`${docs ? 'doc-icon-data.ts' : 'nav-icons.ts'}: ${names.length} icons from @lucide/angular ${version}`);
+console.log(
+  `${docs ? 'doc-icon-data.ts' : 'nav-icons.ts'}: ${names.length} icons from @lucide/angular ${version}`,
+);

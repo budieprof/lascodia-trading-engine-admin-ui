@@ -9,11 +9,18 @@ import { AccountScopePillComponent } from '@core/scope/account-scope-pill.compon
 import { NotificationBellComponent } from './notification-bell.component';
 import { OrgSwitcherComponent } from './org-switcher.component';
 import { TenantBrandingService } from '@core/branding/tenant-branding.service';
+import { LucideDynamicIcon } from '@lucide/angular';
+import { navIcon } from '../sidebar/nav-icons';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [OrgSwitcherComponent, AccountScopePillComponent, NotificationBellComponent],
+  imports: [
+    OrgSwitcherComponent,
+    AccountScopePillComponent,
+    NotificationBellComponent,
+    LucideDynamicIcon,
+  ],
   template: `
     <header class="header" role="banner">
       <div class="header-left">
@@ -46,9 +53,18 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
           aria-label="Open command palette"
           aria-keyshortcuts="Meta+K Control+K"
         >
-          <span class="search-icon" aria-hidden="true">⌕</span>
+          <svg
+            class="search-icon"
+            [lucideIcon]="icons.Search"
+            [size]="16"
+            [strokeWidth]="2"
+            aria-hidden="true"
+          ></svg>
           <span class="search-text">Search…</span>
-          <span class="search-shortcut" aria-hidden="true">⌘K</span>
+          <span class="search-shortcut" aria-hidden="true">
+            <kbd>{{ modKey }}</kbd
+            ><kbd>K</kbd>
+          </span>
         </button>
       </div>
 
@@ -163,14 +179,15 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         flex: 1;
         display: flex;
         justify-content: center;
+        padding: 0 var(--space-3);
       }
 
       .search-trigger {
         display: flex;
         align-items: center;
-        gap: var(--space-2);
-        height: 36px;
-        padding: 0 var(--space-4);
+        gap: 10px;
+        height: 38px;
+        padding: 0 6px 0 14px;
         border: 1px solid var(--border);
         border-radius: var(--radius-full);
         background: var(--bg-secondary);
@@ -178,13 +195,20 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         font-size: var(--text-sm);
         font-family: inherit;
         cursor: pointer;
-        min-width: 240px;
-        transition: all 0.15s ease;
+        min-width: 280px;
+        box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent);
+        transition:
+          border-color var(--dur-fast) ease,
+          background var(--dur-fast) ease,
+          box-shadow var(--dur-fast) ease,
+          color var(--dur-fast) ease;
       }
 
       .search-trigger:hover {
-        border-color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
         background: var(--bg-primary);
+        color: var(--text-secondary);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent);
       }
       .search-trigger:focus-visible,
       .logout-btn:focus-visible {
@@ -193,7 +217,8 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
       }
 
       .search-icon {
-        font-size: 16px;
+        flex: none;
+        color: var(--text-secondary);
       }
 
       .search-text {
@@ -202,11 +227,23 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
       }
 
       .search-shortcut {
+        display: inline-flex;
+        gap: 3px;
+      }
+      .search-shortcut kbd {
+        display: inline-grid;
+        place-items: center;
+        min-width: 22px;
+        height: 24px;
+        padding: 0 6px;
+        font-family: inherit;
         font-size: 11px;
-        padding: 2px 6px;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
+        font-weight: var(--font-medium);
         color: var(--text-secondary);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 7px;
       }
 
       .header-right {
@@ -322,6 +359,7 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         }
         .search-trigger {
           min-width: auto;
+          padding: 0 11px;
         }
         .search-text,
         .search-shortcut {
@@ -370,6 +408,14 @@ export class HeaderComponent {
   private router = inject(Router);
   private location = inject(Location);
   private palette = inject(CommandPaletteService);
+  // Named one by one: scripts/generate-nav-icons.mjs bundles only the `navIcon.<Name>` it can see.
+  protected readonly icons = { Search: navIcon.Search };
+  /** The palette shortcut as this keyboard writes it: ⌘ on Apple devices, Ctrl elsewhere. */
+  protected readonly modKey =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+      ? '⌘'
+      : 'Ctrl';
 
   openMobileNav = output<void>();
 
