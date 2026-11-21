@@ -3,6 +3,8 @@
  * Mirrors `TradeRecommendationCards.cs` / `GetTradeRecommendationDetailQuery.cs` in the engine.
  */
 
+import { OcoChipPartner, ocoLegEnded } from '@shared/utils/oco';
+
 /** Filter for the paged list and the summary. Sent nested under `filter` for `paged`. */
 export interface TradeRecommendationCardFilter {
   /** A number (optionally `#`-prefixed) matches card / analysis / signal / plan id; text matches symbol, rationale, reason. */
@@ -16,6 +18,18 @@ export interface TradeRecommendationCardFilter {
   toUtc?: string | null;
   llmInvocationId?: number | null;
   hasSignal?: boolean | null;
+  /** Only the cards in this one-cancels-other group — every leg, in any status. */
+  ocoGroupId?: string | null;
+}
+
+/** One OCO partner of a list card, enough to name it. */
+export interface RecOcoPartnerDto {
+  id: number;
+  direction: string;
+  orderType: string | null;
+  status: string;
+  monitorId: number | null;
+  monitorStatus: string | null;
 }
 
 /** One card, with the analysis, watch and outcome joined in. */
@@ -53,6 +67,8 @@ export interface TradeRecommendationCardDto {
   monitorCount: number;
   latestMonitorStatus: string | null;
   ocoGroupId: string | null;
+  /** The other cards in the OCO group; a fill on any of them cancels this one. */
+  ocoPartners?: RecOcoPartnerDto[];
   signalStatus: string | null;
   signalRejectionReason: string | null;
   orderCount: number;
@@ -526,3 +542,18 @@ export const REC_SOURCE_LABELS: Record<string, string> = {
   MonitorReview: 'Monitor review',
   StructureWatch: 'Structure watch',
 };
+
+/** A card's OCO partners as the shared OCO chip lists them ("#11 Buy Limit · Filed · watch Cancelled"). */
+export function recOcoChipPartners(
+  card: Pick<TradeRecommendationCardDto, 'ocoPartners'> | null | undefined,
+): OcoChipPartner[] {
+  return (card?.ocoPartners ?? []).map((p) => {
+    const kind = p.orderType ? p.orderType.replace(/^(Buy|Sell)/, '') : '';
+    const watch = p.monitorStatus ? ` · watch ${p.monitorStatus}` : '';
+    return {
+      id: p.id,
+      label: `${p.direction}${kind ? ' ' + kind : ''} · ${p.status}${watch}`,
+      ended: ocoLegEnded(p.monitorStatus) || ocoLegEnded(p.status),
+    };
+  });
+}

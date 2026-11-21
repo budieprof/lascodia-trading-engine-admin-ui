@@ -23,6 +23,7 @@ import type {
 } from '@features/analysis-monitors/analysis-monitors.types';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
 import {
   formatAge,
   formatCountdown,
@@ -78,7 +79,7 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
   selector: 'app-monitor-detail-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, RouterLink, ChartCardComponent, ModalA11yDirective],
+  imports: [DatePipe, DecimalPipe, RouterLink, ChartCardComponent, ModalA11yDirective, OcoChipComponent],
   template: `
     <div class="scrim" (click)="closed.emit()"></div>
     <aside
@@ -301,7 +302,10 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   }
                   @if (m.ocoGroupId) {
                     <dt>OCO group</dt>
-                    <dd class="mono small">{{ m.ocoGroupId }} · a fire cancels its siblings</dd>
+                    <dd class="small">
+                      <app-oco-chip [groupId]="m.ocoGroupId" [selectable]="false" />
+                      <span class="mono"> {{ m.ocoGroupId }}</span> · a fire cancels its siblings
+                    </dd>
                   }
                   @if (m.scriptAuthor) {
                     <dt>Script by</dt>

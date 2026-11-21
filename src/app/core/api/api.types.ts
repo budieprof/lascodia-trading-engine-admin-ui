@@ -4494,8 +4494,20 @@ export interface AnalysisMonitorDto {
   scriptAuthor?: string | null;
   /** OCO link: the watches sharing it cancel each other on a fire. */
   ocoGroupId?: string | null;
+  /** The other watches in the OCO group, with the cards they file (cockpit board only). */
+  ocoPartners?: AnalysisMonitorOcoPartner[];
+  /** Recommendation cards this watch files (cockpit board only). */
+  recommendationIds?: number[];
   /** Literal levels from trigger, invalidation and plan (filled by the cockpit board only). */
   levels?: AnalysisMonitorLevel[];
+}
+
+/** One OCO partner of a watch. */
+export interface AnalysisMonitorOcoPartner {
+  id: number;
+  status: string | null;
+  plannedDirection: string | null;
+  recommendationId: number | null;
 }
 
 /** One literal price a watch waits at or guards. */

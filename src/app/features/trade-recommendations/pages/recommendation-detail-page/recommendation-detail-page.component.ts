@@ -33,10 +33,12 @@ import { RecommendationCardComponent } from '../../components/recommendation-car
 import { RecMonitorComponent } from '../../components/rec-monitor/rec-monitor.component';
 import { RecExecutionComponent } from '../../components/rec-execution/rec-execution.component';
 import { RecTimelineComponent } from '../../components/rec-timeline/rec-timeline.component';
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
 import {
   REC_SOURCE_LABELS,
   TradeRecommendationDetailDto,
   recFormatPrice,
+  recOcoChipPartners,
   recOutcomeView,
   recParseJson,
   recPips,
@@ -96,6 +98,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
     RecMonitorComponent,
     RecExecutionComponent,
     RecTimelineComponent,
+    OcoChipComponent,
   ],
   styleUrls: ['../../rec-shared.scss', './recommendation-detail-page.component.scss'],
   template: `
@@ -329,7 +332,18 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
                     >
                   }
                   @if (c.ocoGroupId) {
-                    <span class="pill pill--warn mono">OCO {{ c.ocoGroupId }}</span>
+                    <a
+                      class="oco-link"
+                      [routerLink]="['/trade-recommendations']"
+                      [queryParams]="{ oco: c.ocoGroupId }"
+                      title="Show every card in this OCO group"
+                    >
+                      <app-oco-chip
+                        [groupId]="c.ocoGroupId"
+                        [partners]="ocoPartners()"
+                        [selectable]="false"
+                      />
+                    </a>
                   }
                 </dd>
               </dl>
@@ -635,17 +649,28 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
           <section class="panel">
             <div class="panel-head">
               <h2>One-cancels-other partners</h2>
+              @if (c.ocoGroupId) {
+                <app-oco-chip [groupId]="c.ocoGroupId" [selectable]="false" />
+              }
               <span class="muted small"
                 >Whichever fires first files its card; the others stand down.</span
               >
+              @if (c.ocoGroupId) {
+                <span class="oco-links">
+                  <a [routerLink]="['/trade-recommendations']" [queryParams]="{ oco: c.ocoGroupId }"
+                    >All legs →</a
+                  >
+                  <a [routerLink]="['/analysis-monitors']" [queryParams]="{ oco: c.ocoGroupId }"
+                    >Their watches →</a
+                  >
+                </span>
+              }
             </div>
             <div class="mini-grid">
               @for (leg of d.ocoLegs; track $index) {
                 <div class="leg">
                   <div class="leg-head muted small">
-                    <span class="mono">{{ leg.ocoGroupId }}</span>
                     @if (leg.monitorId) {
-                      ·
                       <a
                         [routerLink]="['/analysis-monitors']"
                         [queryParams]="{ focus: leg.monitorId }"
@@ -745,6 +770,7 @@ export class RecommendationDetailPageComponent {
   private sub: Subscription | null = null;
 
   readonly card = computed(() => this.detail()?.card ?? null);
+  readonly ocoPartners = computed(() => recOcoChipPartners(this.card()));
 
   /** A watch trigger as text — the DSL object printed "[object Object]". */
   triggerText(trigger: unknown): string {

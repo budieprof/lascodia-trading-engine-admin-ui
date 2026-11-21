@@ -1,11 +1,15 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
+
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { ocoHue } from '@shared/utils/oco';
 
 import {
   REC_SOURCE_LABELS,
   TradeRecommendationCardDto,
   recFormatPrice,
+  recOcoChipPartners,
   recOutcomeView,
   recPips,
   recSplitReason,
@@ -20,7 +24,7 @@ import {
   selector: 'app-recommendation-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, PercentPipe, RouterLink],
+  imports: [DatePipe, DecimalPipe, PercentPipe, RouterLink, OcoChipComponent],
   styleUrls: ['../../rec-shared.scss'],
   template: `
     @let c = card();
@@ -29,6 +33,11 @@ import {
       [class.card--compact]="compact()"
       [class.card--buy]="c.direction === 'Buy'"
       [class.card--sell]="c.direction === 'Sell'"
+      [class.card--oco]="!!c.ocoGroupId"
+      [class.card--oco-lit]="ocoHighlight()"
+      [style.--oco-h]="ocoHueValue()"
+      (mouseenter)="c.ocoGroupId && ocoHover.emit(c.ocoGroupId)"
+      (mouseleave)="c.ocoGroupId && ocoHover.emit(null)"
       [routerLink]="['/trade-recommendations', c.id]"
       [attr.aria-label]="'Recommendation ' + c.id + ', ' + c.direction + ' ' + c.symbol"
     >
@@ -127,9 +136,15 @@ import {
           >
         }
         @if (c.ocoGroupId) {
-          <span class="tag tag--oco" [attr.title]="'One-cancels-other group ' + c.ocoGroupId"
-            >OCO</span
-          >
+          <app-oco-chip
+            [groupId]="c.ocoGroupId"
+            [partners]="ocoPartners()"
+            [highlighted]="ocoHighlight()"
+            [selectable]="ocoSelectable()"
+            [showLonely]="c.ocoPartners !== undefined"
+            (hover)="ocoHover.emit($event)"
+            (selected)="ocoSelect.emit($event)"
+          />
         }
         @if (c.tradeSignalId) {
           <span class="tag"
@@ -194,6 +209,19 @@ import {
       }
       .card--sell {
         border-left-color: var(--loss);
+      }
+      /* OCO legs share a colour stripe across the top, so a group pairs up by eye in the grid. */
+      .card--oco {
+        box-shadow:
+          inset 0 3px 0 hsl(var(--oco-h) 65% 52%),
+          var(--shadow-sm);
+      }
+      .card--oco-lit,
+      .card--oco-lit:hover {
+        border-color: hsl(var(--oco-h) 65% 52%);
+        box-shadow:
+          inset 0 3px 0 hsl(var(--oco-h) 65% 52%),
+          0 0 0 3px hsl(var(--oco-h) 70% 52% / 0.28);
       }
       .card--compact {
         padding: 10px 12px;
@@ -398,13 +426,6 @@ import {
         border-color: rgba(0, 113, 227, 0.35);
         color: var(--accent);
       }
-      .tag--oco {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        letter-spacing: 0.05em;
-        border-color: rgba(255, 149, 0, 0.45);
-        color: #b25000;
-      }
       .pnl {
         font-size: 12.5px;
         font-weight: var(--font-semibold);
@@ -425,6 +446,19 @@ import {
 export class RecommendationCardComponent {
   readonly card = input.required<TradeRecommendationCardDto>();
   readonly compact = input(false);
+  /** A partner in this card's OCO group is hovered on the page. */
+  readonly ocoHighlight = input(false);
+  /** Clicking the OCO chip asks the page to show the whole group (else it opens the card). */
+  readonly ocoSelectable = input(false);
+
+  readonly ocoHover = output<string | null>();
+  readonly ocoSelect = output<string>();
+
+  readonly ocoHueValue = computed(() => {
+    const g = this.card().ocoGroupId;
+    return g ? ocoHue(g) : null;
+  });
+  readonly ocoPartners = computed(() => recOcoChipPartners(this.card()));
 
   readonly sourceLabel = computed(
     () => REC_SOURCE_LABELS[this.card().source] ?? this.card().source,

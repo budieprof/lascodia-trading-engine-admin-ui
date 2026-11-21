@@ -185,3 +185,23 @@ table.grid tr:last-child td {
 .table-wrap {
   overflow-x: auto;
 }
+
+/* An OCO chip that links to its whole group. */
+.oco-link {
+  display: inline-flex;
+  text-decoration: none;
+}
+.oco-links {
+  display: inline-flex;
+  gap: 12px;
+  margin-left: auto;
+  font-size: var(--text-xs);
+}
+.oco-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: var(--font-medium);
+}
+.oco-links a:hover {
+  text-decoration: underline;
+}
