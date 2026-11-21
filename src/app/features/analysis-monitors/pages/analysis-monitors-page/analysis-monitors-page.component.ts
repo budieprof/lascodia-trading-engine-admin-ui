@@ -57,6 +57,9 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { SparklineComponent } from '@shared/components/sparkline/sparkline.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { OcoBannerComponent } from '@shared/components/oco-chip/oco-banner.component';
+import { OcoChipPartner, ocoHue, ocoLegEnded, ocoShortCode } from '@shared/utils/oco';
 
 /** Status filter chips, in the order an operator scans them. */
 const STATUS_FILTERS = [
@@ -126,6 +129,8 @@ type PendingAction =
     RefreshButtonComponent,
     SparklineComponent,
     ModalA11yDirective,
+    OcoChipComponent,
+    OcoBannerComponent,
   ],
   template: `
     <div class="page">
@@ -370,6 +375,17 @@ type PendingAction =
           </div>
         }
 
+        @if (ocoGroup(); as g) {
+          <app-oco-banner
+            [groupId]="g"
+            text="Every watch in this one-cancels-other group, in any status — the first to fire cancels the rest."
+            otherPage="/trade-recommendations"
+            otherLabel="Their cards on Recommendations →"
+            clearLabel="Show all watches ✕"
+            (cleared)="clearFilter('oco')"
+          />
+        }
+
         <!-- ── Bulk bar ───────────────────────────────────────────────────── -->
         @if (selected().size > 0) {
           <div class="bulk">
@@ -423,6 +439,11 @@ type PendingAction =
                     [class.cursor]="cursor() === i"
                     [class.checked]="selected().has(m.id)"
                     [class.ended]="!isOpen(m)"
+                    [class.oco-row]="!!m.ocoGroupId"
+                    [class.oco-lit]="!!m.ocoGroupId && hoveredOco() === m.ocoGroupId"
+                    [style.--oco-h]="ocoHueOf(m)"
+                    (mouseenter)="m.ocoGroupId && hoveredOco.set(m.ocoGroupId)"
+                    (mouseleave)="m.ocoGroupId && hoveredOco.set(null)"
                     tabindex="0"
                     (click)="openDetail(m.id, i)"
                     (keydown.enter)="openDetail(m.id, i)"
@@ -455,7 +476,23 @@ type PendingAction =
                           <span class="tag" title="Re-arm depth">↻{{ m.rearmDepth }}</span>
                         }
                         @if (m.ocoGroupId) {
-                          <span class="tag" title="One-cancels-other group">OCO</span>
+                          <app-oco-chip
+                            [groupId]="m.ocoGroupId"
+                            [partners]="ocoPartnersOf(m)"
+                            [highlighted]="hoveredOco() === m.ocoGroupId"
+                            [showLonely]="m.ocoPartners !== undefined"
+                            (hover)="hoveredOco.set($event)"
+                            (selected)="selectOco($event)"
+                          />
+                        }
+                        @for (rid of m.recommendationIds ?? []; track rid) {
+                          <a
+                            class="tag rec"
+                            [routerLink]="['/trade-recommendations', rid]"
+                            (click)="$event.stopPropagation()"
+                            title="The recommendation card this watch files"
+                            >card #{{ rid }}</a
+                          >
                         }
                         @if (m.monitorGroupId) {
                           <span class="tag" [title]="'Fan-out group ' + m.monitorGroupId">group</span>
@@ -580,6 +617,11 @@ type PendingAction =
                       [class.selected]="selectedId() === m.id"
                       [class.checked]="selected().has(m.id)"
                       [class.ended]="!isOpen(m)"
+                      [class.oco-card]="!!m.ocoGroupId"
+                      [class.oco-lit]="!!m.ocoGroupId && hoveredOco() === m.ocoGroupId"
+                      [style.--oco-h]="ocoHueOf(m)"
+                      (mouseenter)="m.ocoGroupId && hoveredOco.set(m.ocoGroupId)"
+                      (mouseleave)="m.ocoGroupId && hoveredOco.set(null)"
                       tabindex="0"
                       (click)="openDetail(m.id)"
                       (keydown.enter)="openDetail(m.id)"
@@ -607,6 +649,29 @@ type PendingAction =
                         }
                         <span class="status" [attr.data-status]="m.status">{{ statusLabel(m.status) }}</span>
                       </header>
+                      @if (m.ocoGroupId || (m.recommendationIds?.length ?? 0) > 0) {
+                        <div class="mc-links">
+                          @if (m.ocoGroupId) {
+                            <app-oco-chip
+                              [groupId]="m.ocoGroupId"
+                              [partners]="ocoPartnersOf(m)"
+                              [highlighted]="hoveredOco() === m.ocoGroupId"
+                              [showLonely]="m.ocoPartners !== undefined"
+                              (hover)="hoveredOco.set($event)"
+                              (selected)="selectOco($event)"
+                            />
+                          }
+                          @for (rid of m.recommendationIds ?? []; track rid) {
+                            <a
+                              class="tag rec"
+                              [routerLink]="['/trade-recommendations', rid]"
+                              (click)="$event.stopPropagation()"
+                              title="The recommendation card this watch files"
+                              >card #{{ rid }}</a
+                            >
+                          }
+                        </div>
+                      }
                       <p class="mc-intent">{{ m.intentText }}</p>
                       @if (prefs().density === 'comfortable' && (m.scriptLastReading || m.triggerExplanation || m.lastEvalNote)) {
                         <p class="mc-explain">{{ humanize(m.scriptLastReading || m.triggerExplanation || m.lastEvalNote) }}</p>
@@ -1224,6 +1289,13 @@ type PendingAction =
       .row.selected {
         background: color-mix(in srgb, var(--accent) 10%, transparent);
       }
+      /* OCO legs share a colour stripe; hovering one lights up its partners. */
+      .row.oco-row td:first-child {
+        box-shadow: inset 3px 0 0 hsl(var(--oco-h) 65% 52%);
+      }
+      .row.oco-lit {
+        background: hsl(var(--oco-h) 70% 50% / 0.12);
+      }
       .row.cursor td:first-child {
         box-shadow: inset 3px 0 0 var(--accent);
       }
@@ -1560,6 +1632,26 @@ type PendingAction =
       .mcard.ended {
         opacity: 0.8;
       }
+      .mcard.oco-card {
+        box-shadow: inset 0 3px 0 hsl(var(--oco-h) 65% 52%);
+      }
+      .mcard.oco-lit {
+        border-color: hsl(var(--oco-h) 65% 52%);
+        box-shadow:
+          inset 0 3px 0 hsl(var(--oco-h) 65% 52%),
+          0 0 0 3px hsl(var(--oco-h) 70% 52% / 0.28);
+      }
+      .mc-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      a.rec {
+        color: var(--accent);
+      }
+      app-oco-banner {
+        margin-bottom: 10px;
+      }
       .mc-head {
         display: flex;
         align-items: center;
@@ -1729,6 +1821,10 @@ export class AnalysisMonitorsPageComponent {
   protected readonly page = signal(1);
   protected readonly sortKey = signal<SortKey>('default');
   protected readonly attentionOnly = signal(false);
+  /** One OCO group's watches only, any status (a chip click, or `?oco=` from Recommendations). */
+  protected readonly ocoGroup = signal<string>('');
+  /** The OCO group under the pointer; its legs light up. */
+  protected readonly hoveredOco = signal<string | null>(null);
 
   // ── Selection / drawer ────────────────────────────────────────────────────
   protected readonly selectedId = signal<number | null>(null);
@@ -1760,6 +1856,7 @@ export class AnalysisMonitorsPageComponent {
           symbol: this.symbol() || null,
           origin: this.origin() || null,
           evaluationMode: this.mode() || null,
+          ocoGroupId: this.ocoGroup() || null,
           page: this.page(),
           pageSize: 100,
           activityLimit: 80,
@@ -1896,6 +1993,7 @@ export class AnalysisMonitorsPageComponent {
     if (this.origin()) f.push({ key: 'origin', label: `origin: ${this.origin()}` });
     if (this.mode()) f.push({ key: 'mode', label: this.mode() === 'Deterministic' ? 'live check' : 'LLM-judged' });
     if (this.attentionOnly()) f.push({ key: 'attention', label: 'needs attention' });
+    if (this.ocoGroup()) f.push({ key: 'oco', label: `OCO ${ocoShortCode(this.ocoGroup())}` });
     if (this.sortKey() !== 'default') f.push({ key: 'sort', label: `sorted: ${this.sortKey()}` });
     return f;
   });
@@ -1953,6 +2051,7 @@ export class AnalysisMonitorsPageComponent {
       this.symbol();
       this.origin();
       this.mode();
+      this.ocoGroup();
       this.page();
       this.board.refresh();
     });
@@ -1964,6 +2063,13 @@ export class AnalysisMonitorsPageComponent {
     });
     // The assistant sets `search` directly; keep the box in step.
     effect(() => this.searchDraft.set(this.search()));
+
+    // Deep-link: /analysis-monitors?oco=oco-… (a card's OCO chip on Recommendations links here).
+    const oco = this.route.snapshot.queryParamMap.get('oco')?.trim();
+    if (oco) {
+      this.statusFilter.set('');
+      this.ocoGroup.set(oco);
+    }
 
     // Deep-link: /analysis-monitors?focus=123 (the notification bell links here).
     const focus = Number(this.route.snapshot.queryParamMap.get('focus'));
@@ -2109,12 +2215,39 @@ export class AnalysisMonitorsPageComponent {
       case 'sort':
         this.sortKey.set('default');
         break;
+      case 'oco':
+        this.ocoGroup.set('');
+        if (this.route.snapshot.queryParamMap.has('oco')) {
+          this.router.navigate([], { relativeTo: this.route, queryParams: { oco: null }, queryParamsHandling: 'merge' });
+        }
+        break;
     }
     this.resetPage();
   }
 
   protected clearAllFilters(): void {
-    for (const k of ['symbol', 'search', 'origin', 'mode', 'attention', 'sort']) this.clearFilter(k);
+    for (const k of ['symbol', 'search', 'origin', 'mode', 'attention', 'sort', 'oco']) this.clearFilter(k);
+  }
+
+  /** Show one OCO group: every leg in any status, so a cancelled partner is not hidden. */
+  protected selectOco(groupId: string): void {
+    this.hoveredOco.set(null);
+    this.statusFilter.set('');
+    this.ocoGroup.set(groupId);
+    this.resetPage();
+  }
+
+  protected ocoHueOf(m: AnalysisMonitorDto): number | null {
+    return m.ocoGroupId ? ocoHue(m.ocoGroupId) : null;
+  }
+
+  /** "#812 Sell · Cancelled → card #45" for each partner watch. */
+  protected ocoPartnersOf(m: AnalysisMonitorDto): OcoChipPartner[] {
+    return (m.ocoPartners ?? []).map((p) => ({
+      id: p.id,
+      label: [p.plannedDirection, p.status].filter(Boolean).join(' · ') + (p.recommendationId ? ` → card #${p.recommendationId}` : ''),
+      ended: ocoLegEnded(p.status),
+    }));
   }
 
   protected resetPage(): void {

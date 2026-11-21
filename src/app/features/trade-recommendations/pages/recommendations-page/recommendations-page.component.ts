@@ -20,6 +20,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { RecommendationCardComponent } from '../../components/recommendation-card/recommendation-card.component';
+import { OcoBannerComponent } from '@shared/components/oco-chip/oco-banner.component';
 import {
   REC_SOURCE_LABELS,
   REC_SOURCES,
@@ -77,6 +78,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
     EmptyStateComponent,
     CardSkeletonComponent,
     RecommendationCardComponent,
+    OcoBannerComponent,
   ],
   styleUrls: ['../../rec-shared.scss', './recommendations-page.component.scss'],
   template: `
@@ -270,6 +272,17 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
         </div>
       </section>
 
+      @if (oco(); as g) {
+        <app-oco-banner
+          [groupId]="g"
+          text="Every card in this one-cancels-other group, in any status — when one fires, the others stand down."
+          otherPage="/analysis-monitors"
+          otherLabel="Their watches on Monitors →"
+          clearLabel="Show all cards ✕"
+          (cleared)="set(oco, null)"
+        />
+      }
+
       <!-- Cards -->
       @if (loading()) {
         <div class="grid">
@@ -302,7 +315,13 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
         }
         <div class="grid" [class.grid--busy]="refreshing()">
           @for (c of cards(); track c.id) {
-            <app-recommendation-card [card]="c" />
+            <app-recommendation-card
+              [card]="c"
+              [ocoSelectable]="true"
+              [ocoHighlight]="!!c.ocoGroupId && hoveredOco() === c.ocoGroupId"
+              (ocoHover)="hoveredOco.set($event)"
+              (ocoSelect)="selectOco($event)"
+            />
           }
         </div>
 
@@ -391,6 +410,10 @@ export class RecommendationsPageComponent {
   readonly symbols = signal<string[]>([]);
   readonly range = signal<RangeKey>('all');
   readonly hasSignal = signal<'any' | 'yes' | 'no'>('any');
+  /** One OCO group's legs only (set by clicking a card's OCO chip, or `?oco=` from Monitors). */
+  readonly oco = signal<string | null>(null);
+  /** The OCO group under the pointer; its legs on this page light up. */
+  readonly hoveredOco = signal<string | null>(null);
   readonly sort = signal<SortKey>('newest');
   readonly page = signal(1);
   readonly pageSize = signal(24);
@@ -415,6 +438,7 @@ export class RecommendationsPageComponent {
       symbols: this.symbols(),
       fromUtc: hours == null ? null : new Date(Date.now() - hours * 3600_000).toISOString(),
       hasSignal: this.hasSignal() === 'any' ? null : this.hasSignal() === 'yes',
+      ocoGroupId: this.oco(),
     };
   });
 
@@ -428,6 +452,7 @@ export class RecommendationsPageComponent {
       this.symbols(),
       this.range(),
       this.hasSignal(),
+      this.oco(),
       this.sort(),
       this.page(),
       this.pageSize(),
@@ -442,7 +467,8 @@ export class RecommendationsPageComponent {
       this.directions().length > 0 ||
       this.symbols().length > 0 ||
       this.range() !== 'all' ||
-      this.hasSignal() !== 'any',
+      this.hasSignal() !== 'any' ||
+      !!this.oco(),
   );
 
   /** Known sources plus any the engine reports that this build has no label for. */
@@ -628,6 +654,14 @@ export class RecommendationsPageComponent {
     sig.set(cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]);
   }
 
+  /** Show one OCO group: every leg in any status and time, so a cancelled partner is not hidden. */
+  selectOco(groupId: string): void {
+    this.hoveredOco.set(null);
+    this.clearFilters();
+    this.oco.set(groupId);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   setPageSize(n: number): void {
     this.page.set(1);
     this.pageSize.set(PAGE_SIZES.includes(n) ? n : 24);
@@ -649,6 +683,7 @@ export class RecommendationsPageComponent {
     this.symbols.set([]);
     this.range.set('all');
     this.hasSignal.set('any');
+    this.oco.set(null);
     this.page.set(1);
   }
 
@@ -671,6 +706,7 @@ export class RecommendationsPageComponent {
     this.symbols.set(list('sym'));
     const r = q.get('range') as RangeKey | null;
     if (r && r in RANGE_HOURS) this.range.set(r);
+    this.oco.set(q.get('oco')?.trim() || null);
     const sig = q.get('signal');
     if (sig === 'yes' || sig === 'no') this.hasSignal.set(sig);
     const so = q.get('sort') as SortKey | null;
@@ -694,6 +730,7 @@ export class RecommendationsPageComponent {
         sym: join(this.symbols()),
         range: this.range() === 'all' ? null : this.range(),
         signal: this.hasSignal() === 'any' ? null : this.hasSignal(),
+        oco: this.oco(),
         sort: this.sort() === 'newest' ? null : this.sort(),
         size: this.pageSize() === 24 ? null : this.pageSize(),
         page: this.page() === 1 ? null : this.page(),

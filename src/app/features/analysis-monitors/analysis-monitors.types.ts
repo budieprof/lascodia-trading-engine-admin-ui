@@ -131,6 +131,8 @@ export interface AnalysisMonitorBoardFilter {
   evaluationMode?: string | null;
   search?: string | null;
   anchorLlmInvocationId?: number | null;
+  /** Only the watches in this one-cancels-other group. */
+  ocoGroupId?: string | null;
   activityLimit?: number;
   page?: number;
   pageSize?: number;

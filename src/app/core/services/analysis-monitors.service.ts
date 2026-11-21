@@ -44,6 +44,7 @@ export class AnalysisMonitorsService {
     if (filter?.search) p.set('search', filter.search.trim());
     if (filter?.anchorLlmInvocationId != null)
       p.set('anchorLlmInvocationId', String(filter.anchorLlmInvocationId));
+    if (filter?.ocoGroupId) p.set('ocoGroupId', filter.ocoGroupId.trim());
     p.set('activityLimit', String(filter?.activityLimit ?? 40));
     p.set('page', String(filter?.page ?? 1));
     p.set('pageSize', String(filter?.pageSize ?? 50));

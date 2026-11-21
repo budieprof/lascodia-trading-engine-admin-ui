@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, input, signal } from '@an
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+
 import { RecMonitorDto, recFormatPrice, recPrettyJson } from '../../trade-recommendations.types';
 
 /**
@@ -13,7 +15,7 @@ import { RecMonitorDto, recFormatPrice, recPrettyJson } from '../../trade-recomm
   selector: 'app-rec-monitor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, RouterLink],
+  imports: [DatePipe, DecimalPipe, RouterLink, OcoChipComponent],
   styleUrls: ['../../rec-shared.scss'],
   template: `
     @let m = monitor();
@@ -33,9 +35,14 @@ import { RecMonitorDto, recFormatPrice, recPrettyJson } from '../../trade-recomm
           }
           <span class="pill">{{ m.evaluationMode }}</span>
           @if (m.ocoGroupId) {
-            <span class="pill pill--warn mono" title="One-cancels-other group"
-              >OCO {{ m.ocoGroupId }}</span
+            <a
+              class="oco-link"
+              [routerLink]="['/analysis-monitors']"
+              [queryParams]="{ oco: m.ocoGroupId }"
+              title="Show every watch in this OCO group"
             >
+              <app-oco-chip [groupId]="m.ocoGroupId" [selectable]="false" />
+            </a>
           }
           @if (m.dryRunActions) {
             <span class="pill pill--warn">Dry run</span>
