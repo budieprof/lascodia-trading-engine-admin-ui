@@ -4,8 +4,8 @@ import { RouterLink } from '@angular/router';
 import { OcoChipComponent } from './oco-chip.component';
 
 /**
- * "This page is showing one OCO group" — the group's chip, what that means, a link to the same
- * group on the other page (cards ↔ watches), and the way back.
+ * "This page is showing one OCO group" — the group's chip, what that means, links to the same
+ * group on the other pages (cards ↔ watches), and the way back.
  */
 @Component({
   selector: 'app-oco-banner',
@@ -19,6 +19,11 @@ import { OcoChipComponent } from './oco-chip.component';
       <a class="link" [routerLink]="otherPage()" [queryParams]="{ oco: groupId() }">{{
         otherLabel()
       }}</a>
+      @if (secondPage(); as page) {
+        <a class="link" [routerLink]="page" [queryParams]="{ oco: groupId() }">{{
+          secondLabel()
+        }}</a>
+      }
       <button type="button" class="clear" (click)="cleared.emit()">{{ clearLabel() }}</button>
     </section>
   `,
@@ -70,6 +75,9 @@ export class OcoBannerComponent {
   /** Route of the same group on the other page. */
   readonly otherPage = input.required<string>();
   readonly otherLabel = input.required<string>();
+  /** Optional second destination (a page with both cards and watches links to each). */
+  readonly secondPage = input<string | null>(null);
+  readonly secondLabel = input('');
   readonly clearLabel = input('Show all ✕');
 
   readonly cleared = output<void>();

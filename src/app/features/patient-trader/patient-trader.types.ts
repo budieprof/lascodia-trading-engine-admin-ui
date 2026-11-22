@@ -1,3 +1,5 @@
+import { OcoChipPartner } from '@shared/utils/oco';
+
 /**
  * Patient Trader — contract types for the cockpit.
  *
@@ -216,6 +218,40 @@ export interface PatientTraderPlan {
   ocoGroupId: string | null;
   /** When the plan's watch gives up. */
   expiresAtUtc: string;
+  /** The other plans of this plan's OCO group (whole table, not just this page). */
+  ocoPartners?: PatientTraderOcoPartner[];
+}
+
+/** Another plan in the same one-cancels-other group. */
+export interface PatientTraderOcoPartner {
+  id: number;
+  direction: string;
+  status: string;
+  recommendationId: number | null;
+  entryMonitorId: number | null;
+}
+
+/** Plan statuses after which a leg can no longer file. */
+const ENDED_PLAN_STATUSES = new Set([
+  'Declined',
+  'Rejected',
+  'Expired',
+  'Invalidated',
+  'Withdrawn',
+]);
+
+/**
+ * A plan's partners as the OCO chip lists them: by card number when the partner is a card (that
+ * is the number the Recommendations and Monitors pages show), by plan number otherwise.
+ */
+export function planOcoChipPartners(plan: PatientTraderPlan): OcoChipPartner[] {
+  return (plan.ocoPartners ?? []).map((p) => ({
+    id: p.recommendationId ?? p.id,
+    label: [p.direction !== 'None' ? p.direction : null, p.status, `plan ${p.id}`]
+      .filter(Boolean)
+      .join(' · '),
+    ended: ENDED_PLAN_STATUSES.has(p.status),
+  }));
 }
 
 /** Resolved outcome of a plan, from the position-free forward walk. */

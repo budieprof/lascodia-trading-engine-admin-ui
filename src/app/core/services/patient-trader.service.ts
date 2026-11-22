@@ -72,9 +72,11 @@ export class PatientTraderService {
   }
 
   /** Standing views, recent plans, and how the agent's work has been judged. */
-  getBoard(limit = 25): Observable<PatientTraderBoard> {
+  /** `ocoGroupId` narrows the plans to one one-cancels-other group (every leg, any age). */
+  getBoard(limit = 25, ocoGroupId?: string | null): Observable<PatientTraderBoard> {
+    const oco = ocoGroupId ? `&ocoGroupId=${encodeURIComponent(ocoGroupId)}` : '';
     return this.api.getEnvelope<PatientTraderBoard>(
-      `/market-data/patient-trader/board?limit=${limit}`,
+      `/market-data/patient-trader/board?limit=${limit}${oco}`,
     );
   }
 }

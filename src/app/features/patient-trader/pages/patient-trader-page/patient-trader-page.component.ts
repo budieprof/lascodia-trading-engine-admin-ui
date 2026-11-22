@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { PatientTraderService } from '@core/services/patient-trader.service';
 import { AuthService } from '@core/auth/auth.service';
@@ -22,7 +22,11 @@ import {
   PatientTraderPlan,
   parseOutcome,
   parseScenarios,
+  planOcoChipPartners,
 } from '@features/patient-trader/patient-trader.types';
+import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { OcoBannerComponent } from '@shared/components/oco-chip/oco-banner.component';
+import { ocoHue } from '@shared/utils/oco';
 
 /**
  * Patient Trader cockpit — what the agent currently thinks, what it has planned, and whether it
@@ -56,7 +60,15 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
 @Component({
   selector: 'app-patient-trader-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, PercentPipe, FormsModule, RouterLink],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    PercentPipe,
+    FormsModule,
+    RouterLink,
+    OcoChipComponent,
+    OcoBannerComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -172,468 +184,480 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
             <!-- PUT patient-trader/config needs platform.engine.manage; without it the form is
                  read-only (a disabled fieldset disables every control inside). -->
             <fieldset class="ro-fieldset" [disabled]="!canManage()">
-            <section class="card">
-              <h2>Configuration</h2>
-              @if (!canManage()) {
-                <p class="muted small">
-                  Read-only — changing the Patient Trader needs the platform.engine.manage
-                  permission.
-                </p>
-              }
+              <section class="card">
+                <h2>Configuration</h2>
+                @if (!canManage()) {
+                  <p class="muted small">
+                    Read-only — changing the Patient Trader needs the platform.engine.manage
+                    permission.
+                  </p>
+                }
 
-              <div class="field check">
-                <label>
-                  <input type="checkbox" [(ngModel)]="d.enabled" name="enabled" />
-                  <span>Enabled</span>
-                </label>
-              </div>
-
-              <div class="field">
-                <label for="pt-mode">Mode</label>
-                <select id="pt-mode" [(ngModel)]="d.mode" name="mode">
-                  <option value="ForecastOnly">ForecastOnly — views only, writes no plans</option>
-                  <option value="PlanOnly">PlanOnly — plans and walks them, files nothing</option>
-                  <option value="Live">Live — files signals into the pipeline</option>
-                </select>
-                <p class="muted small">
-                  Each mode is the gate on the next. Start in ForecastOnly until view accuracy says
-                  the agent reads the market; move to PlanOnly until the fill rate says its entries
-                  are reachable. Only then does Live mean anything.
-                </p>
-              </div>
-
-              <div class="field">
-                <label for="pt-engine">Analysis engine</label>
-                <select id="pt-engine" [(ngModel)]="d.analysisEngine" name="analysisEngine">
-                  <!-- Short labels: the long one was cut off inside the closed select; the
-                       paragraph below explains the engines. -->
-                  <option value="Assistant">Assistant — a card per idea, each watched</option>
-                  <option value="Classic">Classic — JSON view + a single plan</option>
-                </select>
-                <p class="muted small">
-                  Assistant reads the market the way the console assistant does — any tool, as many
-                  rounds as it needs — and writes a recommendation card for every viable idea, each
-                  with the condition that should trigger it. Cards that pass the plan checker are
-                  armed as watches that file exactly that card; alternatives can be grouped
-                  one-cancels-other.
-                </p>
-              </div>
-
-              @if (d.analysisEngine === 'Assistant') {
-                <div class="row-2">
-                  <div class="field">
-                    <label for="pt-maxcards">Max cards per market</label>
-                    <input
-                      id="pt-maxcards"
-                      type="number"
-                      min="1"
-                      max="6"
-                      [(ngModel)]="d.maxCardsPerAnalysis"
-                      name="maxCardsPerAnalysis"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-watchh">Card watch life (h)</label>
-                    <input
-                      id="pt-watchh"
-                      type="number"
-                      min="1"
-                      max="72"
-                      [(ngModel)]="d.cardWatchExpiryHours"
-                      name="cardWatchExpiryHours"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-resumes">Max resumes per analysis</label>
-                    <input
-                      id="pt-resumes"
-                      type="number"
-                      min="0"
-                      max="30"
-                      [(ngModel)]="d.analysisMaxResumes"
-                      name="analysisMaxResumes"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-analyst">Run as admin id (0 = oldest)</label>
-                    <input
-                      id="pt-analyst"
-                      type="number"
-                      min="0"
-                      [(ngModel)]="d.analystAdminUserId"
-                      name="analystAdminUserId"
-                    />
-                  </div>
+                <div class="field check">
+                  <label>
+                    <input type="checkbox" [(ngModel)]="d.enabled" name="enabled" />
+                    <span>Enabled</span>
+                  </label>
                 </div>
 
                 <div class="field">
-                  <div class="instr-head">
-                    <label for="pt-instruction">Analysis instruction</label>
-                    <span class="instr-tag" [class.custom]="isCustomInstruction(d)">
-                      {{ isCustomInstruction(d) ? 'Custom' : 'Built-in' }}
-                    </span>
+                  <label for="pt-mode">Mode</label>
+                  <select id="pt-mode" [(ngModel)]="d.mode" name="mode">
+                    <option value="ForecastOnly">ForecastOnly — views only, writes no plans</option>
+                    <option value="PlanOnly">PlanOnly — plans and walks them, files nothing</option>
+                    <option value="Live">Live — files signals into the pipeline</option>
+                  </select>
+                  <p class="muted small">
+                    Each mode is the gate on the next. Start in ForecastOnly until view accuracy
+                    says the agent reads the market; move to PlanOnly until the fill rate says its
+                    entries are reachable. Only then does Live mean anything.
+                  </p>
+                </div>
+
+                <div class="field">
+                  <label for="pt-engine">Analysis engine</label>
+                  <select id="pt-engine" [(ngModel)]="d.analysisEngine" name="analysisEngine">
+                    <!-- Short labels: the long one was cut off inside the closed select; the
+                       paragraph below explains the engines. -->
+                    <option value="Assistant">Assistant — a card per idea, each watched</option>
+                    <option value="Classic">Classic — JSON view + a single plan</option>
+                  </select>
+                  <p class="muted small">
+                    Assistant reads the market the way the console assistant does — any tool, as
+                    many rounds as it needs — and writes a recommendation card for every viable
+                    idea, each with the condition that should trigger it. Cards that pass the plan
+                    checker are armed as watches that file exactly that card; alternatives can be
+                    grouped one-cancels-other.
+                  </p>
+                </div>
+
+                @if (d.analysisEngine === 'Assistant') {
+                  <div class="row-2">
+                    <div class="field">
+                      <label for="pt-maxcards">Max cards per market</label>
+                      <input
+                        id="pt-maxcards"
+                        type="number"
+                        min="1"
+                        max="6"
+                        [(ngModel)]="d.maxCardsPerAnalysis"
+                        name="maxCardsPerAnalysis"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-watchh">Card watch life (h)</label>
+                      <input
+                        id="pt-watchh"
+                        type="number"
+                        min="1"
+                        max="72"
+                        [(ngModel)]="d.cardWatchExpiryHours"
+                        name="cardWatchExpiryHours"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-resumes">Max resumes per analysis</label>
+                      <input
+                        id="pt-resumes"
+                        type="number"
+                        min="0"
+                        max="30"
+                        [(ngModel)]="d.analysisMaxResumes"
+                        name="analysisMaxResumes"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-analyst">Run as admin id (0 = oldest)</label>
+                      <input
+                        id="pt-analyst"
+                        type="number"
+                        min="0"
+                        [(ngModel)]="d.analystAdminUserId"
+                        name="analystAdminUserId"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <div class="instr-head">
+                      <label for="pt-instruction">Analysis instruction</label>
+                      <span class="instr-tag" [class.custom]="isCustomInstruction(d)">
+                        {{ isCustomInstruction(d) ? 'Custom' : 'Built-in' }}
+                      </span>
+                      <span class="spacer"></span>
+                      @if (isCustomInstruction(d)) {
+                        <button type="button" class="linkish" (click)="resetInstruction()">
+                          Reset to default
+                        </button>
+                      }
+                    </div>
+                    <textarea
+                      id="pt-instruction"
+                      rows="6"
+                      [maxlength]="instructionMaxLength"
+                      [(ngModel)]="d.analysisInstruction"
+                      name="analysisInstruction"
+                      [placeholder]="d.defaultAnalysisInstruction ?? ''"
+                    ></textarea>
+                    <p class="muted small">
+                      What the assistant is asked to do for each market. Use
+                      <code>{{ '{' }}symbol{{ '}' }}</code> and
+                      <code>{{ '{' }}timeframe{{ '}' }}</code>
+                      for the market being read. The engine always adds the mode, the cards already
+                      being watched and the gate limits after it. Applies from the next analysis.
+                      {{ d.analysisInstruction.length }} / {{ instructionMaxLength }}
+                    </p>
+                  </div>
+                }
+
+                <details class="cfg-group" open>
+                  <summary class="sub-label">Markets</summary>
+                  <div class="tf-row">
+                    <span class="muted small">{{ followedCount() }} selected</span>
+                    <select
+                      class="tf-select"
+                      [(ngModel)]="newMarketTimeframe"
+                      name="newTf"
+                      title="Timeframe applied to newly ticked markets"
+                    >
+                      @for (tf of timeframes; track tf) {
+                        <option [value]="tf">{{ tf }}</option>
+                      }
+                    </select>
                     <span class="spacer"></span>
-                    @if (isCustomInstruction(d)) {
-                      <button type="button" class="linkish" (click)="resetInstruction()">
-                        Reset to default
+                    @if (followedCount() > 0) {
+                      <button type="button" class="linkish" (click)="clearMarkets()">
+                        Clear all
                       </button>
                     }
                   </div>
-                  <textarea
-                    id="pt-instruction"
-                    rows="6"
-                    [maxlength]="instructionMaxLength"
-                    [(ngModel)]="d.analysisInstruction"
-                    name="analysisInstruction"
-                    [placeholder]="d.defaultAnalysisInstruction ?? ''"
-                  ></textarea>
-                  <p class="muted small">
-                    What the assistant is asked to do for each market. Use
-                    <code>{{ '{' }}symbol{{ '}' }}</code> and <code>{{ '{' }}timeframe{{ '}' }}</code>
-                    for the market being read. The engine always adds the mode, the cards already
-                    being watched and the gate limits after it. Applies from the next analysis.
-                    {{ d.analysisInstruction.length }} / {{ instructionMaxLength }}
-                  </p>
-                </div>
-              }
 
-              <details class="cfg-group" open>
-                <summary class="sub-label">Markets</summary>
-                <div class="tf-row">
-                  <span class="muted small">{{ followedCount() }} selected</span>
-                  <select
-                    class="tf-select"
-                    [(ngModel)]="newMarketTimeframe"
-                    name="newTf"
-                    title="Timeframe applied to newly ticked markets"
-                  >
-                    @for (tf of timeframes; track tf) {
-                      <option [value]="tf">{{ tf }}</option>
-                    }
-                  </select>
-                  <span class="spacer"></span>
-                  @if (followedCount() > 0) {
-                    <button type="button" class="linkish" (click)="clearMarkets()">
-                      Clear all
-                    </button>
+                  @if (pairsLoading()) {
+                    <p class="muted small">Loading currency pairs…</p>
+                  } @else if (availableSymbols().length === 0) {
+                    <p class="muted small">No active currency pairs found in the catalogue.</p>
+                  } @else {
+                    <ul class="pair-check-list">
+                      @for (sym of availableSymbols(); track sym) {
+                        <li class="pair-row">
+                          <label class="inline-check">
+                            <input
+                              type="checkbox"
+                              [checked]="isFollowed(sym)"
+                              (change)="toggleMarket(sym)"
+                            />
+                            <span class="mono">{{ sym }}</span>
+                          </label>
+                          @if (marketFor(sym); as m) {
+                            <select
+                              class="tf-chip"
+                              [ngModel]="m.timeframe"
+                              (ngModelChange)="setTimeframe(sym, $event)"
+                              [name]="'tf-' + sym"
+                            >
+                              @for (tf of timeframes; track tf) {
+                                <option [value]="tf">{{ tf }}</option>
+                              }
+                            </select>
+                          }
+                        </li>
+                      }
+                    </ul>
+                    <p class="muted small">
+                      Picked from the active catalogue, so a market the engine does not know cannot
+                      be followed by a typo. Start with two or three.
+                    </p>
                   }
-                </div>
-
-                @if (pairsLoading()) {
-                  <p class="muted small">Loading currency pairs…</p>
-                } @else if (availableSymbols().length === 0) {
-                  <p class="muted small">No active currency pairs found in the catalogue.</p>
-                } @else {
-                  <ul class="pair-check-list">
-                    @for (sym of availableSymbols(); track sym) {
-                      <li class="pair-row">
-                        <label class="inline-check">
-                          <input
-                            type="checkbox"
-                            [checked]="isFollowed(sym)"
-                            (change)="toggleMarket(sym)"
-                          />
-                          <span class="mono">{{ sym }}</span>
-                        </label>
-                        @if (marketFor(sym); as m) {
-                          <select
-                            class="tf-chip"
-                            [ngModel]="m.timeframe"
-                            (ngModelChange)="setTimeframe(sym, $event)"
-                            [name]="'tf-' + sym"
-                          >
-                            @for (tf of timeframes; track tf) {
-                              <option [value]="tf">{{ tf }}</option>
-                            }
-                          </select>
-                        }
-                      </li>
-                    }
-                  </ul>
+                </details>
+                <details class="cfg-group">
+                  <summary class="sub-label">Plan standards</summary>
                   <p class="muted small">
-                    Picked from the active catalogue, so a market the engine does not know cannot be
-                    followed by a typo. Start with two or three.
+                    These are <b>rejection criteria</b>, not targets. A plan breaching any of them
+                    is refused outright and never adjusted — the agent owns its own levels, so this
+                    is what prevents an attractive payoff being manufactured from a stop too tight
+                    to survive.
                   </p>
-                }
-              </details>
-              <details class="cfg-group">
-                <summary class="sub-label">Plan standards</summary>
-                <p class="muted small">
-                  These are <b>rejection criteria</b>, not targets. A plan breaching any of them is
-                  refused outright and never adjusted — the agent owns its own levels, so this is
-                  what prevents an attractive payoff being manufactured from a stop too tight to
-                  survive.
-                </p>
-                <div class="row-2">
-                  <div class="field">
-                    <label for="pt-minstop">Min stop ×ATR</label>
-                    <input
-                      id="pt-minstop"
-                      type="number"
-                      step="0.1"
-                      [(ngModel)]="d.minStopAtrMultiple"
-                      name="minStop"
-                    />
-                    <p class="muted small">The single most important number here.</p>
+                  <div class="row-2">
+                    <div class="field">
+                      <label for="pt-minstop">Min stop ×ATR</label>
+                      <input
+                        id="pt-minstop"
+                        type="number"
+                        step="0.1"
+                        [(ngModel)]="d.minStopAtrMultiple"
+                        name="minStop"
+                      />
+                      <p class="muted small">The single most important number here.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-maxstop">Max stop ×ATR</label>
+                      <input
+                        id="pt-maxstop"
+                        type="number"
+                        step="0.1"
+                        [(ngModel)]="d.maxStopAtrMultiple"
+                        name="maxStop"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-minrr">Min reward:risk</label>
+                      <input
+                        id="pt-minrr"
+                        type="number"
+                        step="0.1"
+                        [(ngModel)]="d.minRewardRisk"
+                        name="minRr"
+                      />
+                      <p class="muted small">Never met by tightening the stop.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-maxtgt">Max target ×ATR</label>
+                      <input
+                        id="pt-maxtgt"
+                        type="number"
+                        step="0.5"
+                        [(ngModel)]="d.maxTargetAtrMultiple"
+                        name="maxTgt"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-minconf">Min confidence</label>
+                      <input
+                        id="pt-minconf"
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        [(ngModel)]="d.minConfidence"
+                        name="minConf"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-noise">Stop beyond noise (×)</label>
+                      <input
+                        id="pt-noise"
+                        type="number"
+                        step="0.1"
+                        [(ngModel)]="d.stopNoiseMultiple"
+                        name="noise"
+                      />
+                      <p class="muted small">1.0 = just outside what this market routinely does.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-spread">Spread cost (×)</label>
+                      <input
+                        id="pt-spread"
+                        type="number"
+                        step="0.5"
+                        [(ngModel)]="d.spreadCostMultiple"
+                        name="spread"
+                      />
+                      <p class="muted small">
+                        Charged before the payoff is judged. 2 = in and out.
+                      </p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-lookback">Evidence lookback (bars)</label>
+                      <input
+                        id="pt-lookback"
+                        type="number"
+                        step="100"
+                        [(ngModel)]="d.evidenceLookbackBars"
+                        name="lookback"
+                      />
+                      <p class="muted small">Long on purpose — a short window caps reach.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-corr">Max correlated plans</label>
+                      <input
+                        id="pt-corr"
+                        type="number"
+                        [(ngModel)]="d.maxCorrelatedPlans"
+                        name="corr"
+                      />
+                      <p class="muted small">One dollar bet placed three times is still one bet.</p>
+                    </div>
                   </div>
-                  <div class="field">
-                    <label for="pt-maxstop">Max stop ×ATR</label>
-                    <input
-                      id="pt-maxstop"
-                      type="number"
-                      step="0.1"
-                      [(ngModel)]="d.maxStopAtrMultiple"
-                      name="maxStop"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-minrr">Min reward:risk</label>
-                    <input
-                      id="pt-minrr"
-                      type="number"
-                      step="0.1"
-                      [(ngModel)]="d.minRewardRisk"
-                      name="minRr"
-                    />
-                    <p class="muted small">Never met by tightening the stop.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-maxtgt">Max target ×ATR</label>
-                    <input
-                      id="pt-maxtgt"
-                      type="number"
-                      step="0.5"
-                      [(ngModel)]="d.maxTargetAtrMultiple"
-                      name="maxTgt"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-minconf">Min confidence</label>
-                    <input
-                      id="pt-minconf"
-                      type="number"
-                      step="0.05"
-                      min="0"
-                      max="1"
-                      [(ngModel)]="d.minConfidence"
-                      name="minConf"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-noise">Stop beyond noise (×)</label>
-                    <input
-                      id="pt-noise"
-                      type="number"
-                      step="0.1"
-                      [(ngModel)]="d.stopNoiseMultiple"
-                      name="noise"
-                    />
-                    <p class="muted small">1.0 = just outside what this market routinely does.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-spread">Spread cost (×)</label>
-                    <input
-                      id="pt-spread"
-                      type="number"
-                      step="0.5"
-                      [(ngModel)]="d.spreadCostMultiple"
-                      name="spread"
-                    />
-                    <p class="muted small">Charged before the payoff is judged. 2 = in and out.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-lookback">Evidence lookback (bars)</label>
-                    <input
-                      id="pt-lookback"
-                      type="number"
-                      step="100"
-                      [(ngModel)]="d.evidenceLookbackBars"
-                      name="lookback"
-                    />
-                    <p class="muted small">Long on purpose — a short window caps reach.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-corr">Max correlated plans</label>
-                    <input
-                      id="pt-corr"
-                      type="number"
-                      [(ngModel)]="d.maxCorrelatedPlans"
-                      name="corr"
-                    />
-                    <p class="muted small">One dollar bet placed three times is still one bet.</p>
-                  </div>
-                </div>
 
-                <div class="field check">
-                  <label>
-                    <input type="checkbox" [(ngModel)]="d.requireStopStructure" name="structure" />
-                    <span>Stop must sit beyond a real swing, not float in mid-range</span>
-                  </label>
-                </div>
-                <div class="field check">
-                  <label>
-                    <input type="checkbox" [(ngModel)]="d.respectKillSwitch" name="kill" />
-                    <span>Stand down entirely while the fleet kill switch is thrown</span>
-                  </label>
-                </div>
-              </details>
-              <details class="cfg-group">
-                <summary class="sub-label">Conviction</summary>
-                <div class="row-2">
+                  <div class="field check">
+                    <label>
+                      <input
+                        type="checkbox"
+                        [(ngModel)]="d.requireStopStructure"
+                        name="structure"
+                      />
+                      <span>Stop must sit beyond a real swing, not float in mid-range</span>
+                    </label>
+                  </div>
+                  <div class="field check">
+                    <label>
+                      <input type="checkbox" [(ngModel)]="d.respectKillSwitch" name="kill" />
+                      <span>Stand down entirely while the fleet kill switch is thrown</span>
+                    </label>
+                  </div>
+                </details>
+                <details class="cfg-group">
+                  <summary class="sub-label">Conviction</summary>
+                  <div class="row-2">
+                    <div class="field">
+                      <label for="pt-hcrr">High conviction extra R:R</label>
+                      <input
+                        id="pt-hcrr"
+                        type="number"
+                        step="0.1"
+                        [(ngModel)]="d.highConvictionRewardRiskBonus"
+                        name="hcrr"
+                      />
+                      <p class="muted small">
+                        A tier that costs nothing to claim ends up on every plan.
+                      </p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-hcconf">High conviction min confidence</label>
+                      <input
+                        id="pt-hcconf"
+                        type="number"
+                        step="0.05"
+                        min="0"
+                        max="1"
+                        [(ngModel)]="d.highConvictionMinConfidence"
+                        name="hcconf"
+                      />
+                    </div>
+                  </div>
+                </details>
+                <details class="cfg-group">
+                  <summary class="sub-label">Cadence and limits</summary>
+                  <div class="row-2">
+                    <div class="field">
+                      <label for="pt-vi">View interval (min)</label>
+                      <input
+                        id="pt-vi"
+                        type="number"
+                        [(ngModel)]="d.viewIntervalMinutes"
+                        name="vi"
+                      />
+                      <p class="muted small">The cost dial.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-vh">View horizon (h)</label>
+                      <input id="pt-vh" type="number" [(ngModel)]="d.viewHorizonHours" name="vh" />
+                      <p class="muted small">What accuracy is scored against.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-pe">Plan expiry (h)</label>
+                      <input id="pt-pe" type="number" [(ngModel)]="d.planExpiryHours" name="pe" />
+                    </div>
+                    <div class="field">
+                      <label for="pt-mo">Max open plans / market</label>
+                      <input
+                        id="pt-mo"
+                        type="number"
+                        [(ngModel)]="d.maxOpenPlansPerSymbol"
+                        name="mo"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-md">Max plans / day</label>
+                      <input id="pt-md" type="number" [(ngModel)]="d.maxPlansPerDay" name="md" />
+                      <p class="muted small">A ceiling, not a quota.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-cb">Catalyst blackout (min before)</label>
+                      <input
+                        id="pt-cb"
+                        type="number"
+                        [(ngModel)]="d.catalystBlackoutMinutesBefore"
+                        name="cb"
+                      />
+                      <p class="muted small">Nothing armed into a major print.</p>
+                    </div>
+                    <div class="field">
+                      <label for="pt-ca">Catalyst window (min after)</label>
+                      <input
+                        id="pt-ca"
+                        type="number"
+                        [(ngModel)]="d.catalystArmMinutesAfter"
+                        name="ca"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-sc">Daily spend cap (USD)</label>
+                      <input
+                        id="pt-sc"
+                        type="number"
+                        step="0.5"
+                        [(ngModel)]="d.dailySpendCapUsd"
+                        name="sc"
+                      />
+                    </div>
+                    <div class="field">
+                      <label for="pt-pmsc">Per-market cap (USD)</label>
+                      <input
+                        id="pt-pmsc"
+                        type="number"
+                        step="0.5"
+                        [(ngModel)]="d.perMarketDailySpendCapUsd"
+                        name="pmsc"
+                      />
+                      <p class="muted small">
+                        Stops the earliest catalyst eating the day. 0 = shared pot.
+                      </p>
+                    </div>
+                  </div>
+                </details>
+                <details class="cfg-group">
+                  <summary class="sub-label">Memory</summary>
+                  <div class="field check">
+                    <label>
+                      <input type="checkbox" [(ngModel)]="d.memoryEnabled" name="mem" />
+                      <span>Show past lessons, and which ideas have already failed</span>
+                    </label>
+                  </div>
                   <div class="field">
-                    <label for="pt-hcrr">High conviction extra R:R</label>
+                    <label for="pt-notes">Lessons in prompt</label>
                     <input
-                      id="pt-hcrr"
+                      id="pt-notes"
                       type="number"
-                      step="0.1"
-                      [(ngModel)]="d.highConvictionRewardRiskBonus"
-                      name="hcrr"
+                      [(ngModel)]="d.maxNotesInPrompt"
+                      name="notes"
                     />
+                  </div>
+                </details>
+                <details class="cfg-group">
+                  <summary class="sub-label">Prompt experiment</summary>
+                  <div class="field">
+                    <label for="pt-variant">View prompt</label>
+                    <select id="pt-variant" [(ngModel)]="d.promptVariant" name="variant">
+                      <option value="a">a — control</option>
+                      <option value="b">b — argue the other side first</option>
+                      <option value="split">split — run both and compare</option>
+                    </select>
                     <p class="muted small">
-                      A tier that costs nothing to claim ends up on every plan.
+                      The arm is recorded on every view, so accuracy can be split by it.
                     </p>
                   </div>
-                  <div class="field">
-                    <label for="pt-hcconf">High conviction min confidence</label>
-                    <input
-                      id="pt-hcconf"
-                      type="number"
-                      step="0.05"
-                      min="0"
-                      max="1"
-                      [(ngModel)]="d.highConvictionMinConfidence"
-                      name="hcconf"
-                    />
-                  </div>
-                </div>
-              </details>
-              <details class="cfg-group">
-                <summary class="sub-label">Cadence and limits</summary>
-                <div class="row-2">
-                  <div class="field">
-                    <label for="pt-vi">View interval (min)</label>
-                    <input id="pt-vi" type="number" [(ngModel)]="d.viewIntervalMinutes" name="vi" />
-                    <p class="muted small">The cost dial.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-vh">View horizon (h)</label>
-                    <input id="pt-vh" type="number" [(ngModel)]="d.viewHorizonHours" name="vh" />
-                    <p class="muted small">What accuracy is scored against.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-pe">Plan expiry (h)</label>
-                    <input id="pt-pe" type="number" [(ngModel)]="d.planExpiryHours" name="pe" />
-                  </div>
-                  <div class="field">
-                    <label for="pt-mo">Max open plans / market</label>
-                    <input
-                      id="pt-mo"
-                      type="number"
-                      [(ngModel)]="d.maxOpenPlansPerSymbol"
-                      name="mo"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-md">Max plans / day</label>
-                    <input id="pt-md" type="number" [(ngModel)]="d.maxPlansPerDay" name="md" />
-                    <p class="muted small">A ceiling, not a quota.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-cb">Catalyst blackout (min before)</label>
-                    <input
-                      id="pt-cb"
-                      type="number"
-                      [(ngModel)]="d.catalystBlackoutMinutesBefore"
-                      name="cb"
-                    />
-                    <p class="muted small">Nothing armed into a major print.</p>
-                  </div>
-                  <div class="field">
-                    <label for="pt-ca">Catalyst window (min after)</label>
-                    <input
-                      id="pt-ca"
-                      type="number"
-                      [(ngModel)]="d.catalystArmMinutesAfter"
-                      name="ca"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-sc">Daily spend cap (USD)</label>
-                    <input
-                      id="pt-sc"
-                      type="number"
-                      step="0.5"
-                      [(ngModel)]="d.dailySpendCapUsd"
-                      name="sc"
-                    />
-                  </div>
-                  <div class="field">
-                    <label for="pt-pmsc">Per-market cap (USD)</label>
-                    <input
-                      id="pt-pmsc"
-                      type="number"
-                      step="0.5"
-                      [(ngModel)]="d.perMarketDailySpendCapUsd"
-                      name="pmsc"
-                    />
-                    <p class="muted small">
-                      Stops the earliest catalyst eating the day. 0 = shared pot.
-                    </p>
-                  </div>
-                </div>
-              </details>
-              <details class="cfg-group">
-                <summary class="sub-label">Memory</summary>
-                <div class="field check">
-                  <label>
-                    <input type="checkbox" [(ngModel)]="d.memoryEnabled" name="mem" />
-                    <span>Show past lessons, and which ideas have already failed</span>
-                  </label>
-                </div>
+                </details>
                 <div class="field">
-                  <label for="pt-notes">Lessons in prompt</label>
+                  <label for="pt-reason">Reason (audit log)</label>
                   <input
-                    id="pt-notes"
-                    type="number"
-                    [(ngModel)]="d.maxNotesInPrompt"
-                    name="notes"
+                    id="pt-reason"
+                    type="text"
+                    [(ngModel)]="reason"
+                    name="reason"
+                    placeholder="why this change"
                   />
                 </div>
-              </details>
-              <details class="cfg-group">
-                <summary class="sub-label">Prompt experiment</summary>
-                <div class="field">
-                  <label for="pt-variant">View prompt</label>
-                  <select id="pt-variant" [(ngModel)]="d.promptVariant" name="variant">
-                    <option value="a">a — control</option>
-                    <option value="b">b — argue the other side first</option>
-                    <option value="split">split — run both and compare</option>
-                  </select>
-                  <p class="muted small">
-                    The arm is recorded on every view, so accuracy can be split by it.
-                  </p>
-                </div>
-              </details>
-              <div class="field">
-                <label for="pt-reason">Reason (audit log)</label>
-                <input
-                  id="pt-reason"
-                  type="text"
-                  [(ngModel)]="reason"
-                  name="reason"
-                  placeholder="why this change"
-                />
-              </div>
 
-              <button
-                type="button"
-                class="save-btn"
-                [disabled]="saving() || !canManage()"
-                (click)="save()"
-              >
-                {{ saving() ? 'Saving…' : 'Save configuration' }}
-              </button>
-            </section>
+                <button
+                  type="button"
+                  class="save-btn"
+                  [disabled]="saving() || !canManage()"
+                  (click)="save()"
+                >
+                  {{ saving() ? 'Saving…' : 'Save configuration' }}
+                </button>
+              </section>
             </fieldset>
           }
         </div>
@@ -738,8 +762,26 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                 passed on" is half of what makes a discretionary record readable, and the only way
                 to tell a genuinely patient agent from a broken one that never finds anything.
               </p>
+              @if (oco(); as group) {
+                <app-oco-banner
+                  [groupId]="group"
+                  [text]="
+                    'Showing every plan of one OCO group (' +
+                    b.plans.length +
+                    ') — the first to file stands the others down.'
+                  "
+                  otherPage="/trade-recommendations"
+                  otherLabel="Their cards on Recommendations →"
+                  secondPage="/analysis-monitors"
+                  secondLabel="Their watches on Monitors →"
+                  clearLabel="Show all plans ✕"
+                  (cleared)="selectOco(null)"
+                />
+              }
               @if (b.plans.length === 0) {
-                <p class="muted small">Nothing written yet.</p>
+                <p class="muted small">
+                  {{ oco() ? 'No plan belongs to this OCO group.' : 'Nothing written yet.' }}
+                </p>
               } @else {
                 <div class="table-wrap">
                   <table>
@@ -755,7 +797,14 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                     </thead>
                     <tbody>
                       @for (p of b.plans; track p.id) {
-                        <tr [class.refused]="isRefused(p)">
+                        <tr
+                          [class.refused]="isRefused(p)"
+                          [class.oco-row]="!!p.ocoGroupId"
+                          [class.oco-lit]="!!p.ocoGroupId && hoveredOco() === p.ocoGroupId"
+                          [style.--oco-h]="p.ocoGroupId ? ocoHue(p.ocoGroupId) : null"
+                          (mouseenter)="p.ocoGroupId && hoveredOco.set(p.ocoGroupId)"
+                          (mouseleave)="p.ocoGroupId && hoveredOco.set(null)"
+                        >
                           <td class="nowrap">{{ p.createdAtUtc | date: 'dd MMM HH:mm' }}</td>
                           <td class="nowrap mono">
                             {{ p.symbol }}
@@ -794,8 +843,9 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                               >
                             }
                             @if (p.recommendationId) {
-                              <span
+                              <a
                                 class="card-tag"
+                                [routerLink]="['/trade-recommendations', p.recommendationId]"
                                 [title]="
                                   'Card #' +
                                   p.recommendationId +
@@ -805,20 +855,30 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                                       ' files it when its condition is met'
                                     : '')
                                 "
-                                >card #{{ p.recommendationId }}</span
+                                >card #{{ p.recommendationId }}</a
+                              >
+                            }
+                            @if (p.entryMonitorId) {
+                              <a
+                                class="card-tag"
+                                [routerLink]="['/analysis-monitors']"
+                                [queryParams]="{ focus: p.entryMonitorId }"
+                                [title]="'Watch #' + p.entryMonitorId + ' — open it on Monitors'"
+                                >watch #{{ p.entryMonitorId }}</a
                               >
                             }
                             @if (p.ocoGroupId) {
-                              <span
-                                class="oco-tag"
-                                [style.--oco-hue]="ocoHue(p.ocoGroupId)"
-                                [title]="
-                                  'One-cancels-other group ' +
-                                  p.ocoGroupId +
-                                  ' — the first of these to file stands the others down'
-                                "
-                                >OCO</span
-                              >
+                              <div class="oco-line">
+                                <app-oco-chip
+                                  [groupId]="p.ocoGroupId"
+                                  [partners]="ocoPartnersOf(p)"
+                                  [highlighted]="hoveredOco() === p.ocoGroupId"
+                                  [selectable]="oco() !== p.ocoGroupId"
+                                  [showLonely]="true"
+                                  (hover)="hoveredOco.set($event)"
+                                  (selected)="selectOco($event)"
+                                />
+                              </div>
                             }
                           </td>
                           <td class="num">
@@ -1385,8 +1445,7 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
-      .card-tag,
-      .oco-tag {
+      .card-tag {
         display: inline-block;
         margin-left: 6px;
         padding: 1px 6px;
@@ -1398,12 +1457,24 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
       .card-tag {
         background: color-mix(in srgb, var(--text-muted, #64748b) 14%, transparent);
         color: var(--text-muted, #64748b);
+        text-decoration: none;
       }
-      /* One hue per group, so the alternatives of one move read as a set down the table. */
-      .oco-tag {
-        background: hsl(var(--oco-hue, 200) 70% 50% / 0.16);
-        color: hsl(var(--oco-hue, 200) 60% 38%);
-        letter-spacing: 0.04em;
+      a.card-tag:hover {
+        color: var(--accent);
+      }
+      /* One colour per OCO group: the legs share a stripe, and hovering one lights its partners. */
+      .oco-line {
+        margin-top: 4px;
+      }
+      tr.oco-row td:first-child {
+        box-shadow: inset 3px 0 0 hsl(var(--oco-h) 65% 52%);
+      }
+      tr.oco-lit {
+        opacity: 1;
+        background: hsl(var(--oco-h) 70% 50% / 0.12);
+      }
+      app-oco-banner {
+        margin-bottom: var(--space-3);
       }
       /* Its own line: the pre-mortem is a sentence, not a badge, and inlining it
          beside the thesis made both unreadable. */
@@ -1491,10 +1562,25 @@ export class PatientTraderPageComponent {
    * reconnect gap — an interval short enough to feel live is also short enough to repaint the
    * page under an operator mid-edit, which is what polling did here before.
    */
-  private readonly boardResource = createPolledResource(() => this.svc.getBoard(50), {
-    intervalMs: 600_000,
-    refreshOn: ['patientTraderChanged'],
-  });
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
+  /** The OCO group the plans table is narrowed to (`?oco=`), or null for the latest plans. */
+  readonly oco = signal<string | null>(
+    this.route.snapshot.queryParamMap.get('oco')?.trim() || null,
+  );
+  /** The group under the pointer — its legs light up together. */
+  readonly hoveredOco = signal<string | null>(null);
+
+  private readonly boardResource = createPolledResource(
+    () => this.svc.getBoard(this.oco() ? 200 : 50, this.oco()),
+    {
+      intervalMs: 600_000,
+      refreshOn: ['patientTraderChanged'],
+      // A group switch drops the previous plans at once rather than presenting them as its answer.
+      key: () => this.oco(),
+    },
+  );
   readonly board = this.boardResource.value;
 
   /**
@@ -1683,11 +1769,25 @@ export class PatientTraderPageComponent {
     }
   }
 
-  /** A stable hue per one-cancels-other group, so one move's alternatives share a colour. */
-  ocoHue(groupId: string): number {
-    let h = 0;
-    for (let i = 0; i < groupId.length; i++) h = (h * 31 + groupId.charCodeAt(i)) % 360;
-    return h;
+  /** The shared OCO colour, so a group reads the same here, on Recommendations and on Monitors. */
+  readonly ocoHue = ocoHue;
+
+  ocoPartnersOf(plan: PatientTraderPlan) {
+    return planOcoChipPartners(plan);
+  }
+
+  /** Narrows the plans to one OCO group (null shows the latest plans again), kept in the URL. */
+  selectOco(group: string | null): void {
+    if (group === this.oco()) return;
+    this.hoveredOco.set(null);
+    this.oco.set(group);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { oco: group },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    this.boardResource.refresh();
   }
 
   outcomeOf(plan: PatientTraderPlan) {
