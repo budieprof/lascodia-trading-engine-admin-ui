@@ -117,6 +117,10 @@ export interface AnalysisMonitorDetail {
   timeline: AnalysisMonitorActivity[];
   signals: AnalysisMonitorSignal[];
   lineage: AnalysisMonitorLineage[];
+  /** Every step the watch needs before it fires, met steps ticked (absent on older engines). */
+  checklist?:
+    | import('@shared/components/watch-checklist/watch-checklist.types').RecWatchChecklistDto
+    | null;
   timelineTotal: number;
   includesHeartbeats: boolean;
   asOfUtc: string;

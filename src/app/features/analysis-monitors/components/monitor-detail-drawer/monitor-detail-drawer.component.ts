@@ -24,6 +24,7 @@ import type {
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { WatchChecklistComponent } from '@shared/components/watch-checklist/watch-checklist.component';
 import {
   formatAge,
   formatCountdown,
@@ -55,7 +56,10 @@ const MARKER_KINDS: Record<string, { label: string; symbol: string }> = {
   Rearmed: { label: 'Re-armed', symbol: 'roundRect' },
 };
 
-const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' | 'dashed' | 'dotted' }> = {
+const LEVEL_STYLE: Record<
+  string,
+  { light: string; dark: string; dash: 'solid' | 'dashed' | 'dotted' }
+> = {
   trigger: { light: '#2a78d6', dark: '#3987e5', dash: 'solid' },
   entry: { light: '#2a78d6', dark: '#3987e5', dash: 'dashed' },
   invalidation: { light: '#eb6834', dark: '#d95926', dash: 'solid' },
@@ -79,7 +83,15 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
   selector: 'app-monitor-detail-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, RouterLink, ChartCardComponent, ModalA11yDirective, OcoChipComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    RouterLink,
+    ChartCardComponent,
+    ModalA11yDirective,
+    OcoChipComponent,
+    WatchChecklistComponent,
+  ],
   template: `
     <div class="scrim" (click)="closed.emit()"></div>
     <aside
@@ -98,19 +110,47 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
             <span class="d-sym mono">{{ m.subjectLabel || m.symbol }}</span>
             <span class="d-tf">{{ m.timeframe }}</span>
             @if (m.plannedDirection) {
-              <span class="pill dir" [class.buy]="m.plannedDirection === 'Buy'">{{ m.plannedDirection }}</span>
+              <span class="pill dir" [class.buy]="m.plannedDirection === 'Buy'">{{
+                m.plannedDirection
+              }}</span>
             }
             <span class="status" [attr.data-status]="m.status">{{ statusLabel(m.status) }}</span>
             <span class="spacer"></span>
-            <button type="button" class="icon-btn" title="Previous monitor (k)" (click)="step.emit(-1)">↑</button>
-            <button type="button" class="icon-btn" title="Next monitor (j)" (click)="step.emit(1)">↓</button>
-            <button type="button" class="icon-btn" title="Close (Esc)" aria-label="Close" (click)="closed.emit()">✕</button>
+            <button
+              type="button"
+              class="icon-btn"
+              title="Previous monitor (k)"
+              (click)="step.emit(-1)"
+            >
+              ↑
+            </button>
+            <button type="button" class="icon-btn" title="Next monitor (j)" (click)="step.emit(1)">
+              ↓
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              title="Close (Esc)"
+              aria-label="Close"
+              (click)="closed.emit()"
+            >
+              ✕
+            </button>
           </div>
           <p class="d-intent">{{ m.intentText }}</p>
 
           <!-- Life bar: armed → expiry, with "now" and every fire placed on it. -->
           @if (life(); as l) {
-            <div class="life" [title]="'Armed ' + (m.createdAtUtc | date: 'MMM d HH:mm' : 'UTC') + 'Z → expires ' + (m.expiresAtUtc | date: 'MMM d HH:mm' : 'UTC') + 'Z'">
+            <div
+              class="life"
+              [title]="
+                'Armed ' +
+                (m.createdAtUtc | date: 'MMM d HH:mm' : 'UTC') +
+                'Z → expires ' +
+                (m.expiresAtUtc | date: 'MMM d HH:mm' : 'UTC') +
+                'Z'
+              "
+            >
               <div class="life-track">
                 <div class="life-fill" [style.width.%]="l.pct" [class.ended]="!m.isLive"></div>
                 @for (f of fireMarks(); track $index) {
@@ -121,7 +161,10 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                 <span>armed {{ m.createdAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span>
                 <span>
                   @if (m.isLive) {
-                    <b [class.imminent]="(m.secondsToExpiry ?? 0) < 3600">{{ countdown(m.secondsToExpiry ?? 0) }}</b> left
+                    <b [class.imminent]="(m.secondsToExpiry ?? 0) < 3600">{{
+                      countdown(m.secondsToExpiry ?? 0)
+                    }}</b>
+                    left
                   } @else {
                     ended
                   }
@@ -133,26 +176,57 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
 
           <div class="d-actions">
             @if (m.status === 'Active') {
-              <button type="button" class="btn" (click)="action.emit('pause')" [disabled]="busy()">⏸ Pause</button>
-              <button type="button" class="btn" (click)="action.emit('fire')" [disabled]="busy()">⚡ Fire now</button>
+              <button type="button" class="btn" (click)="action.emit('pause')" [disabled]="busy()">
+                ⏸ Pause
+              </button>
+              <button type="button" class="btn" (click)="action.emit('fire')" [disabled]="busy()">
+                ⚡ Fire now
+              </button>
             } @else if (m.status === 'Paused') {
-              <button type="button" class="btn" (click)="action.emit('resume')" [disabled]="busy()">▶ Resume</button>
+              <button type="button" class="btn" (click)="action.emit('resume')" [disabled]="busy()">
+                ▶ Resume
+              </button>
             }
             @if (m.status === 'Active' || m.status === 'Paused') {
-              <button type="button" class="btn" (click)="action.emit('extend')" [disabled]="busy()">⏱ +6h</button>
+              <button type="button" class="btn" (click)="action.emit('extend')" [disabled]="busy()">
+                ⏱ +6h
+              </button>
             }
             @if (m.awaitingAckSinceUtc) {
-              <button type="button" class="btn warn" (click)="action.emit('ack')" [disabled]="busy()">✓ Acknowledge</button>
+              <button
+                type="button"
+                class="btn warn"
+                (click)="action.emit('ack')"
+                [disabled]="busy()"
+              >
+                ✓ Acknowledge
+              </button>
             }
-            <button type="button" class="btn" (click)="action.emit('duplicate')">⧉ Duplicate</button>
+            <button type="button" class="btn" (click)="action.emit('duplicate')">
+              ⧉ Duplicate
+            </button>
             @if (m.scriptSource) {
-              <button type="button" class="btn" (click)="action.emit('chart')">📈 Script chart</button>
+              <button type="button" class="btn" (click)="action.emit('chart')">
+                📈 Script chart
+              </button>
             }
             @if (m.anchorLlmInvocationId) {
-              <a class="btn" [routerLink]="['/conversations']" [queryParams]="{ conversation: m.anchorLlmInvocationId }">💬 Conversation</a>
+              <a
+                class="btn"
+                [routerLink]="['/conversations']"
+                [queryParams]="{ conversation: m.anchorLlmInvocationId }"
+                >💬 Conversation</a
+              >
             }
             @if (m.status === 'Active' || m.status === 'Paused') {
-              <button type="button" class="btn danger" (click)="action.emit('cancel')" [disabled]="busy()">✕ Cancel</button>
+              <button
+                type="button"
+                class="btn danger"
+                (click)="action.emit('cancel')"
+                [disabled]="busy()"
+              >
+                ✕ Cancel
+              </button>
             }
           </div>
         </header>
@@ -181,39 +255,62 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
               @if (m.awaitingAckSinceUtc) {
                 <div class="callout warn">
                   A fire has waited for acknowledgement since
-                  {{ m.awaitingAckSinceUtc | date: 'MMM d HH:mm' : 'UTC' }}Z — it keeps escalating until acknowledged.
+                  {{ m.awaitingAckSinceUtc | date: 'MMM d HH:mm' : 'UTC' }}Z — it keeps escalating
+                  until acknowledged.
                 </div>
               }
               @if ((m.consecutiveEvalErrors ?? 0) > 0) {
                 <div class="callout err">
-                  The last {{ m.consecutiveEvalErrors }} evaluation{{ m.consecutiveEvalErrors === 1 ? '' : 's' }} failed;
-                  past the tolerance the monitor moves to Error.
+                  The last {{ m.consecutiveEvalErrors }} evaluation{{
+                    m.consecutiveEvalErrors === 1 ? '' : 's'
+                  }}
+                  failed; past the tolerance the monitor moves to Error.
                 </div>
               }
               @if (m.confirmPendingSinceUtc) {
                 <div class="callout info">
-                  Touched at {{ m.confirmPendingSinceUtc | date: 'HH:mm' : 'UTC' }}Z — waiting for that bar to close
-                  before it decides.
+                  Touched at {{ m.confirmPendingSinceUtc | date: 'HH:mm' : 'UTC' }}Z — waiting for
+                  that bar to close before it decides.
                 </div>
+              }
+
+              @if (det.checklist; as cl) {
+                @if (cl.steps.length > 0) {
+                  <section class="block">
+                    <h4>Steps to fire</h4>
+                    <app-watch-checklist
+                      [checklist]="cl"
+                      [symbol]="m.symbol"
+                      [lastPrice]="m.lastObservedPrice"
+                      [lastCheckedAtUtc]="m.lastCheckedAtUtc"
+                    />
+                  </section>
+                }
               }
 
               <section class="block">
                 <h4>Waiting for</h4>
                 <p class="lead">{{ m.triggerExplanation || m.intentText }}</p>
                 @if (m.lastEvalNote) {
-                  <p class="note"><span class="note-k">Last check</span> {{ humanize(m.lastEvalNote) }}</p>
+                  <p class="note">
+                    <span class="note-k">Last check</span> {{ humanize(m.lastEvalNote) }}
+                  </p>
                 }
                 @if (m.scriptSource) {
                   <p class="note">
                     <span class="note-k">Structure · step {{ m.scriptStep ?? 0 }}</span>
                     {{ m.scriptLastReading || 'waiting for the first candle close' }}
                     @if (m.scriptReadyAtUtc) {
-                      <span class="pill ok">ready {{ m.scriptReadyAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span>
+                      <span class="pill ok"
+                        >ready {{ m.scriptReadyAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span
+                      >
                     }
                   </p>
                 }
                 @if (m.invalidationExplanation) {
-                  <p class="note"><span class="note-k">Called off if</span> {{ m.invalidationExplanation }}</p>
+                  <p class="note">
+                    <span class="note-k">Called off if</span> {{ m.invalidationExplanation }}
+                  </p>
                 }
               </section>
 
@@ -236,14 +333,21 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
               <section class="block">
                 <div class="block-head">
                   <h4>Price at each check</h4>
-                  <span class="muted small">{{ tracePoints() }} readings · markers = fires / touches / breaks · lines = levels</span>
+                  <span class="muted small"
+                    >{{ tracePoints() }} readings · markers = fires / touches / breaks · lines =
+                    levels</span
+                  >
                 </div>
                 <app-chart-card
                   flush
                   height="220px"
                   [loading]="traceLoading()"
                   [options]="traceOptions()"
-                  [emptyMessage]="tracePoints() > 1 || traceLoading() ? null : 'No price readings recorded for this monitor.'"
+                  [emptyMessage]="
+                    tracePoints() > 1 || traceLoading()
+                      ? null
+                      : 'No price readings recorded for this monitor.'
+                  "
                   alt="Mid price observed at each evaluation, with fires and levels"
                 />
               </section>
@@ -253,16 +357,24 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                 <dl class="facts">
                   <dt>Mode</dt>
                   <dd>
-                    {{ m.evaluationMode === 'Deterministic' ? 'Live check (every worker loop)' : 'LLM-judged' }}
+                    {{
+                      m.evaluationMode === 'Deterministic'
+                        ? 'Live check (every worker loop)'
+                        : 'LLM-judged'
+                    }}
                     @if (m.evaluationMode !== 'Deterministic') {
                       · every {{ age(m.minEvalIntervalSeconds ?? 0) }}
                     }
                   </dd>
                   <dt>Origin</dt>
-                  <dd>{{ m.origin || 'operator' }}{{ m.createdBy && m.createdBy !== m.origin ? ' · ' + m.createdBy : '' }}</dd>
+                  <dd>
+                    {{ m.origin || 'operator'
+                    }}{{ m.createdBy && m.createdBy !== m.origin ? ' · ' + m.createdBy : '' }}
+                  </dd>
                   <dt>Fires</dt>
                   <dd>
-                    {{ m.triggerCount }} / {{ m.maxTriggers }} · {{ m.recurring ? 'recurring' : 'one-shot' }}
+                    {{ m.triggerCount }} / {{ m.maxTriggers }} ·
+                    {{ m.recurring ? 'recurring' : 'one-shot' }}
                     @if (m.lastTriggeredAtUtc) {
                       · last {{ m.lastTriggeredAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z
                     }
@@ -276,7 +388,11 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   </dd>
                   <dt>Last check</dt>
                   <dd>
-                    {{ has(m.secondsSinceLastCheck) ? age(m.secondsSinceLastCheck!) + ' ago' : 'never' }}
+                    {{
+                      has(m.secondsSinceLastCheck)
+                        ? age(m.secondsSinceLastCheck!) + ' ago'
+                        : 'never'
+                    }}
                     @if (has(m.lastObservedPrice)) {
                       · mid <span class="mono">{{ m.lastObservedPrice | number: '1.2-5' }}</span>
                     }
@@ -289,13 +405,21 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   <dd>{{ (m.deliverTo ?? []).length ? m.deliverTo!.join(', ') : 'default' }}</dd>
                   <dt>Acknowledgement</dt>
                   <dd>
-                    {{ m.requiresAck ? 'required, escalates after ' + age(m.ackEscalateAfterSeconds ?? 0) : 'not required' }}
+                    {{
+                      m.requiresAck
+                        ? 'required, escalates after ' + age(m.ackEscalateAfterSeconds ?? 0)
+                        : 'not required'
+                    }}
                     @if (m.lastAckedAtUtc) {
-                      · last by {{ m.lastAckedBy }} {{ m.lastAckedAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z
+                      · last by {{ m.lastAckedBy }}
+                      {{ m.lastAckedAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z
                     }
                   </dd>
                   <dt>History</dt>
-                  <dd>{{ det.timelineTotal }} event{{ det.timelineTotal === 1 ? '' : 's' }} · {{ det.signals.length }} signal{{ det.signals.length === 1 ? '' : 's' }}</dd>
+                  <dd>
+                    {{ det.timelineTotal }} event{{ det.timelineTotal === 1 ? '' : 's' }} ·
+                    {{ det.signals.length }} signal{{ det.signals.length === 1 ? '' : 's' }}
+                  </dd>
                   @if (m.monitorGroupId) {
                     <dt>Fan-out group</dt>
                     <dd class="mono small">{{ m.monitorGroupId }}</dd>
@@ -309,7 +433,13 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   }
                   @if (m.scriptAuthor) {
                     <dt>Script by</dt>
-                    <dd>{{ m.scriptAuthor === 'synthesized' ? 'engine (from the trigger)' : m.scriptAuthor }}</dd>
+                    <dd>
+                      {{
+                        m.scriptAuthor === 'synthesized'
+                          ? 'engine (from the trigger)'
+                          : m.scriptAuthor
+                      }}
+                    </dd>
                   }
                 </dl>
               </section>
@@ -319,7 +449,11 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   <h4>LLM spend</h4>
                   <div class="spend">
                     <div class="spend-track">
-                      <div class="spend-fill" [style.width.%]="spendPct()" [class.hot]="spendPct() > 80"></div>
+                      <div
+                        class="spend-fill"
+                        [style.width.%]="spendPct()"
+                        [class.hot]="spendPct() > 80"
+                      ></div>
                     </div>
                     <span class="mono small"
                       >\${{ m.llmSpendUsd ?? 0 | number: '1.2-2' }}
@@ -346,9 +480,20 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   <h4>Authorised to change live state</h4>
                   <p class="mono small wrap">{{ m.actionAuthorizationJson }}</p>
                   <p class="small">
-                    {{ m.dryRunActions ? 'Dry-run: it reports what it would do and changes nothing.' : 'ACTING FOR REAL on every fire.' }}
+                    {{
+                      m.dryRunActions
+                        ? 'Dry-run: it reports what it would do and changes nothing.'
+                        : 'ACTING FOR REAL on every fire.'
+                    }}
                   </p>
-                  <button type="button" class="btn" (click)="action.emit('disarm')" [disabled]="busy()">Disarm actions</button>
+                  <button
+                    type="button"
+                    class="btn"
+                    (click)="action.emit('disarm')"
+                    [disabled]="busy()"
+                  >
+                    Disarm actions
+                  </button>
                 </section>
               }
             }
@@ -356,7 +501,12 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
             @case ('timeline') {
               <div class="tl-tools">
                 <div class="chips">
-                  <button type="button" class="chip" [class.on]="kindFilter() === ''" (click)="kindFilter.set('')">
+                  <button
+                    type="button"
+                    class="chip"
+                    [class.on]="kindFilter() === ''"
+                    (click)="kindFilter.set('')"
+                  >
                     All <span class="c">{{ timeline().length }}</span>
                   </button>
                   @for (k of timelineKinds(); track k.key) {
@@ -372,12 +522,18 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   }
                 </div>
                 <label class="check">
-                  <input type="checkbox" [checked]="withHeartbeats()" (change)="withHeartbeats.set(!withHeartbeats())" />
+                  <input
+                    type="checkbox"
+                    [checked]="withHeartbeats()"
+                    (change)="withHeartbeats.set(!withHeartbeats())"
+                  />
                   routine checks
                 </label>
               </div>
               @if (filteredTimeline().length === 0) {
-                <p class="muted small">No history recorded{{ kindFilter() ? ' of this kind' : '' }}.</p>
+                <p class="muted small">
+                  No history recorded{{ kindFilter() ? ' of this kind' : '' }}.
+                </p>
               } @else {
                 <ol class="timeline">
                   @for (e of filteredTimeline(); track e.id; let i = $index) {
@@ -386,18 +542,26 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                     }
                     <li class="tl-row" [attr.data-kind]="e.kind">
                       <span class="tl-dot" [attr.data-kind]="e.kind"></span>
-                      <span class="tl-when mono">{{ e.occurredAtUtc | date: 'HH:mm:ss' : 'UTC' }}</span>
+                      <span class="tl-when mono">{{
+                        e.occurredAtUtc | date: 'HH:mm:ss' : 'UTC'
+                      }}</span>
                       <span class="tl-kind" [attr.data-kind]="e.kind">{{ e.kind }}</span>
                       <span class="tl-note">
                         {{ humanize(e.note) }}
                         @if (has(e.observedMid)) {
-                          <span class="muted mono"> · mid {{ e.observedMid | number: '1.2-5' }}</span>
+                          <span class="muted mono">
+                            · mid {{ e.observedMid | number: '1.2-5' }}</span
+                          >
                         }
                         @if (e.generatedSignalIds) {
                           <span class="pill ok">signals {{ e.generatedSignalIds }}</span>
                         }
                         @if (e.resultLlmInvocationId) {
-                          <a [routerLink]="['/conversations']" [queryParams]="{ conversation: e.resultLlmInvocationId }">analysis #{{ e.resultLlmInvocationId }}</a>
+                          <a
+                            [routerLink]="['/conversations']"
+                            [queryParams]="{ conversation: e.resultLlmInvocationId }"
+                            >analysis #{{ e.resultLlmInvocationId }}</a
+                          >
                         }
                         @if (e.actorUserId) {
                           <span class="muted"> · by {{ e.actorUserId }}</span>
@@ -407,7 +571,9 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   }
                 </ol>
                 @if (det.timelineTotal > timeline().length) {
-                  <p class="muted small">Showing the newest {{ timeline().length }} of {{ det.timelineTotal }} events.</p>
+                  <p class="muted small">
+                    Showing the newest {{ timeline().length }} of {{ det.timelineTotal }} events.
+                  </p>
                 }
               }
             }
@@ -430,7 +596,9 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                 <section class="block">
                   <div class="block-head">
                     <h4>Invalidation (thesis break)</h4>
-                    <button type="button" class="link" (click)="copy(m.invalidationSpecJson)">copy</button>
+                    <button type="button" class="link" (click)="copy(m.invalidationSpecJson)">
+                      copy
+                    </button>
                   </div>
                   @if (m.invalidationExplanation) {
                     <p class="lead">{{ m.invalidationExplanation }}</p>
@@ -475,13 +643,29 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   <tbody>
                     @for (s of det.signals; track s.id) {
                       <tr>
-                        <td><a [routerLink]="['/trade-signals', s.id]">#{{ s.id }}</a></td>
-                        <td><span class="pill dir" [class.buy]="s.direction === 'Buy'">{{ s.direction }}</span></td>
-                        <td><span class="status" [attr.data-status]="s.status">{{ s.status }}</span></td>
-                        <td class="num mono">{{ has(s.entryPrice) ? (s.entryPrice | number: '1.2-5') : '—' }}</td>
-                        <td class="num mono">{{ has(s.stopLoss) ? (s.stopLoss | number: '1.2-5') : '—' }}</td>
-                        <td class="num mono">{{ has(s.takeProfit) ? (s.takeProfit | number: '1.2-5') : '—' }}</td>
-                        <td class="num muted">{{ s.createdAtUtc | date: 'MMM d HH:mm' : 'UTC' }}</td>
+                        <td>
+                          <a [routerLink]="['/trade-signals', s.id]">#{{ s.id }}</a>
+                        </td>
+                        <td>
+                          <span class="pill dir" [class.buy]="s.direction === 'Buy'">{{
+                            s.direction
+                          }}</span>
+                        </td>
+                        <td>
+                          <span class="status" [attr.data-status]="s.status">{{ s.status }}</span>
+                        </td>
+                        <td class="num mono">
+                          {{ has(s.entryPrice) ? (s.entryPrice | number: '1.2-5') : '—' }}
+                        </td>
+                        <td class="num mono">
+                          {{ has(s.stopLoss) ? (s.stopLoss | number: '1.2-5') : '—' }}
+                        </td>
+                        <td class="num mono">
+                          {{ has(s.takeProfit) ? (s.takeProfit | number: '1.2-5') : '—' }}
+                        </td>
+                        <td class="num muted">
+                          {{ s.createdAtUtc | date: 'MMM d HH:mm' : 'UTC' }}
+                        </td>
                       </tr>
                     }
                   </tbody>
@@ -497,9 +681,21 @@ const LEVEL_STYLE: Record<string, { light: string; dark: string; dash: 'solid' |
                   @for (l of chain(); track l.id) {
                     <li [class.self]="l.id === m.id">
                       <span class="chain-dot"></span>
-                      <button type="button" class="link mono" [disabled]="l.id === m.id" (click)="openMonitor.emit(l.id)">#{{ l.id }}</button>
-                      <span class="status" [attr.data-status]="l.status">{{ statusLabel(l.status) }}</span>
-                      <span class="muted small">depth {{ l.rearmDepth }} · {{ l.createdAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span>
+                      <button
+                        type="button"
+                        class="link mono"
+                        [disabled]="l.id === m.id"
+                        (click)="openMonitor.emit(l.id)"
+                      >
+                        #{{ l.id }}
+                      </button>
+                      <span class="status" [attr.data-status]="l.status">{{
+                        statusLabel(l.status)
+                      }}</span>
+                      <span class="muted small"
+                        >depth {{ l.rearmDepth }} ·
+                        {{ l.createdAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span
+                      >
                       <span class="chain-intent">{{ l.intentText }}</span>
                     </li>
                   }
@@ -1270,7 +1466,9 @@ export class MonitorDetailDrawerComponent {
   protected readonly timelineKinds = computed(() => {
     const counts = new Map<string, number>();
     for (const e of this.timeline()) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count);
+    return [...counts.entries()]
+      .map(([key, count]) => ({ key, count }))
+      .sort((a, b) => b.count - a.count);
   });
 
   protected readonly filteredTimeline = computed(() => {
@@ -1333,7 +1531,11 @@ export class MonitorDetailDrawerComponent {
       createdAtUtc: d.monitor.createdAtUtc,
       relation: 'self',
     };
-    return [...d.lineage.filter((l) => l.relation === 'parent'), self, ...d.lineage.filter((l) => l.relation === 'successor')];
+    return [
+      ...d.lineage.filter((l) => l.relation === 'parent'),
+      self,
+      ...d.lineage.filter((l) => l.relation === 'successor'),
+    ];
   });
 
   /** Levels sorted high → low, with the last observed price slotted in where it sits. */
@@ -1351,11 +1553,14 @@ export class MonitorDetailDrawerComponent {
       isPrice: false,
       dist: price != null ? levelDistance(price, l.price, m) : '',
     }));
-    if (price != null) rows.push({ key: 'now', kind: 'now', label: 'Price now', price, isPrice: true, dist: '' });
+    if (price != null)
+      rows.push({ key: 'now', kind: 'now', label: 'Price now', price, isPrice: true, dist: '' });
     return rows.sort((a, b) => b.price - a.price);
   });
 
-  protected readonly tracePoints = computed(() => this.trace().filter((e) => e.observedMid != null).length);
+  protected readonly tracePoints = computed(
+    () => this.trace().filter((e) => e.observedMid != null).length,
+  );
 
   protected readonly traceOptions = computed<EChartsOption>(() => {
     const m = this.detail()?.monitor;
@@ -1367,7 +1572,10 @@ export class MonitorDetailDrawerComponent {
     const line = dark ? '#9ec5f4' : '#256abf';
     const pts = this.trace()
       .filter((e) => e.observedMid != null)
-      .map((e) => ({ t: Date.parse(e.occurredAtUtc + (e.occurredAtUtc.endsWith('Z') ? '' : 'Z')), e }))
+      .map((e) => ({
+        t: Date.parse(e.occurredAtUtc + (e.occurredAtUtc.endsWith('Z') ? '' : 'Z')),
+        e,
+      }))
       .sort((a, b) => a.t - b.t);
     if (!m || pts.length === 0) return {};
     const markers = Object.entries(MARKER_KINDS).map(([kind, meta]) => ({
@@ -1397,11 +1605,21 @@ export class MonitorDetailDrawerComponent {
           [t0, l.price, ''],
           [t1, l.price, ''],
         ],
-        endLabel: { show: true, formatter: `${l.label} ${l.price}`, color: ink, fontSize: 10, offset: [-6, -8], align: 'right' as const },
+        endLabel: {
+          show: true,
+          formatter: `${l.label} ${l.price}`,
+          color: ink,
+          fontSize: 10,
+          offset: [-6, -8],
+          align: 'right' as const,
+        },
         tooltip: { show: false },
       };
     });
-    const all = [...pts.map((p) => p.e.observedMid as number), ...(m.levels ?? []).map((l) => l.price)];
+    const all = [
+      ...pts.map((p) => p.e.observedMid as number),
+      ...(m.levels ?? []).map((l) => l.price),
+    ];
     const lo = Math.min(...all);
     const hi = Math.max(...all);
     const pad = (hi - lo) * 0.08 || hi * 0.0005;
@@ -1421,13 +1639,19 @@ export class MonitorDetailDrawerComponent {
         axisPointer: { type: 'cross', label: { show: false } },
         formatter: (raw) => {
           const levelNames = new Set((m.levels ?? []).map((l) => l.label));
-          const arr = (Array.isArray(raw) ? raw : [raw]) as unknown as { seriesName?: string; data: [number, number, string] }[];
+          const arr = (Array.isArray(raw) ? raw : [raw]) as unknown as {
+            seriesName?: string;
+            data: [number, number, string];
+          }[];
           const first = arr[0];
           if (!first) return '';
           const when = new Date(first.data[0]).toISOString().slice(5, 19).replace('T', ' ');
-          const lines = arr.filter((p) => p.data[2] !== undefined && !(levelNames.has(p.seriesName ?? ''))).map(
-            (p) => `${p.seriesName === 'Mid' ? 'mid' : p.seriesName}: <b>${p.data[1]}</b>${p.data[2] && p.seriesName !== 'Mid' ? '<br/><span style="opacity:.75">' + String(p.data[2]).slice(0, 120) + '</span>' : ''}`,
-          );
+          const lines = arr
+            .filter((p) => p.data[2] !== undefined && !levelNames.has(p.seriesName ?? ''))
+            .map(
+              (p) =>
+                `${p.seriesName === 'Mid' ? 'mid' : p.seriesName}: <b>${p.data[1]}</b>${p.data[2] && p.seriesName !== 'Mid' ? '<br/><span style="opacity:.75">' + String(p.data[2]).slice(0, 120) + '</span>' : ''}`,
+            );
           return `${when}Z<br/>${lines.join('<br/>')}`;
         },
       },
@@ -1443,7 +1667,11 @@ export class MonitorDetailDrawerComponent {
         min: lo - pad,
         max: hi + pad,
         splitLine: { lineStyle: { color: grid } },
-        axisLabel: { color: muted, fontSize: 10, formatter: (v: number) => v.toFixed(hi > 50 ? 2 : 5) },
+        axisLabel: {
+          color: muted,
+          fontSize: 10,
+          formatter: (v: number) => v.toFixed(hi > 50 ? 2 : 5),
+        },
       },
       series: [
         {

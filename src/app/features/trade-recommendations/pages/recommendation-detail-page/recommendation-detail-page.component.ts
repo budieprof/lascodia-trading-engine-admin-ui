@@ -31,7 +31,7 @@ import {
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RecommendationCardComponent } from '../../components/recommendation-card/recommendation-card.component';
 import { RecMonitorComponent } from '../../components/rec-monitor/rec-monitor.component';
-import { RecWatchChecklistComponent } from '../../components/rec-watch-checklist/rec-watch-checklist.component';
+import { WatchChecklistComponent } from '@shared/components/watch-checklist/watch-checklist.component';
 import { RecExecutionComponent } from '../../components/rec-execution/rec-execution.component';
 import { RecTimelineComponent } from '../../components/rec-timeline/rec-timeline.component';
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
@@ -97,7 +97,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
     MarkdownPipe,
     RecommendationCardComponent,
     RecMonitorComponent,
-    RecWatchChecklistComponent,
+    WatchChecklistComponent,
     RecExecutionComponent,
     RecTimelineComponent,
     OcoChipComponent,
@@ -249,10 +249,12 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
             </div>
             <div class="checklists">
               @for (m of checklists(); track m.id) {
-                <app-rec-watch-checklist
-                  [monitor]="m"
+                <app-watch-checklist
                   [checklist]="m.checklist!"
                   [symbol]="c.symbol"
+                  [monitorId]="m.id"
+                  [lastPrice]="m.lastObservedPrice"
+                  [lastCheckedAtUtc]="m.lastCheckedAtUtc"
                 />
               }
             </div>

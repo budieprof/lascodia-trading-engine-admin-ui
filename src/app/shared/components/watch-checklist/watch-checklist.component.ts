@@ -2,35 +2,32 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 
-import {
-  RecMonitorDto,
-  RecWatchChecklistDto,
-  RecWatchStepDto,
-  recFormatPrice,
-} from '../../trade-recommendations.types';
+import { RecWatchChecklistDto, RecWatchStepDto } from './watch-checklist.types';
 
 /**
  * Everything that has to happen before a monitor files its card, in order, with the steps already met ticked —
- * built by the engine from the watch's script, trigger and invalidation (`RecMonitorDto.checklist`).
+ * built by the engine from the watch's script, trigger and invalidation. Used on the recommendation page (one per
+ * monitor armed to file the card) and in the monitors page's detail drawer.
  */
 @Component({
-  selector: 'app-rec-watch-checklist',
+  selector: 'app-watch-checklist',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DatePipe, RouterLink],
-  styleUrls: ['../../rec-shared.scss'],
   template: `
     @let c = checklist();
-    @let m = monitor();
     <div class="wc" [class]="'wc wc--' + c.state">
       <header class="wc-head">
         <div class="wc-title">
           <span class="wc-name">{{ c.title }}</span>
           <span class="muted small">
-            judged on {{ c.judgedOn }} ·
-            <a [routerLink]="['/analysis-monitors']" [queryParams]="{ focus: m.id }"
-              >monitor #{{ m.id }}</a
-            >
+            judged on {{ c.judgedOn }}
+            @if (monitorId(); as id) {
+              ·
+              <a [routerLink]="['/analysis-monitors']" [queryParams]="{ focus: id }"
+                >monitor #{{ id }}</a
+              >
+            }
           </span>
         </div>
         <div class="wc-score">
@@ -140,11 +137,11 @@ import {
                   }
                 </div>
               }
-              @if (s.status === 'current' && s.lane === 'live' && m.lastObservedPrice !== null) {
+              @if (s.status === 'current' && s.lane === 'live' && hasPrice()) {
                 <div class="met muted">
-                  Last price <span class="mono">{{ price(m.lastObservedPrice) }}</span>
-                  @if (m.lastCheckedAtUtc) {
-                    at {{ m.lastCheckedAtUtc | date: 'HH:mm' : 'UTC' }} UTC
+                  Last price <span class="mono">{{ price(lastPrice()) }}</span>
+                  @if (lastCheckedAtUtc()) {
+                    at {{ lastCheckedAtUtc() | date: 'HH:mm' : 'UTC' }} UTC
                   }
                 </div>
               }
@@ -183,6 +180,41 @@ import {
     `
       :host {
         display: block;
+      }
+      .mono {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-variant-numeric: tabular-nums;
+      }
+      .muted {
+        color: var(--text-secondary);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        font-size: 11px;
+        font-weight: var(--font-semibold);
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        line-height: 1.5;
+        white-space: nowrap;
+      }
+      .pill--good {
+        background: rgba(52, 199, 89, 0.15);
+        color: var(--profit);
+      }
+      .pill--bad {
+        background: rgba(255, 59, 48, 0.15);
+        color: var(--loss);
+      }
+      .pill--warn {
+        background: rgba(255, 149, 0, 0.16);
+        color: var(--warning);
+      }
+      .pill--info {
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
       }
       .small {
         font-size: 12px;
@@ -560,10 +592,15 @@ import {
     `,
   ],
 })
-export class RecWatchChecklistComponent {
-  readonly monitor = input.required<RecMonitorDto>();
+export class WatchChecklistComponent {
   readonly checklist = input.required<RecWatchChecklistDto>();
   readonly symbol = input<string>('');
+  /** Links to the monitor on the monitors page; leave unset where the page is already that monitor. */
+  readonly monitorId = input<number | null>(null);
+  /** The monitor's last observed price, shown under a live-price step that is waiting. */
+  readonly lastPrice = input<number | null | undefined>(null);
+  readonly lastCheckedAtUtc = input<string | null | undefined>(null);
+  readonly hasPrice = computed(() => typeof this.lastPrice() === 'number');
 
   /** Guards only say "in force / not yet" while the watch can still move. */
   readonly live = computed(() => ['waiting', 'paused'].includes(this.checklist().state));
@@ -617,7 +654,11 @@ export class RecWatchChecklistComponent {
     return `Step ${s.number}: ${word}`;
   }
 
-  price(v: number | null): string {
-    return recFormatPrice(this.symbol() || this.monitor().symbol, v);
+  /** Metals 2 decimals, JPY 3, else 5 — the console's price convention. */
+  price(v: number | null | undefined): string {
+    if (v == null) return '—';
+    const s = this.symbol().toUpperCase();
+    const digits = s.startsWith('XAU') || s.startsWith('XAG') ? 2 : s.includes('JPY') ? 3 : 5;
+    return v.toFixed(digits);
   }
 }
