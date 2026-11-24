@@ -45,6 +45,10 @@ export type KeyedTable = TableLayout & { key?: string };
  * the other instead of covering each other; a table the pointer is over fades so the bars under it
  * can be read; `topLeftOffset` keeps the top-left corner's tables below a status line there
  * (PC-I11).</p>
+ *
+ * <p>A cell with a `tooltip` shows it at once, styled like the chart's label tooltips, on hover or
+ * on a tap (touch has no hover; a second tap closes it). The table under such a cell does not fade
+ * while its tooltip is open — a dashboard that explains itself on hover has to stay readable.</p>
  */
 @Component({
   selector: 'app-pine-table-overlay',
@@ -62,7 +66,7 @@ export type KeyedTable = TableLayout & { key?: string };
             #table
             class="pine-table"
             [attr.data-key]="t.key"
-            [class.faded]="faded().has(t.key)"
+            [class.faded]="faded().has(t.key) && tip()?.table !== t.key"
             [style]="t.containerStyle"
             role="table"
             [attr.aria-label]="'Script table ' + t.id"
@@ -73,13 +77,34 @@ export type KeyedTable = TableLayout & { key?: string };
                 role="cell"
                 [style]="c.style"
                 [class.has-tip]="!!c.tooltip"
-                [attr.title]="c.tooltip"
+                [class.tip-open]="tip()?.cell === c.key && tip()?.table === t.key"
+                [attr.aria-description]="c.tooltip"
+                (mouseenter)="c.tooltip && showTip(t.key, c.key, c.tooltip, $event, false)"
+                (mousemove)="c.tooltip && moveTip($event)"
+                (mouseleave)="hideTip(false)"
+                (click)="c.tooltip && toggleTip(t.key, c.key, c.tooltip, $event)"
+                [attr.tabindex]="c.tooltip ? 0 : null"
+                (focus)="c.tooltip && focusTip(t.key, c.key, c.tooltip, $event)"
+                (blur)="hideTip(true)"
+                (keydown.escape)="hideTip(true)"
               >
                 {{ c.text }}
               </div>
             }
           </div>
         }
+      </div>
+    }
+    @if (tip(); as t) {
+      <div
+        class="cell-tip"
+        role="tooltip"
+        [class.flip-x]="t.flipX"
+        [class.flip-y]="t.flipY"
+        [style.left.px]="t.left"
+        [style.top.px]="t.top"
+      >
+        {{ t.text }}
       </div>
     }
   `,
@@ -148,6 +173,38 @@ export type KeyedTable = TableLayout & { key?: string };
         pointer-events: auto;
         cursor: help;
       }
+      .cell.has-tip:focus-visible {
+        outline: 1px solid rgba(255, 255, 255, 0.5);
+        outline-offset: -1px;
+      }
+      .cell.has-tip:hover,
+      .cell.tip-open {
+        box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
+      }
+      .cell-tip {
+        position: absolute;
+        z-index: 5;
+        max-width: 340px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(19, 23, 34, 0.96);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+        color: #fff;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        pointer-events: none;
+      }
+      .cell-tip.flip-x {
+        transform: translateX(-100%);
+      }
+      .cell-tip.flip-y {
+        transform: translateY(-100%);
+      }
+      .cell-tip.flip-x.flip-y {
+        transform: translate(-100%, -100%);
+      }
     `,
   ],
 })
@@ -191,6 +248,55 @@ export class PineTableOverlayComponent {
   /** Keys of the tables the pointer is over. */
   readonly faded = signal<ReadonlySet<string>>(new Set());
 
+  /** The open cell tooltip: whose (table + cell key), its text and where (overlay px). */
+  readonly tip = signal<CellTip | null>(null);
+  /** The open tooltip came from a tap: the pointer leaving does not close it. */
+  private pinned = false;
+
+  showTip(table: string, cell: string, text: string, ev: MouseEvent, pin: boolean): void {
+    this.pinned = pin;
+    this.tip.set({ table, cell, text, ...this.placeAt(ev) });
+  }
+
+  moveTip(ev: MouseEvent): void {
+    const cur = this.tip();
+    if (cur && !this.pinned) this.tip.set({ ...cur, ...this.placeAt(ev) });
+  }
+
+  hideTip(force: boolean): void {
+    if (force || !this.pinned) {
+      this.pinned = false;
+      this.tip.set(null);
+    }
+  }
+
+  /** A tap opens the cell's tooltip and keeps it; a second tap on the same cell closes it. */
+  toggleTip(table: string, cell: string, text: string, ev: MouseEvent): void {
+    const cur = this.tip();
+    if (cur && this.pinned && cur.table === table && cur.cell === cell) this.hideTip(true);
+    else this.showTip(table, cell, text, ev, true);
+  }
+
+  /** Keyboard focus on a cell opens its tooltip under the cell (Escape or leaving it closes it). */
+  focusTip(table: string, cell: string, text: string, ev: FocusEvent): void {
+    const el = ev.target as HTMLElement | null;
+    if (!el) return;
+    const r = (this.host.nativeElement as HTMLElement).getBoundingClientRect();
+    const c = el.getBoundingClientRect();
+    this.pinned = true;
+    this.tip.set({
+      table,
+      cell,
+      text,
+      ...placeCellTip(c.left - r.left, c.bottom - r.top, r.width, r.height),
+    });
+  }
+
+  private placeAt(ev: MouseEvent): Pick<CellTip, 'left' | 'top' | 'flipX' | 'flipY'> {
+    const r = (this.host.nativeElement as HTMLElement).getBoundingClientRect();
+    return placeCellTip(ev.clientX - r.left, ev.clientY - r.top, r.width, r.height);
+  }
+
   constructor() {
     effect(() => {
       const p = this.pointer();
@@ -214,6 +320,44 @@ export class PineTableOverlayComponent {
   }
 }
 
+/** A table cell's tooltip as the overlay shows it. */
+export interface CellTip {
+  table: string;
+  cell: string;
+  text: string;
+  left: number;
+  top: number;
+  /** Anchored by its right / bottom edge (opens toward the free side near the edges). */
+  flipX: boolean;
+  flipY: boolean;
+}
+
+/** Room a tooltip needs before it flips to the other side of the pointer, px. */
+const TIP_ROOM_X = 360;
+const TIP_ROOM_Y = 160;
+/** Gap between the pointer and the tooltip, px. */
+const TIP_GAP = 14;
+
+/**
+ * Where a cell tooltip goes for a pointer at (x, y) in a `width` × `height` overlay: beside it,
+ * toward the free side, so a dashboard in the right or bottom corner keeps its tooltips on screen.
+ */
+export function placeCellTip(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Pick<CellTip, 'left' | 'top' | 'flipX' | 'flipY'> {
+  const flipX = x > width - TIP_ROOM_X;
+  const flipY = y > height - TIP_ROOM_Y;
+  return {
+    left: x + (flipX ? -TIP_GAP : TIP_GAP),
+    top: y + (flipY ? -TIP_GAP : TIP_GAP),
+    flipX,
+    flipY,
+  };
+}
+
 /**
  * The tables a pointer at `p` (px in the overlay) is over: each table's `rect` and the overlay's
  * `origin` are viewport rects.
@@ -221,7 +365,10 @@ export class PineTableOverlayComponent {
 export function tablesUnder(
   p: { x: number; y: number } | null,
   origin: { left: number; top: number },
-  tables: readonly { key: string; rect: { left: number; top: number; right: number; bottom: number } }[],
+  tables: readonly {
+    key: string;
+    rect: { left: number; top: number; right: number; bottom: number };
+  }[],
 ): ReadonlySet<string> {
   const out = new Set<string>();
   if (!p) return out;

@@ -5,6 +5,7 @@ import { signal } from '@angular/core';
 import type { TableLayout } from '../render/render-model';
 import {
   PineTableOverlayComponent,
+  placeCellTip,
   tablesUnder,
   type KeyedTable,
 } from './pine-table-overlay.component';
@@ -69,7 +70,10 @@ describe('PineTableOverlayComponent (PC-I11)', () => {
       table(2, 'bottom_left'),
     ]);
     const groups = [...host.querySelectorAll('.pine-tables')];
-    expect(groups.map((g) => g.getAttribute('data-position'))).toEqual(['top_right', 'bottom_left']);
+    expect(groups.map((g) => g.getAttribute('data-position'))).toEqual([
+      'top_right',
+      'bottom_left',
+    ]);
     expect(
       [...groups[0].querySelectorAll('.pine-table')].map((t) => t.getAttribute('data-key')),
     ).toEqual(['mine:1:1', 'mine:2:1']);
@@ -81,6 +85,84 @@ describe('PineTableOverlayComponent (PC-I11)', () => {
     expect(g.style.top).toBe('26px');
   });
 
+  it('shows a cell tooltip on hover, keeps its table from fading, and closes it on leave', () => {
+    const t = table(1, 'top_right', 'k1');
+    t.cells[0] = { ...t.cells[0], tooltip: 'Line one\nLine two' };
+    const { fixture, host, cmp } = render([t]);
+    // The pointer is over the table: it would fade.
+    cmp.faded.set(new Set(['k1']));
+    const cell = host.querySelector('.cell.has-tip') as HTMLElement;
+    expect(cell.getAttribute('title')).toBeNull(); // no second, native tooltip
+    cell.dispatchEvent(new MouseEvent('mouseenter', { clientX: 20, clientY: 20 }));
+    fixture.detectChanges();
+    const tip = host.querySelector('.cell-tip') as HTMLElement;
+    expect(tip.textContent?.trim()).toBe('Line one\nLine two');
+    expect(host.querySelector('.pine-table')!.classList).not.toContain('faded');
+    cell.dispatchEvent(new MouseEvent('mouseleave'));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')).toBeNull();
+    expect(host.querySelector('.pine-table')!.classList).toContain('faded');
+  });
+
+  it('opens a cell tooltip on a tap and keeps it until the same cell is tapped again', () => {
+    const t = table(1, 'top_right', 'k1');
+    t.cells[0] = { ...t.cells[0], tooltip: 'Tip' };
+    const { fixture, host } = render([t]);
+    const cell = host.querySelector('.cell.has-tip') as HTMLElement;
+    cell.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5 }));
+    cell.dispatchEvent(new MouseEvent('mouseleave'));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')).not.toBeNull();
+    cell.dispatchEvent(new MouseEvent('click', { clientX: 5, clientY: 5 }));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')).toBeNull();
+  });
+
+  it('opens a cell tooltip on keyboard focus and closes it on Escape', () => {
+    const t = table(1, 'top_right', 'k1');
+    t.cells[0] = { ...t.cells[0], tooltip: 'Tip' };
+    const { fixture, host } = render([t]);
+    const cell = host.querySelector('.cell.has-tip') as HTMLElement;
+    expect(cell.getAttribute('tabindex')).toBe('0');
+    cell.dispatchEvent(new FocusEvent('focus'));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')?.textContent?.trim()).toBe('Tip');
+    cell.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')).toBeNull();
+  });
+
+  it('a cell without a tooltip opens nothing', () => {
+    const { fixture, host } = render([table(1, 'top_right')]);
+    const cell = host.querySelector('.cell') as HTMLElement;
+    cell.dispatchEvent(new MouseEvent('click'));
+    cell.dispatchEvent(new MouseEvent('mouseenter'));
+    fixture.detectChanges();
+    expect(host.querySelector('.cell-tip')).toBeNull();
+  });
+});
+
+describe('placeCellTip', () => {
+  it('opens toward the free side near the right and bottom edges', () => {
+    expect(placeCellTip(100, 50, 1200, 800)).toEqual({
+      left: 114,
+      top: 64,
+      flipX: false,
+      flipY: false,
+    });
+    expect(placeCellTip(1150, 50, 1200, 800)).toEqual({
+      left: 1136,
+      top: 64,
+      flipX: true,
+      flipY: false,
+    });
+    expect(placeCellTip(1150, 790, 1200, 800)).toEqual({
+      left: 1136,
+      top: 776,
+      flipX: true,
+      flipY: true,
+    });
+  });
 });
 
 describe('tablesUnder (the table to fade)', () => {
