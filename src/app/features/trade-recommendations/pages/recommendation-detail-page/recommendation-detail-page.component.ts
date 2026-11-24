@@ -31,6 +31,7 @@ import {
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RecommendationCardComponent } from '../../components/recommendation-card/recommendation-card.component';
 import { RecMonitorComponent } from '../../components/rec-monitor/rec-monitor.component';
+import { RecWatchChecklistComponent } from '../../components/rec-watch-checklist/rec-watch-checklist.component';
 import { RecExecutionComponent } from '../../components/rec-execution/rec-execution.component';
 import { RecTimelineComponent } from '../../components/rec-timeline/rec-timeline.component';
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
@@ -96,6 +97,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
     MarkdownPipe,
     RecommendationCardComponent,
     RecMonitorComponent,
+    RecWatchChecklistComponent,
     RecExecutionComponent,
     RecTimelineComponent,
     OcoChipComponent,
@@ -233,6 +235,27 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
               [exitMarker]="exitMarker()"
               [live]="isLive()"
             />
+          </section>
+        }
+
+        <!-- What has to happen before the card files -->
+        @if (checklists().length > 0) {
+          <section class="panel">
+            <div class="panel-head">
+              <h2>What has to happen</h2>
+              <span class="muted small">
+                Every step the watch needs before it files this card — met steps are ticked.
+              </span>
+            </div>
+            <div class="checklists">
+              @for (m of checklists(); track m.id) {
+                <app-rec-watch-checklist
+                  [monitor]="m"
+                  [checklist]="m.checklist!"
+                  [symbol]="c.symbol"
+                />
+              }
+            </div>
           </section>
         }
 
@@ -771,6 +794,16 @@ export class RecommendationDetailPageComponent {
 
   readonly card = computed(() => this.detail()?.card ?? null);
   readonly ocoPartners = computed(() => recOcoChipPartners(this.card()));
+  /** Monitors armed to file this card that carry a checklist — live ones first, then newest. */
+  readonly checklists = computed(() =>
+    (this.detail()?.monitors ?? [])
+      .filter((m) => !!m.checklist && m.checklist.steps.length > 0)
+      .sort(
+        (a, b) =>
+          Number(b.checklist!.state === 'waiting') - Number(a.checklist!.state === 'waiting') ||
+          b.id - a.id,
+      ),
+  );
 
   /** A watch trigger as text — the DSL object printed "[object Object]". */
   triggerText(trigger: unknown): string {

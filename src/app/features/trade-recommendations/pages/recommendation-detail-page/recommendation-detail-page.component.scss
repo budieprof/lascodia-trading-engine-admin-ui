@@ -165,3 +165,8 @@ section.panel > app-rec-monitor {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.checklists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+  gap: var(--space-4) var(--space-5, 24px);
+}
