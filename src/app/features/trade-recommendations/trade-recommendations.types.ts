@@ -350,6 +350,26 @@ export interface RecTimelineEventDto {
   refId: number | null;
 }
 
+/** One clock that ends a recommendation's chance to trade. */
+export interface RecDeadlineDto {
+  /** card | plan | monitor | park | signal */
+  kind: string;
+  refId: number | null;
+  /** When the clock started — the start of the countdown bar. */
+  fromUtc: string;
+  atUtc: string;
+  title: string;
+  /** What happens when it runs out. */
+  detail: string;
+}
+
+/** `counting`: binding is the first clock to run out, others the later ones. `ended`: binding is the one that ended it. */
+export interface RecExpiryDto {
+  state: 'counting' | 'ended';
+  binding: RecDeadlineDto;
+  others: RecDeadlineDto[];
+}
+
 export interface TradeRecommendationDetailDto {
   card: TradeRecommendationCardDto;
   analysis: RecAnalysisDto | null;
@@ -363,6 +383,8 @@ export interface TradeRecommendationDetailDto {
   siblings: TradeRecommendationCardDto[];
   signal: RecSignalDto | null;
   pendingRec: RecPendingRecDto | null;
+  /** The clock that ends the card's chance to trade (engine-built; absent on older engines, null when none applies). */
+  expiry?: RecExpiryDto | null;
   timeline: RecTimelineEventDto[];
 }
 

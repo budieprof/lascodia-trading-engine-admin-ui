@@ -32,6 +32,7 @@ import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { RecommendationCardComponent } from '../../components/recommendation-card/recommendation-card.component';
 import { RecMonitorComponent } from '../../components/rec-monitor/rec-monitor.component';
 import { WatchChecklistComponent } from '@shared/components/watch-checklist/watch-checklist.component';
+import { RecExpiryComponent } from '../../components/rec-expiry/rec-expiry.component';
 import { RecExecutionComponent } from '../../components/rec-execution/rec-execution.component';
 import { RecTimelineComponent } from '../../components/rec-timeline/rec-timeline.component';
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
@@ -98,6 +99,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
     RecommendationCardComponent,
     RecMonitorComponent,
     WatchChecklistComponent,
+    RecExpiryComponent,
     RecExecutionComponent,
     RecTimelineComponent,
     OcoChipComponent,
@@ -214,6 +216,11 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
         />
       } @else if (detail(); as d) {
         @let c = d.card;
+
+        <!-- When it stops being able to trade -->
+        @if (d.expiry; as x) {
+          <app-rec-expiry [expiry]="x" />
+        }
 
         <!-- Chart -->
         @if (canChart()) {
