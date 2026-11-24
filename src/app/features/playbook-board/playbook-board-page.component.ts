@@ -13,7 +13,6 @@ import { firstValueFrom } from 'rxjs';
 
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
-import { ScriptingService } from '@core/services/scripting.service';
 import { appStorage } from '@core/storage/app-storage';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -28,7 +27,6 @@ import { describeFailure, isOk } from '@features/scripting/shared/api-error';
 import {
   BOARD_TIMEFRAMES,
   PLAYBOOK_SCRIPT_ID,
-  boardSource,
   mapRow,
   refreshDue,
   sortRows,
@@ -56,7 +54,7 @@ interface SourceOption {
  * Playbook board — the "LLM Playbook" chart indicator (engine chart script #21) read on every pair of a
  * watchlist at once: the call, the next step, the buy and sell levels with their distance and how far they
  * can be trusted, trend and market type. Runs through the script screener (see playbook-board.model.ts for
- * why the script's source is sent rather than its id). A research tool: the playbook has no proven edge.
+ * the script is run by id; its reading plots are marked for the screener). A research tool: the playbook has no proven edge.
  */
 @Component({
   selector: 'app-playbook-board-page',
@@ -369,7 +367,6 @@ interface SourceOption {
 })
 export class PlaybookBoardPageComponent implements OnInit {
   private readonly screener = inject(ScriptStrategyService);
-  private readonly scripting = inject(ScriptingService);
   private readonly watchlists = inject(WatchlistService);
   private readonly pairs = inject(CurrencyPairsService);
   private readonly destroyRef = inject(DestroyRef);
@@ -445,7 +442,6 @@ export class PlaybookBoardPageComponent implements OnInit {
     return map;
   });
 
-  private source: string | null = null;
   private runSeq = 0;
 
   async ngOnInit(): Promise<void> {
@@ -482,10 +478,9 @@ export class PlaybookBoardPageComponent implements OnInit {
   }
 
   /**
-   * One read of the board: the script's source (fetched again on a manual refresh, so an edited script is
-   * picked up), then the symbols in chunks of {@link BOARD_CHUNK}, each chunk's rows shown as it lands.
+   * One read of the board: the symbols in chunks of {@link BOARD_CHUNK}, each chunk's rows shown as it lands.
    */
-  async run(manual: boolean): Promise<void> {
+  async run(_manual: boolean): Promise<void> {
     const symbols = this.symbols();
     if (!this.ready() || !symbols.length) return;
     const seq = ++this.runSeq;
@@ -495,14 +490,6 @@ export class PlaybookBoardPageComponent implements OnInit {
     this.error.set(null);
     this.progress.set({ done: 0, total: symbols.length });
     try {
-      if (manual || this.source === null) {
-        const script = await firstValueFrom(this.scripting.getChartScript(PLAYBOOK_SCRIPT_ID));
-        if (!live()) return;
-        if (!script.pineSource)
-          throw new Error('The LLM Playbook script came back without its source.');
-        this.source = boardSource(script.pineSource);
-      }
-      const source = this.source;
       const collected = new Map<string, BoardRow>();
       // A re-read of the same pairs and timeframe keeps the previous rows on screen until each is replaced;
       // another list or timeframe starts from an empty board.
@@ -516,7 +503,12 @@ export class PlaybookBoardPageComponent implements OnInit {
         let rows: ScreenerRow[];
         try {
           const res = await firstValueFrom(
-            this.screener.runScreener({ source, symbols: chunk, timeframe, lastBars: BOARD_BARS }),
+            this.screener.runScreener({
+              chartScriptId: PLAYBOOK_SCRIPT_ID,
+              symbols: chunk,
+              timeframe,
+              lastBars: BOARD_BARS,
+            }),
           );
           if (!isOk(res)) throw res;
           rows = res.data ?? [];

@@ -83,6 +83,8 @@ export interface ScriptCompileResult {
 
 export interface ScreenerRequest {
   source?: string;
+  /** A saved chart script, run by id (the engine reads its source). */
+  chartScriptId?: number;
   libraryId?: number;
   symbols: string[];
   timeframe: string;

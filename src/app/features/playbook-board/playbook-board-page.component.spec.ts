@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { of } from 'rxjs';
 
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
-import { ScriptingService } from '@core/services/scripting.service';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
@@ -37,8 +36,6 @@ const ok = <T>(data: T, status = true, message = 'Successful') => ({
   message,
   responseCode: status ? '00' : '-11',
 });
-
-const SOURCE = '//@version=6\nindicator("p")\nplot(d, "decision", display = display.data_window)\n';
 
 const VALUES: Record<string, Record<string, number | null>> = {
   EURUSD: {
@@ -114,7 +111,6 @@ function watchlist(symbols: string[]): ChartWatchlist {
 describe('PlaybookBoardPageComponent', () => {
   let fixture: ComponentFixture<PlaybookBoardPageComponent>;
   let runScreener: ReturnType<typeof vi.fn>;
-  let getChartScript: ReturnType<typeof vi.fn>;
   let lists: ReturnType<typeof signal<ChartWatchlist[]>>;
 
   const screenerAnswer = (req: ScreenerRequest) =>
@@ -158,15 +154,11 @@ describe('PlaybookBoardPageComponent', () => {
     localStorage.clear();
     lists = signal<ChartWatchlist[]>([watchlist(['EURUSD', 'GBPNZD', 'NZDJPY', 'AUDNZD'])]);
     runScreener = vi.fn(screenerAnswer);
-    getChartScript = vi.fn(() =>
-      of({ id: PLAYBOOK_SCRIPT_ID, name: 'LLM Analyst Playbook', pineSource: SOURCE }),
-    );
     TestBed.configureTestingModule({
       imports: [PlaybookBoardPageComponent],
       providers: [
         provideRouter([]),
         { provide: ScriptStrategyService, useValue: { runScreener } },
-        { provide: ScriptingService, useValue: { getChartScript } },
         {
           provide: WatchlistService,
           useValue: {
@@ -201,15 +193,14 @@ describe('PlaybookBoardPageComponent', () => {
     TestBed.resetTestingModule();
   });
 
-  it('runs script #21 through the screener with its data-window plots on the screener', async () => {
+  it('runs script #21 by id through the screener (its reading plots are marked for the screener)', async () => {
     await render();
-    expect(getChartScript).toHaveBeenCalledWith(PLAYBOOK_SCRIPT_ID);
     expect(runScreener).toHaveBeenCalledTimes(1);
     const req = runScreener.mock.calls[0][0] as ScreenerRequest;
+    expect(req.chartScriptId).toBe(PLAYBOOK_SCRIPT_ID);
+    expect(req.source).toBeUndefined();
     expect(req.symbols).toEqual(['EURUSD', 'GBPNZD', 'NZDJPY', 'AUDNZD']);
     expect(req.timeframe).toBe('H1');
-    expect(req.source).toContain('display = display.data_window + display.pine_screener');
-    expect(req.source).toContain(`"${CLOSE_PLOT}"`);
   });
 
   it('renders one row per pair, actionable first, in plain words', async () => {
@@ -255,14 +246,6 @@ describe('PlaybookBoardPageComponent', () => {
     expect((runScreener.mock.calls[0][0] as ScreenerRequest).symbols).toHaveLength(BOARD_CHUNK);
     expect((runScreener.mock.calls[1][0] as ScreenerRequest).symbols).toHaveLength(5);
     expect(el.querySelectorAll('[data-testid="row"]')).toHaveLength(BOARD_CHUNK + 5);
-  });
-
-  it('shows the error when the script cannot be loaded', async () => {
-    getChartScript.mockReturnValue(throwError(() => new Error('You cannot read this script.')));
-    const el = await render();
-    expect(texts(el, 'error')).toEqual(['You cannot read this script.']);
-    expect(runScreener).not.toHaveBeenCalled();
-    expect(el.querySelector('[data-testid="board"]')).toBeNull();
   });
 
   it('shows the engine refusal when the screener refuses every pair', async () => {

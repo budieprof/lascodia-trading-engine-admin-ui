@@ -4,24 +4,16 @@ import type { ScreenerRow } from '@features/scripting/api/scripting-api.types';
  * The Playbook board: chart script #21 ("LLM Analyst Playbook") read on every pair at once through the
  * engine's script screener (`POST scripting/screener`), one row per pair in plain words.
  *
- * Two things the screener does not do for this script, handled here on the source before it is sent:
- *
- *  1. The screener returns the plots marked `display.pine_screener` — or every plot when none is. The
- *     playbook's reading (decision, classes, biases, regime, veto mask…) is plotted with
- *     `display = display.data_window`, which excludes the screener, so by id (`chartScriptId`) the
- *     screener returns only the visible lines. {@link boardSource} adds `display.pine_screener` to every
- *     data-window plot, and the page sends the source instead of the id.
- *  2. The script plots no price, so the distance to a level could not be measured. {@link boardSource}
- *     appends one screener-only plot of the close ({@link CLOSE_PLOT}).
- *
- * Neither change alters a decision: `display` only says where a value is shown.
+ * The script marks its reading plots (decision, classes, biases, regime, veto mask…) and a `close` plot for the
+ * screener (`display.data_window + display.pine_screener`), so the page runs it by id (`chartScriptId`): no source
+ * is sent. Display flags only say where a value is shown; they change no call.
  */
 
 /** The engine chart script ("My scripts") the board runs. */
 export const PLAYBOOK_SCRIPT_ID = 21;
 
-/** The close the board measures distances from (added by {@link boardSource}). */
-export const CLOSE_PLOT = 'board close';
+/** The close the board measures distances from (script #21's screener-only `close` plot). */
+export const CLOSE_PLOT = 'close';
 
 /** Plot titles the board reads (verified against the screener's answer on 2026-11-24, script revision f84d1099). */
 export const PLOT = {
@@ -59,14 +51,6 @@ export const PLOT = {
 /**
  * The source the screener runs: every data-window plot also on the screener, plus the close. Idempotent.
  */
-export function boardSource(source: string): string {
-  const shown = source.replace(
-    /display\s*=\s*display\.data_window\b(?!\s*\+\s*display\.pine_screener)/g,
-    'display = display.data_window + display.pine_screener',
-  );
-  if (shown.includes(`"${CLOSE_PLOT}"`)) return shown;
-  return `${shown.replace(/\s*$/, '')}\nplot(close, "${CLOSE_PLOT}", display = display.pine_screener)\n`;
-}
 
 /** What the board needs to know about a symbol to price distances: the pip (or point / tick) and the quote decimals. */
 export interface DistanceFacts {

@@ -4,7 +4,6 @@ import type { ScreenerRow } from '@features/scripting/api/scripting-api.types';
 
 import {
   CLOSE_PLOT,
-  boardSource,
   levelQuality,
   mapRow,
   refreshDue,
@@ -47,31 +46,6 @@ const EURUSD_HOLD = {
   'H4 bias': 0,
   [CLOSE_PLOT]: 1.09708,
 };
-
-describe('boardSource', () => {
-  const src = [
-    '//@version=6',
-    'indicator("x")',
-    'plot(a, "decision", display = display.data_window)',
-    'plot(b, "Best long", color = color.teal)',
-  ].join('\n');
-
-  it('puts every data-window plot on the screener and appends the close', () => {
-    const out = boardSource(src);
-    expect(out).toContain(
-      'plot(a, "decision", display = display.data_window + display.pine_screener)',
-    );
-    expect(out).toContain('plot(b, "Best long", color = color.teal)');
-    expect(
-      out.trimEnd().endsWith(`plot(close, "${CLOSE_PLOT}", display = display.pine_screener)`),
-    ).toBe(true);
-  });
-
-  it('is idempotent', () => {
-    const once = boardSource(src);
-    expect(boardSource(once)).toBe(once);
-  });
-});
 
 describe('mapRow', () => {
   it('reads a HOLD at a level: classes, distances, trend, regime and the held-back reasons', () => {
