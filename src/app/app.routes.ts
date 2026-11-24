@@ -202,6 +202,16 @@ export const routes: Routes = [
           import('@features/watchlist/watchlist.routes').then((m) => m.WATCHLIST_ROUTES),
       },
       {
+        // The LLM Playbook chart indicator (chart script #21) read on every pair at once, via the script screener.
+        path: 'playbook-board',
+        canActivate: [canAccessPath('playbook-board')],
+        data: { breadcrumb: 'Playbook Board' },
+        loadComponent: () =>
+          import('@features/playbook-board/playbook-board-page.component').then(
+            (m) => m.PlaybookBoardPageComponent,
+          ),
+      },
+      {
         path: 'spot-analysis',
         canActivate: [canAccessPath('spot-analysis')],
         data: { breadcrumb: 'Spot Analysis' },

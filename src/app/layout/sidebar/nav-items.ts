@@ -60,6 +60,8 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: navIcon.Layers,
       },
       { label: 'Watchlist', route: '/watchlist', icon: navIcon.Eye },
+      // The LLM Playbook indicator's reading on every pair of a watchlist (research tool, no proven edge).
+      { label: 'Playbook Board', route: '/playbook-board', icon: navIcon.Compass },
     ],
   },
   {

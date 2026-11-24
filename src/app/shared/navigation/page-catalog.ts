@@ -116,6 +116,13 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
     keywords:
       'chart candlestick indicators pine scripts drawings layouts bar replay price alert footprint heatmap dom order book economic events overlays',
   },
+  {
+    group: 'Trading',
+    label: 'Playbook Board',
+    route: '/playbook-board',
+    keywords:
+      'llm analyst playbook indicator every pair trade now watch hold buy level sell level mid-range trend regime screener research',
+  },
 
   {
     group: 'Configuration',

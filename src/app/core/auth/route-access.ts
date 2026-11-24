@@ -77,6 +77,7 @@ export const ROUTE_ACCESS = {
   'market-data/declarations-review': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/declarations
   'chart-analysis': rule(P.MarketdataRead),
   watchlist: rule(P.MarketdataRead),
+  'playbook-board': rule(P.AccessAnalyst), // POST scripting/screener (+ GET scripting/indicators/21)
   'spot-analysis': rule(P.AccessOperator),
   conversations: rule(P.AccessOperator),
   assistant: rule(P.AccessOperator), // GET assistant/metrics, assistant/lessons
