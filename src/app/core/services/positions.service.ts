@@ -57,6 +57,56 @@ export interface ExposedEventDto {
   positions: ExposedPositionDto[];
 }
 
+/** One trade the trail-to-break-even rule moved, next to its replay with the original stop and target. */
+export interface BreakevenCounterfactualTradeDto {
+  positionId: number;
+  tradeSignalId: number | null;
+  source: string | null;
+  symbol: string;
+  direction: string;
+  accounts: number;
+  movedAtUtc: string;
+  entry: number;
+  initialStop: number;
+  takeProfit: number;
+  plannedR: number;
+  status: 'Closed' | 'Open' | string;
+  realisedR: number | null;
+  /** HitTP / HitSL / Unresolved — what the original stop and target would have done from the move on. */
+  withoutRule: string;
+  withoutRuleR: number | null;
+  /** realised − without the rule: positive, the rule earned R; negative, it cost R. */
+  effectR: number | null;
+}
+
+export interface BreakevenCounterfactualGroupDto {
+  key: string;
+  trades: number;
+  cutWinners: number;
+  savedLosers: number;
+  realisedR: number;
+  withoutRuleR: number;
+  netEffectR: number;
+}
+
+/** `GET /position/breakeven-counterfactual` — what the trail-to-break-even rule did. */
+export interface BreakevenCounterfactualDto {
+  days: number;
+  summary: {
+    trades: number;
+    resolved: number;
+    cutWinners: number;
+    savedLosers: number;
+    realisedR: number;
+    withoutRuleR: number;
+    netEffectR: number;
+  };
+  bySource: BreakevenCounterfactualGroupDto[];
+  byPlannedR: BreakevenCounterfactualGroupDto[];
+  trades: BreakevenCounterfactualTradeDto[];
+  basis: string;
+}
+
 /** Event-exposure snapshot across the open book, from `GET /position/event-exposure`. */
 export interface EventExposureDto {
   generatedAtUtc: string;
@@ -102,6 +152,18 @@ export class PositionsService {
       `/position/event-exposure?lookaheadHours=${lookaheadHours}` +
         `&includeMediumImpact=${includeMediumImpact}`,
     );
+  }
+
+  /**
+   * What the trail-to-break-even rule did over the last `days`: each moved trade beside its replay with the original
+   * stop and target. Reporting only — the operator decides the rule from it.
+   */
+  getBreakevenCounterfactual(
+    days = 90,
+    tradingAccountId?: number | null,
+  ): Observable<ResponseData<BreakevenCounterfactualDto>> {
+    const account = tradingAccountId != null ? `&tradingAccountId=${tradingAccountId}` : '';
+    return this.api.get(`/position/breakeven-counterfactual?days=${days}${account}`);
   }
 
   /**

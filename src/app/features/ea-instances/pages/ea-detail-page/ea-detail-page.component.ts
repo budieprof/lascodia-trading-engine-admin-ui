@@ -27,6 +27,7 @@ import type {
 import { createPolledResource } from '@core/polling/polled-resource';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { EaBreakevenEffectComponent } from '../../components/ea-breakeven-effect/ea-breakeven-effect.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -74,6 +75,7 @@ type FleetRow = EAFleetItem & { id?: number | null };
   // One results tray + settled stream for every panel on this page.
   providers: [EaOpsService],
   imports: [
+    EaBreakevenEffectComponent,
     DatePipe,
     DecimalPipe,
     FormsModule,
@@ -720,6 +722,8 @@ type FleetRow = EAFleetItem & { id?: number | null };
                     One-shot SL→entry move once MFE crosses the trigger. Subsequent reversals
                     through entry close the position at no loss.
                   </p>
+                  <!-- What the rule actually did on this account (reporting only, 2026-11-24). -->
+                  <app-ea-breakeven-effect [tradingAccountId]="ea()?.tradingAccountId ?? null" />
                 </div>
 
                 <div class="set-foot">
