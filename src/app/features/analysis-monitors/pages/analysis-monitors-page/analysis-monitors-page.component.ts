@@ -58,6 +58,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 import { SparklineComponent } from '@shared/components/sparkline/sparkline.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { WatchProgressComponent } from '@shared/components/watch-checklist/watch-progress.component';
 import { OcoBannerComponent } from '@shared/components/oco-chip/oco-banner.component';
 import { OcoChipPartner, ocoHue, ocoLegEnded, ocoShortCode } from '@shared/utils/oco';
 
@@ -131,6 +132,7 @@ type PendingAction =
     ModalA11yDirective,
     OcoChipComponent,
     OcoBannerComponent,
+    WatchProgressComponent,
   ],
   template: `
     <div class="page">
@@ -421,6 +423,7 @@ type PendingAction =
                   </th>
                   <th>Monitor</th>
                   <th>Intent</th>
+                  <th>Steps to fire</th>
                   <th class="clickable" (click)="sortKey.set('distance')" [class.sorted]="sortKey() === 'distance'">Distance to level</th>
                   <th class="clickable" (click)="sortKey.set('life')" [class.sorted]="sortKey() === 'life'">Life</th>
                   <th class="num clickable" (click)="sortKey.set('fires')" [class.sorted]="sortKey() === 'fires'">Fires</th>
@@ -515,7 +518,9 @@ type PendingAction =
                       @if (prefs().density === 'comfortable') {
                         @if (m.scriptSource) {
                           <span class="explain" [title]="m.scriptLastReading || ''">
-                            <span class="tag script">step {{ m.scriptStep ?? 0 }}</span>
+                            @if (!m.progress) {
+                              <span class="tag script">step {{ m.scriptStep ?? 0 }}</span>
+                            }
                             @if (m.scriptReadyAtUtc) {
                               <span class="tag ready">ready {{ m.scriptReadyAtUtc | date: 'HH:mm' : 'UTC' }}Z</span>
                             }
@@ -526,6 +531,13 @@ type PendingAction =
                             humanize(m.triggerExplanation || m.lastEvalNote)
                           }}</span>
                         }
+                      }
+                    </td>
+                    <td>
+                      @if (m.progress; as pg) {
+                        <app-watch-progress [progress]="pg" [showStep]="prefs().density === 'comfortable'" />
+                      } @else {
+                        <span class="muted">—</span>
                       }
                     </td>
                     <td class="dist">
@@ -640,7 +652,7 @@ type PendingAction =
                           <span class="tag dir" [class.buy]="m.plannedDirection === 'Buy'">{{ m.plannedDirection }}</span>
                         }
                         <span class="tag mode" [class.llm]="m.evaluationMode !== 'Deterministic'">{{ m.evaluationMode === 'Deterministic' ? 'live' : 'LLM' }}</span>
-                        @if (m.scriptSource) {
+                        @if (m.scriptSource && !m.progress) {
                           <span class="tag script">step {{ m.scriptStep ?? 0 }}</span>
                         }
                         <span class="grow"></span>
@@ -673,6 +685,9 @@ type PendingAction =
                         </div>
                       }
                       <p class="mc-intent">{{ m.intentText }}</p>
+                      @if (m.progress; as pg) {
+                        <app-watch-progress [progress]="pg" [showStep]="true" />
+                      }
                       @if (prefs().density === 'comfortable' && (m.scriptLastReading || m.triggerExplanation || m.lastEvalNote)) {
                         <p class="mc-explain">{{ humanize(m.scriptLastReading || m.triggerExplanation || m.lastEvalNote) }}</p>
                       }

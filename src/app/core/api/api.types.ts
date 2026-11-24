@@ -4387,6 +4387,10 @@ export interface AnalysisMonitorDto {
   /** When the script's steps start counting. */
   scriptStartUtc?: string | null;
   /** The step the script last reported. */
+  /** Steps to fire, in one line (monitors board only). */
+  progress?:
+    | import('@shared/components/watch-checklist/watch-checklist.types').RecWatchProgressDto
+    | null;
   scriptStep?: number | null;
   /** First moment the script said ready (in shadow mode: when the watch would have fired). */
   scriptReadyAtUtc?: string | null;

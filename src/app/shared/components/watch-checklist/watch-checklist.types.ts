@@ -37,3 +37,14 @@ export interface RecWatchChecklistDto {
   steps: RecWatchStepDto[];
   guards: RecWatchGuardDto[];
 }
+
+/** A checklist in one line, for list rows: progress, state, and the step it is on. */
+export interface RecWatchProgressDto {
+  done: number;
+  total: number;
+  state: string;
+  /** "Step 2 — A H1 candle closes back below 1.098"; null once every step happened. */
+  currentStep: string | null;
+  /** Each step's status in order, for the mini bar. */
+  statuses: RecWatchStepStatus[];
+}
