@@ -5,69 +5,60 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
-import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+
 import { PatientTraderService } from '@core/services/patient-trader.service';
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import type { PatientTraderConfig } from '@features/patient-trader/patient-trader.types';
 import {
-  DEFAULT_PATIENT_TRADER_CONFIG,
-  PatientTraderConfig,
-  PatientTraderMarket,
-  PatientTraderMode,
-  PatientTraderPlan,
-  parseOutcome,
-  parseScenarios,
-  planOcoChipPartners,
-} from '@features/patient-trader/patient-trader.types';
-import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
-import { OcoBannerComponent } from '@shared/components/oco-chip/oco-banner.component';
-import { ocoHue } from '@shared/utils/oco';
+  PlanFilters,
+  boardQuery,
+  filtersFromParams,
+  filtersToParams,
+  isConfigDirty,
+  newlyLiveMarkets,
+  toSavePayload,
+  withInstructionShown,
+} from '@features/patient-trader/patient-trader.logic';
+import { HasUnsavedChanges, warnBeforeUnload } from '@features/scripting/shared/unsaved-changes';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import {
+  ConfigPatch,
+  PtConfigFormComponent,
+} from '../../components/pt-config-form/pt-config-form.component';
+import { PtHealthStripComponent } from '../../components/pt-health-strip/pt-health-strip.component';
+import { PtPlansTableComponent } from '../../components/pt-plans-table/pt-plans-table.component';
+import { PtResultsPanelComponent } from '../../components/pt-results-panel/pt-results-panel.component';
+import { PtStatusStripComponent } from '../../components/pt-status-strip/pt-status-strip.component';
+import { PtViewsPanelComponent } from '../../components/pt-views-panel/pt-views-panel.component';
+
+/** Rows per page of the plans table. */
+const PLAN_PAGE_SIZE = 50;
 
 /**
- * Patient Trader cockpit — what the agent currently thinks, what it has planned, and whether it
- * is any good.
+ * Patient Trader cockpit — is it running, how is it doing, what does it think, and what has it
+ * planned or passed on.
  *
- * Structure and tokens follow the Spot Sweep page, its sibling module: a status strip of
- * counters, then a two-column body with the configuration form on the left and the read-only
- * panels on the right. The counters lead with the two numbers that decide whether the module is
- * working rather than a count of activity — view accuracy (does it read the market at all, which
- * is answerable before a penny is risked) and fill rate (do its entries ever actually get hit).
+ * A thin container: it owns the data (board, health, config), the editable draft with its dirty
+ * check and save flow, and the URL state (`?oco=` and the plan filters). Each panel is its own
+ * component under `../../components/`.
  */
-/** A new set with `id` flipped — signals compare by reference, so mutating in place is invisible. */
-/**
- * Editable copy of a config, with the engine's built-in instruction filled in when none is saved,
- * so the box shows the text actually being sent rather than an empty field.
- */
-function withInstructionShown(c: PatientTraderConfig): PatientTraderConfig {
-  const next = structuredClone(c);
-  if (!next.analysisInstruction?.trim()) {
-    next.analysisInstruction = next.defaultAnalysisInstruction ?? '';
-  }
-  return next;
-}
-
-function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
-  const next = new Set(set);
-  if (!next.delete(id)) next.add(id);
-  return next;
-}
-
 @Component({
   selector: 'app-patient-trader-page',
   standalone: true,
   imports: [
-    DatePipe,
-    DecimalPipe,
-    PercentPipe,
-    FormsModule,
-    RouterLink,
-    OcoChipComponent,
-    OcoBannerComponent,
+    ConfirmDialogComponent,
+    PtConfigFormComponent,
+    PtHealthStripComponent,
+    PtPlansTableComponent,
+    PtResultsPanelComponent,
+    PtStatusStripComponent,
+    PtViewsPanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -76,880 +67,87 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         <div>
           <h1>Patient Trader</h1>
           <p class="muted">
-            Generation-only discretionary agent — keeps a standing view of each market it follows,
-            waits for quiet to break into a large move, and writes a complete plan (entry, stop and
-            target) when one does. It never manages a position.
+            Keeps a standing view of each market it follows and writes a card for each idea worth
+            having, armed as a watch that files it when its price condition is met. It never manages
+            a position.
           </p>
         </div>
         @if (config(); as c) {
           <div class="head-actions">
+            @if (dirty()) {
+              <span class="unsaved" role="status">Unsaved changes</span>
+            }
             <span class="mode-badge" [class.live]="c.enabled && c.mode === 'Live'">
-              {{ c.enabled ? c.mode : 'Disabled' }}
+              {{ c.enabled ? c.mode : 'Switched off' }}
             </span>
           </div>
         }
       </header>
 
-      @if (saveMessage(); as msg) {
-        <div class="banner info">{{ msg }}</div>
-      }
+      <app-pt-health-strip [health]="health()" [error]="healthError()" />
 
-      <!-- ── Status strip ─────────────────────────────────────────────── -->
-      @if (board(); as b) {
-        <section class="card status-card">
-          <div class="status-head">
-            <span class="phase-pill" [class.analyzing]="b.counters.armedPlans > 0">
-              {{ b.counters.armedPlans > 0 ? 'Armed' : 'Waiting' }}
-            </span>
-            <span class="muted small">
-              {{ b.counters.activeMarkets }} market{{ b.counters.activeMarkets === 1 ? '' : 's' }}
-              followed · last 7 days
-            </span>
-            <span class="spacer"></span>
-            <span class="muted small">
-              {{ b.counters.declinedLast7Days }} declined · {{ b.counters.rejectedLast7Days }}
-              rejected by the checker
-            </span>
-          </div>
-
-          <dl class="counters">
-            <div>
-              <dt>View accuracy</dt>
-              <dd>
-                {{
-                  b.counters.viewAccuracy !== null
-                    ? (b.counters.viewAccuracy | percent: '1.0-1')
-                    : '—'
-                }}
-              </dd>
-            </div>
-            <div>
-              <dt>Views scored</dt>
-              <dd>{{ b.counters.viewsScored }}</dd>
-            </div>
-            <div>
-              <dt>Abstained</dt>
-              <dd>{{ b.counters.viewsAbstained }}</dd>
-            </div>
-            <div>
-              <dt>Fill rate</dt>
-              <dd>
-                {{ b.counters.fillRate !== null ? (b.counters.fillRate | percent: '1.0-1') : '—' }}
-              </dd>
-            </div>
-            <div>
-              <dt>Never reached</dt>
-              <dd>{{ b.counters.entryNotReachedCount }}</dd>
-            </div>
-            <div>
-              <dt>Expectancy</dt>
-              <dd>
-                {{
-                  b.counters.meanRMultiple !== null
-                    ? (b.counters.meanRMultiple | number: '1.2-2') + 'R'
-                    : '—'
-                }}
-              </dd>
-            </div>
-            <div>
-              <dt>Plans (7d)</dt>
-              <dd>{{ b.counters.plansLast7Days }}</dd>
-            </div>
-            <div>
-              <dt>Armed</dt>
-              <dd>{{ b.counters.armedPlans }}</dd>
-            </div>
-            <div>
-              <dt>Stops at floor</dt>
-              <dd [class.warn-value]="b.counters.nearFloorCount > 0">
-                {{ b.counters.nearFloorCount }}
-              </dd>
-            </div>
-          </dl>
-
-          <p class="muted small">
-            <b>View accuracy</b> answers whether the agent reads the market, before any money is
-            involved — it is the gate on leaving ForecastOnly. <b>Never reached</b> is the failure
-            that looks like success: beautiful plans at levels the market never visits.
-            <b>Stops at floor</b> counts accepted plans hugging the survivability minimum; a run of
-            those means the agent is writing to the checker rather than the market.
-          </p>
-        </section>
-      }
+      <app-pt-status-strip [board]="board()" [engine]="engine()" />
 
       <div class="cols">
-        <!-- ── Configuration ──────────────────────────────────────────── -->
         <div class="col">
           @if (draft(); as d) {
-            <!-- PUT patient-trader/config needs platform.engine.manage; without it the form is
-                 read-only (a disabled fieldset disables every control inside). -->
-            <fieldset class="ro-fieldset" [disabled]="!canManage()">
-              <section class="card">
-                <h2>Configuration</h2>
-                @if (!canManage()) {
-                  <p class="muted small">
-                    Read-only — changing the Patient Trader needs the platform.engine.manage
-                    permission.
-                  </p>
-                }
-
-                <div class="field check">
-                  <label>
-                    <input type="checkbox" [(ngModel)]="d.enabled" name="enabled" />
-                    <span>Enabled</span>
-                  </label>
-                </div>
-
-                <div class="field">
-                  <label for="pt-mode">Mode</label>
-                  <select id="pt-mode" [(ngModel)]="d.mode" name="mode">
-                    <option value="ForecastOnly">ForecastOnly — views only, writes no plans</option>
-                    <option value="PlanOnly">PlanOnly — plans and walks them, files nothing</option>
-                    <option value="Live">Live — files signals into the pipeline</option>
-                  </select>
-                  <p class="muted small">
-                    Each mode is the gate on the next. Start in ForecastOnly until view accuracy
-                    says the agent reads the market; move to PlanOnly until the fill rate says its
-                    entries are reachable. Only then does Live mean anything.
-                  </p>
-                </div>
-
-                <div class="field">
-                  <label for="pt-engine">Analysis engine</label>
-                  <select id="pt-engine" [(ngModel)]="d.analysisEngine" name="analysisEngine">
-                    <!-- Short labels: the long one was cut off inside the closed select; the
-                       paragraph below explains the engines. -->
-                    <option value="Assistant">Assistant — a card per idea, each watched</option>
-                    <option value="Classic">Classic — JSON view + a single plan</option>
-                  </select>
-                  <p class="muted small">
-                    Assistant reads the market the way the console assistant does — any tool, as
-                    many rounds as it needs — and writes a recommendation card for every viable
-                    idea, each with the condition that should trigger it. Cards that pass the plan
-                    checker are armed as watches that file exactly that card; alternatives can be
-                    grouped one-cancels-other.
-                  </p>
-                </div>
-
-                @if (d.analysisEngine === 'Assistant') {
-                  <div class="row-2">
-                    <div class="field">
-                      <label for="pt-maxcards">Max cards per market</label>
-                      <input
-                        id="pt-maxcards"
-                        type="number"
-                        min="1"
-                        max="6"
-                        [(ngModel)]="d.maxCardsPerAnalysis"
-                        name="maxCardsPerAnalysis"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-watchh">Card watch life (h)</label>
-                      <input
-                        id="pt-watchh"
-                        type="number"
-                        min="1"
-                        max="72"
-                        [(ngModel)]="d.cardWatchExpiryHours"
-                        name="cardWatchExpiryHours"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-resumes">Max resumes per analysis</label>
-                      <input
-                        id="pt-resumes"
-                        type="number"
-                        min="0"
-                        max="30"
-                        [(ngModel)]="d.analysisMaxResumes"
-                        name="analysisMaxResumes"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-analyst">Run as admin id (0 = oldest)</label>
-                      <input
-                        id="pt-analyst"
-                        type="number"
-                        min="0"
-                        [(ngModel)]="d.analystAdminUserId"
-                        name="analystAdminUserId"
-                      />
-                    </div>
-                  </div>
-
-                  <div class="field">
-                    <div class="instr-head">
-                      <label for="pt-instruction">Analysis instruction</label>
-                      <span class="instr-tag" [class.custom]="isCustomInstruction(d)">
-                        {{ isCustomInstruction(d) ? 'Custom' : 'Built-in' }}
-                      </span>
-                      <span class="spacer"></span>
-                      @if (isCustomInstruction(d)) {
-                        <button type="button" class="linkish" (click)="resetInstruction()">
-                          Reset to default
-                        </button>
-                      }
-                    </div>
-                    <textarea
-                      id="pt-instruction"
-                      rows="6"
-                      [maxlength]="instructionMaxLength"
-                      [(ngModel)]="d.analysisInstruction"
-                      name="analysisInstruction"
-                      [placeholder]="d.defaultAnalysisInstruction ?? ''"
-                    ></textarea>
-                    <p class="muted small">
-                      What the assistant is asked to do for each market. Use
-                      <code>{{ '{' }}symbol{{ '}' }}</code> and
-                      <code>{{ '{' }}timeframe{{ '}' }}</code>
-                      for the market being read. The engine always adds the mode, the cards already
-                      being watched and the gate limits after it. Applies from the next analysis.
-                      {{ d.analysisInstruction.length }} / {{ instructionMaxLength }}
-                    </p>
-                  </div>
-                }
-
-                <details class="cfg-group" open>
-                  <summary class="sub-label">Markets</summary>
-                  <div class="tf-row">
-                    <span class="muted small">{{ followedCount() }} selected</span>
-                    <select
-                      class="tf-select"
-                      [(ngModel)]="newMarketTimeframe"
-                      name="newTf"
-                      title="Timeframe applied to newly ticked markets"
-                    >
-                      @for (tf of timeframes; track tf) {
-                        <option [value]="tf">{{ tf }}</option>
-                      }
-                    </select>
-                    <span class="spacer"></span>
-                    @if (followedCount() > 0) {
-                      <button type="button" class="linkish" (click)="clearMarkets()">
-                        Clear all
-                      </button>
-                    }
-                  </div>
-
-                  @if (pairsLoading()) {
-                    <p class="muted small">Loading currency pairs…</p>
-                  } @else if (availableSymbols().length === 0) {
-                    <p class="muted small">No active currency pairs found in the catalogue.</p>
-                  } @else {
-                    <ul class="pair-check-list">
-                      @for (sym of availableSymbols(); track sym) {
-                        <li class="pair-row">
-                          <label class="inline-check">
-                            <input
-                              type="checkbox"
-                              [checked]="isFollowed(sym)"
-                              (change)="toggleMarket(sym)"
-                            />
-                            <span class="mono">{{ sym }}</span>
-                          </label>
-                          @if (marketFor(sym); as m) {
-                            <select
-                              class="tf-chip"
-                              [ngModel]="m.timeframe"
-                              (ngModelChange)="setTimeframe(sym, $event)"
-                              [name]="'tf-' + sym"
-                            >
-                              @for (tf of timeframes; track tf) {
-                                <option [value]="tf">{{ tf }}</option>
-                              }
-                            </select>
-                          }
-                        </li>
-                      }
-                    </ul>
-                    <p class="muted small">
-                      Picked from the active catalogue, so a market the engine does not know cannot
-                      be followed by a typo. Start with two or three.
-                    </p>
-                  }
-                </details>
-                <details class="cfg-group">
-                  <summary class="sub-label">Plan standards</summary>
-                  <p class="muted small">
-                    These are <b>rejection criteria</b>, not targets. A plan breaching any of them
-                    is refused outright and never adjusted — the agent owns its own levels, so this
-                    is what prevents an attractive payoff being manufactured from a stop too tight
-                    to survive.
-                  </p>
-                  <div class="row-2">
-                    <div class="field">
-                      <label for="pt-minstop">Min stop ×ATR</label>
-                      <input
-                        id="pt-minstop"
-                        type="number"
-                        step="0.1"
-                        [(ngModel)]="d.minStopAtrMultiple"
-                        name="minStop"
-                      />
-                      <p class="muted small">The single most important number here.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-maxstop">Max stop ×ATR</label>
-                      <input
-                        id="pt-maxstop"
-                        type="number"
-                        step="0.1"
-                        [(ngModel)]="d.maxStopAtrMultiple"
-                        name="maxStop"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-minrr">Min reward:risk</label>
-                      <input
-                        id="pt-minrr"
-                        type="number"
-                        step="0.1"
-                        [(ngModel)]="d.minRewardRisk"
-                        name="minRr"
-                      />
-                      <p class="muted small">Never met by tightening the stop.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-maxtgt">Max target ×ATR</label>
-                      <input
-                        id="pt-maxtgt"
-                        type="number"
-                        step="0.5"
-                        [(ngModel)]="d.maxTargetAtrMultiple"
-                        name="maxTgt"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-minconf">Min confidence</label>
-                      <input
-                        id="pt-minconf"
-                        type="number"
-                        step="0.05"
-                        min="0"
-                        max="1"
-                        [(ngModel)]="d.minConfidence"
-                        name="minConf"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-noise">Stop beyond noise (×)</label>
-                      <input
-                        id="pt-noise"
-                        type="number"
-                        step="0.1"
-                        [(ngModel)]="d.stopNoiseMultiple"
-                        name="noise"
-                      />
-                      <p class="muted small">1.0 = just outside what this market routinely does.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-spread">Spread cost (×)</label>
-                      <input
-                        id="pt-spread"
-                        type="number"
-                        step="0.5"
-                        [(ngModel)]="d.spreadCostMultiple"
-                        name="spread"
-                      />
-                      <p class="muted small">
-                        Charged before the payoff is judged. 2 = in and out.
-                      </p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-lookback">Evidence lookback (bars)</label>
-                      <input
-                        id="pt-lookback"
-                        type="number"
-                        step="100"
-                        [(ngModel)]="d.evidenceLookbackBars"
-                        name="lookback"
-                      />
-                      <p class="muted small">Long on purpose — a short window caps reach.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-corr">Max correlated plans</label>
-                      <input
-                        id="pt-corr"
-                        type="number"
-                        [(ngModel)]="d.maxCorrelatedPlans"
-                        name="corr"
-                      />
-                      <p class="muted small">One dollar bet placed three times is still one bet.</p>
-                    </div>
-                  </div>
-
-                  <div class="field check">
-                    <label>
-                      <input
-                        type="checkbox"
-                        [(ngModel)]="d.requireStopStructure"
-                        name="structure"
-                      />
-                      <span>Stop must sit beyond a real swing, not float in mid-range</span>
-                    </label>
-                  </div>
-                  <div class="field check">
-                    <label>
-                      <input type="checkbox" [(ngModel)]="d.respectKillSwitch" name="kill" />
-                      <span>Stand down entirely while the fleet kill switch is thrown</span>
-                    </label>
-                  </div>
-                </details>
-                <details class="cfg-group">
-                  <summary class="sub-label">Conviction</summary>
-                  <div class="row-2">
-                    <div class="field">
-                      <label for="pt-hcrr">High conviction extra R:R</label>
-                      <input
-                        id="pt-hcrr"
-                        type="number"
-                        step="0.1"
-                        [(ngModel)]="d.highConvictionRewardRiskBonus"
-                        name="hcrr"
-                      />
-                      <p class="muted small">
-                        A tier that costs nothing to claim ends up on every plan.
-                      </p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-hcconf">High conviction min confidence</label>
-                      <input
-                        id="pt-hcconf"
-                        type="number"
-                        step="0.05"
-                        min="0"
-                        max="1"
-                        [(ngModel)]="d.highConvictionMinConfidence"
-                        name="hcconf"
-                      />
-                    </div>
-                  </div>
-                </details>
-                <details class="cfg-group">
-                  <summary class="sub-label">Cadence and limits</summary>
-                  <div class="row-2">
-                    <div class="field">
-                      <label for="pt-vi">View interval (min)</label>
-                      <input
-                        id="pt-vi"
-                        type="number"
-                        [(ngModel)]="d.viewIntervalMinutes"
-                        name="vi"
-                      />
-                      <p class="muted small">The cost dial.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-vh">View horizon (h)</label>
-                      <input id="pt-vh" type="number" [(ngModel)]="d.viewHorizonHours" name="vh" />
-                      <p class="muted small">What accuracy is scored against.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-pe">Plan expiry (h)</label>
-                      <input id="pt-pe" type="number" [(ngModel)]="d.planExpiryHours" name="pe" />
-                    </div>
-                    <div class="field">
-                      <label for="pt-mo">Max open plans / market</label>
-                      <input
-                        id="pt-mo"
-                        type="number"
-                        [(ngModel)]="d.maxOpenPlansPerSymbol"
-                        name="mo"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-md">Max plans / day</label>
-                      <input id="pt-md" type="number" [(ngModel)]="d.maxPlansPerDay" name="md" />
-                      <p class="muted small">A ceiling, not a quota.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-cb">Catalyst blackout (min before)</label>
-                      <input
-                        id="pt-cb"
-                        type="number"
-                        [(ngModel)]="d.catalystBlackoutMinutesBefore"
-                        name="cb"
-                      />
-                      <p class="muted small">Nothing armed into a major print.</p>
-                    </div>
-                    <div class="field">
-                      <label for="pt-ca">Catalyst window (min after)</label>
-                      <input
-                        id="pt-ca"
-                        type="number"
-                        [(ngModel)]="d.catalystArmMinutesAfter"
-                        name="ca"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-sc">Daily spend cap (USD)</label>
-                      <input
-                        id="pt-sc"
-                        type="number"
-                        step="0.5"
-                        [(ngModel)]="d.dailySpendCapUsd"
-                        name="sc"
-                      />
-                    </div>
-                    <div class="field">
-                      <label for="pt-pmsc">Per-market cap (USD)</label>
-                      <input
-                        id="pt-pmsc"
-                        type="number"
-                        step="0.5"
-                        [(ngModel)]="d.perMarketDailySpendCapUsd"
-                        name="pmsc"
-                      />
-                      <p class="muted small">
-                        Stops the earliest catalyst eating the day. 0 = shared pot.
-                      </p>
-                    </div>
-                  </div>
-                </details>
-                <details class="cfg-group">
-                  <summary class="sub-label">Memory</summary>
-                  <div class="field check">
-                    <label>
-                      <input type="checkbox" [(ngModel)]="d.memoryEnabled" name="mem" />
-                      <span>Show past lessons, and which ideas have already failed</span>
-                    </label>
-                  </div>
-                  <div class="field">
-                    <label for="pt-notes">Lessons in prompt</label>
-                    <input
-                      id="pt-notes"
-                      type="number"
-                      [(ngModel)]="d.maxNotesInPrompt"
-                      name="notes"
-                    />
-                  </div>
-                </details>
-                <details class="cfg-group">
-                  <summary class="sub-label">Prompt experiment</summary>
-                  <div class="field">
-                    <label for="pt-variant">View prompt</label>
-                    <select id="pt-variant" [(ngModel)]="d.promptVariant" name="variant">
-                      <option value="a">a — control</option>
-                      <option value="b">b — argue the other side first</option>
-                      <option value="split">split — run both and compare</option>
-                    </select>
-                    <p class="muted small">
-                      The arm is recorded on every view, so accuracy can be split by it.
-                    </p>
-                  </div>
-                </details>
-                <div class="field">
-                  <label for="pt-reason">Reason (audit log)</label>
-                  <input
-                    id="pt-reason"
-                    type="text"
-                    [(ngModel)]="reason"
-                    name="reason"
-                    placeholder="why this change"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  class="save-btn"
-                  [disabled]="saving() || !canManage()"
-                  (click)="save()"
-                >
-                  {{ saving() ? 'Saving…' : 'Save configuration' }}
-                </button>
-              </section>
-            </fieldset>
+            <app-pt-config-form
+              [draft]="d"
+              [health]="health()"
+              [canManage]="canManage()"
+              [saving]="saving()"
+              [dirty]="dirty()"
+              [availableSymbols]="availableSymbols()"
+              [pairsLoading]="pairsLoading()"
+              [message]="saveMessage()"
+              [conflict]="conflict() !== null"
+              [(reason)]="reason"
+              (patch)="applyPatch($event)"
+              (save)="requestSave()"
+              (discard)="discard()"
+              (reloadCurrent)="reloadCurrent()"
+            />
+          } @else if (configError()) {
+            <section class="card">
+              <p class="muted small">Could not load the configuration.</p>
+            </section>
           }
         </div>
 
-        <!-- ── Views + plans ──────────────────────────────────────────── -->
         <div class="col">
-          @if (board(); as b) {
-            <section class="card">
-              <h2>What it currently thinks</h2>
-              @if (b.views.length === 0) {
-                <p class="muted small">
-                  No views yet. The agent writes one per followed market on its cadence — nothing
-                  here means it is disabled, has no markets configured, or has not yet reached its
-                  first interval.
-                </p>
-              } @else {
-                <!-- Bounded and scrolling. Twenty markets of full narrative ran to 11,600px —
-                     eleven screens in one card, with the neighbouring column dead beside it. -->
-                <div class="scroll-list">
-                  @for (v of b.views; track v.id) {
-                    <article class="view" [class.open]="isViewOpen(v.id)">
-                      <header (click)="toggleView(v.id)">
-                        <span class="mono">{{ v.symbol }} {{ v.timeframe }}</span>
-                        <span class="muted small">{{ v.regime }}</span>
-                        <span
-                          class="lean-pill"
-                          [class.buy]="v.lean === 'Buy'"
-                          [class.sell]="v.lean === 'Sell'"
-                        >
-                          {{ v.lean === 'None' ? 'no view' : v.lean }}
-                          @if (v.lean !== 'None') {
-                            · {{ v.confidence | number: '1.2-2' }}
-                          }
-                        </span>
-                        <span class="spacer"></span>
-                        <span class="muted small">{{ v.ageMinutes | number: '1.0-0' }}m ago</span>
-                        @if (v.journalLlmInvocationId; as jid) {
-                          <!-- Stops the click bubbling to the header's expand toggle. -->
-                          <a
-                            class="thread-link"
-                            [routerLink]="['/conversations']"
-                            [queryParams]="{ conversation: jid }"
-                            (click)="$event.stopPropagation()"
-                            [title]="
-                              'Open the ' +
-                              v.symbol +
-                              ' ' +
-                              v.timeframe +
-                              ' journal — every view and plan in order, with a follow-up box'
-                            "
-                            aria-label="Open this market's journal"
-                            >💬</a
-                          >
-                        }
-                        @if (v.analysisLlmInvocationId; as aid) {
-                          <a
-                            class="thread-link"
-                            [routerLink]="['/conversations']"
-                            [queryParams]="{ conversation: aid }"
-                            (click)="$event.stopPropagation()"
-                            title="Open the full assistant analysis behind this view — every tool call, chart and card, with a follow-up box"
-                            aria-label="Open the assistant analysis"
-                            >🔎</a
-                          >
-                        }
-                        <span class="chev">{{ isViewOpen(v.id) ? '▴' : '▾' }}</span>
-                      </header>
-
-                      @if (isViewOpen(v.id)) {
-                        <p class="narrative">{{ v.narrative }}</p>
-                        @if (parseScenarios(v.scenariosJson); as scenarios) {
-                          @if (scenarios.length > 0) {
-                            <ul class="scenarios">
-                              @for (s of scenarios; track $index) {
-                                <li>
-                                  <b>{{ s.trigger }}</b> → {{ s.expectedReaction }}
-                                  <span class="muted">{{ s.myAction }}</span>
-                                </li>
-                              }
-                            </ul>
-                          }
-                        }
-                        @if (v.whatWouldChangeMyMind) {
-                          <p class="muted small">
-                            Would change my mind: {{ v.whatWouldChangeMyMind }}
-                          </p>
-                        }
-                      } @else {
-                        <!-- Two lines is enough to tell whether this one is worth opening. -->
-                        <p class="narrative clamp-2">{{ v.narrative }}</p>
-                      }
-                    </article>
-                  }
-                </div>
-              }
-            </section>
-
-            <section class="card">
-              <h2>Plans and refusals</h2>
-              <p class="muted small">
-                Declines and rejections are shown alongside live plans on purpose — "the setups it
-                passed on" is half of what makes a discretionary record readable, and the only way
-                to tell a genuinely patient agent from a broken one that never finds anything.
-              </p>
-              @if (oco(); as group) {
-                <app-oco-banner
-                  [groupId]="group"
-                  [text]="
-                    'Showing every plan of one OCO group (' +
-                    b.plans.length +
-                    ') — the first to file stands the others down.'
-                  "
-                  otherPage="/trade-recommendations"
-                  otherLabel="Their cards on Recommendations →"
-                  secondPage="/analysis-monitors"
-                  secondLabel="Their watches on Monitors →"
-                  clearLabel="Show all plans ✕"
-                  (cleared)="selectOco(null)"
-                />
-              }
-              @if (b.plans.length === 0) {
-                <p class="muted small">
-                  {{ oco() ? 'No plan belongs to this OCO group.' : 'Nothing written yet.' }}
-                </p>
-              } @else {
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>When</th>
-                        <th>Market</th>
-                        <th>Status</th>
-                        <th class="num">R:R</th>
-                        <th class="num">Stop ×ATR</th>
-                        <th>Reasoning</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (p of b.plans; track p.id) {
-                        <tr
-                          [class.refused]="isRefused(p)"
-                          [class.oco-row]="!!p.ocoGroupId"
-                          [class.oco-lit]="!!p.ocoGroupId && hoveredOco() === p.ocoGroupId"
-                          [style.--oco-h]="p.ocoGroupId ? ocoHue(p.ocoGroupId) : null"
-                          (mouseenter)="p.ocoGroupId && hoveredOco.set(p.ocoGroupId)"
-                          (mouseleave)="p.ocoGroupId && hoveredOco.set(null)"
-                        >
-                          <td class="nowrap">{{ p.createdAtUtc | date: 'dd MMM HH:mm' }}</td>
-                          <td class="nowrap mono">
-                            {{ p.symbol }}
-                            @if (p.direction !== 'None') {
-                              <span class="dir" [class.buy]="p.direction === 'Buy'">{{
-                                p.direction
-                              }}</span>
-                            }
-                            @if (p.journalLlmInvocationId; as jid) {
-                              <a
-                                class="thread-link"
-                                [routerLink]="['/conversations']"
-                                [queryParams]="{ conversation: jid }"
-                                [title]="
-                                  'Open the ' +
-                                  p.symbol +
-                                  ' journal — this plan in context, with a follow-up box'
-                                "
-                                aria-label="Open this market's journal"
-                                >💬</a
-                              >
-                            }
-                          </td>
-                          <td>
-                            <span class="status" [class]="statusClass(p)">{{ p.status }}</span>
-                            @if (p.nearFloor) {
-                              <span class="floor-tag" title="Stop hugging the survivability minimum"
-                                >floor</span
-                              >
-                            }
-                            @if (p.conviction === 'High') {
-                              <span
-                                class="conviction-tag"
-                                title="Backed above the ordinary bar — tracked separately"
-                                >high</span
-                              >
-                            }
-                            @if (p.recommendationId) {
-                              <a
-                                class="card-tag"
-                                [routerLink]="['/trade-recommendations', p.recommendationId]"
-                                [title]="
-                                  'Card #' +
-                                  p.recommendationId +
-                                  (p.entryMonitorId
-                                    ? ' — watch #' +
-                                      p.entryMonitorId +
-                                      ' files it when its condition is met'
-                                    : '')
-                                "
-                                >card #{{ p.recommendationId }}</a
-                              >
-                            }
-                            @if (p.entryMonitorId) {
-                              <a
-                                class="card-tag"
-                                [routerLink]="['/analysis-monitors']"
-                                [queryParams]="{ focus: p.entryMonitorId }"
-                                [title]="'Watch #' + p.entryMonitorId + ' — open it on Monitors'"
-                                >watch #{{ p.entryMonitorId }}</a
-                              >
-                            }
-                            @if (p.ocoGroupId) {
-                              <div class="oco-line">
-                                <app-oco-chip
-                                  [groupId]="p.ocoGroupId"
-                                  [partners]="ocoPartnersOf(p)"
-                                  [highlighted]="hoveredOco() === p.ocoGroupId"
-                                  [selectable]="oco() !== p.ocoGroupId"
-                                  [showLonely]="true"
-                                  (hover)="hoveredOco.set($event)"
-                                  (selected)="selectOco($event)"
-                                />
-                              </div>
-                            }
-                          </td>
-                          <td class="num">
-                            {{ p.rewardRisk ? (p.rewardRisk | number: '1.2-2') : '—' }}
-                          </td>
-                          <td class="num">
-                            {{ p.stopAtrMultiple ? (p.stopAtrMultiple | number: '1.2-2') : '—' }}
-                          </td>
-                          <td class="reason" [class.open]="isPlanOpen(p.id)">
-                            <!-- Full reasoning ran to ~390px per row; fourteen rows filled five
-                                 screens. Clamped to two lines, opened on click. -->
-                            <span class="reason-body" (click)="togglePlan(p.id)">
-                              @if (p.rejectionReason) {
-                                <span class="muted">{{ p.rejectionReason }}</span>
-                              } @else {
-                                {{ p.thesis }}
-                              }
-                            </span>
-                            @if (p.preMortem) {
-                              <span class="premortem muted" title="Named before the plan was armed">
-                                How it dies: {{ p.preMortem }}
-                              </span>
-                            }
-                            @if (p.invalidationPrice) {
-                              <span
-                                class="premortem muted"
-                                title="Abandoned before entry if price reaches this"
-                              >
-                                Abandon at {{ p.invalidationPrice }}
-                              </span>
-                            }
-                            @if (outcomeOf(p); as o) {
-                              <span class="outcome muted">
-                                {{ o.outcome }}
-                                @if (o.rMultiple !== null && o.rMultiple !== undefined) {
-                                  · {{ o.rMultiple | number: '1.2-2' }}R
-                                }
-                                @if (o.mfeR !== null && o.mfeR !== undefined) {
-                                  · MFE {{ o.mfeR | number: '1.2-2' }}R
-                                }
-                              </span>
-                            }
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              }
-            </section>
-          }
+          <app-pt-views-panel [views]="board()?.views ?? []" [symbols]="symbols()" />
+          <app-pt-results-panel [symbols]="symbols()" />
         </div>
       </div>
+
+      @if (board(); as b) {
+        <app-pt-plans-table
+          [plans]="b.plans"
+          [total]="planTotal()"
+          [pageSize]="pageSize"
+          [filters]="filters()"
+          [oco]="oco()"
+          [codes]="rejectionCodes()"
+          [symbols]="symbols()"
+          (filtersChange)="setFilters($event)"
+          (ocoSelect)="selectOco($event)"
+        />
+      }
+
+      <app-confirm-dialog
+        [open]="liveConfirm() !== null"
+        title="Start filing real signals?"
+        [message]="liveConfirmMessage()"
+        confirmLabel="Save and go live"
+        confirmVariant="destructive"
+        [loading]="saving()"
+        (confirm)="confirmLive()"
+        (cancelled)="liveConfirm.set(null)"
+      />
     </div>
   `,
   styles: [
     `
-      .ro-fieldset {
-        display: contents;
-        border: 0;
-        margin: 0;
-        padding: 0;
-        min-width: 0;
-      }
-
-      /* Tokens and structure follow the Spot Sweep page so the two siblings read as one
-         product. An earlier pass invented token names (--surface, --accent-fg) that do not
-         exist in the design system, so every colour silently fell back to a hardcoded hex
-         and the page drifted away from the rest of the console. */
-      /* The shell already pads the content area; a second 24/32px inset put this page 32px in
-         from every sibling's left edge. */
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -967,22 +165,11 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         font-size: var(--text-xl);
         font-weight: var(--font-semibold);
       }
-      h2 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
       .muted {
         color: var(--text-secondary);
       }
       .small {
         font-size: var(--text-xs);
-      }
-      .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .spacer {
-        flex: 1;
       }
       .head-actions {
         display: flex;
@@ -990,7 +177,8 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         gap: var(--space-3);
         flex-shrink: 0;
       }
-      .mode-badge {
+      .mode-badge,
+      .unsaved {
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
         padding: 4px 10px;
@@ -1001,81 +189,23 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         letter-spacing: 0.04em;
       }
       .mode-badge.live {
-        background: rgba(0, 113, 227, 0.16);
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
         color: var(--accent);
       }
-      .banner {
-        padding: var(--space-3) var(--space-4);
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
+      .unsaved {
+        background: rgba(234, 179, 8, 0.15);
+        color: #b45309;
       }
-      .banner.info {
-        background: rgba(0, 122, 255, 0.1);
-        color: var(--accent, #0a66c2);
-      }
-
       .card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
       }
-      .status-card {
-        gap: var(--space-4);
-      }
-      .status-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .phase-pill {
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        padding: 3px 10px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .phase-pill.analyzing {
-        background: rgba(0, 113, 227, 0.15);
-        color: var(--accent);
-      }
-      .counters {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(104px, 100%), 1fr));
-        gap: var(--space-4) var(--space-3);
-        margin: 0;
-      }
-      .counters div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-      }
-      .counters dt {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-      }
-      .counters dd {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .counters dd.warn-value {
-        color: #b45309;
-      }
-
       .cols {
         display: grid;
-        /* The config column is a fixed-size form; the journal beside it is the page. Splitting
-           50/50 left the form's column dead for 15,000px once the views stacked up. */
-        grid-template-columns: minmax(360px, 30%) 1fr;
+        /* The config column is a fixed-size form; the panels beside it are the page. */
+        grid-template-columns: minmax(360px, 34%) 1fr;
         gap: var(--space-4);
         align-items: start;
       }
@@ -1090,454 +220,273 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
           grid-template-columns: 1fr;
         }
       }
-
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .field > label {
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-      }
-      .field.check label {
-        flex-direction: row;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .field p {
-        margin: 0;
-      }
-      .sub-label {
-        margin: var(--space-2) 0 0;
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .row-2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-      }
-      input,
-      select,
-      textarea {
-        font: inherit;
-        padding: 7px 10px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-      }
-      input[type='checkbox'] {
-        width: auto;
-        padding: 0;
-      }
-      textarea {
-        resize: vertical;
-        min-height: 110px;
-        line-height: 1.45;
-      }
-      .instr-head {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .instr-head > label {
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-      }
-      .instr-head .spacer {
-        flex: 1;
-      }
-      .instr-tag {
-        font-size: 10px;
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        border: 1px solid var(--border);
-        color: var(--text-secondary);
-      }
-      .instr-tag.custom {
-        border-color: var(--accent);
-        color: var(--accent);
-      }
-      .linkish {
-        border: none;
-        background: transparent;
-        color: var(--accent);
-        cursor: pointer;
-        font-size: var(--text-xs);
-        padding: 0;
-      }
-      .save-btn {
-        align-self: flex-start;
-        border: none;
-        background: var(--accent);
-        color: #fff;
-        border-radius: var(--radius-full);
-        padding: 9px 22px;
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-        margin-top: var(--space-2);
-      }
-      .save-btn:disabled {
-        opacity: 0.5;
-        cursor: default;
-      }
-
-      .tf-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        margin-bottom: 6px;
-      }
-      .tf-select {
-        padding: 4px 8px;
-        font-size: var(--text-xs);
-      }
-      .pair-check-list {
-        list-style: none;
-        margin: 0;
-        padding: 6px;
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(110px, 100%), 1fr));
-        gap: 4px 12px;
-        max-height: 220px;
-        overflow-y: auto;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-      }
-      .pair-check-list li {
-        display: flex;
-      }
-      .pair-row {
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-      }
-      .inline-check {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--text-sm);
-        cursor: pointer;
-      }
-      /* The per-market timeframe, sized as a chip so a followed row stays the same height as
-         an unfollowed one and the grid does not go ragged. */
-      .tf-chip {
-        flex: none;
-        padding: 1px 4px;
-        font-size: 10px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-secondary);
-      }
-
-      .view {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-      }
-      .view header {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-2);
-      }
-      .lean-pill {
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .lean-pill.buy {
-        background: rgba(52, 199, 89, 0.16);
-        color: var(--profit, #15803d);
-      }
-      .lean-pill.sell {
-        background: rgba(255, 59, 48, 0.14);
-        color: var(--loss, #b91c1c);
-      }
-      .narrative {
-        margin: 0;
-        font-size: var(--text-sm);
-        line-height: 1.5;
-      }
-      /* Two lines is enough to decide whether a market is worth opening. */
-      .clamp-2 {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        color: var(--text-secondary);
-      }
-
-      /* ── Nothing on this page may grow without limit ──────────────────────
-         Measured at 17,722px — seventeen screens — with 15,000px of dead
-         column beside the views. Every region that grows with the data now
-         has a ceiling and scrolls inside it, so the page stays a cockpit
-         rather than becoming a document. */
-      /* The form is a fixed set of fields, so it cannot grow with the data — but at 2,405px it
-         was still the tallest thing on the page and the reason it ran to three screens. Grouped
-         so the operator opens the one section they came for. Native <details>, so keyboard and
-         screen-reader behaviour comes for free. */
-      .cfg-group {
-        border-top: 1px solid var(--border);
-        padding-top: var(--space-3);
-      }
-      .cfg-group > summary {
-        cursor: pointer;
-        user-select: none;
-        list-style: none;
-      }
-      .cfg-group > summary::-webkit-details-marker {
-        display: none;
-      }
-      .cfg-group > summary::after {
-        content: ' ▾';
-        color: var(--text-secondary);
-        font-size: 11px;
-      }
-      .cfg-group[open] > summary::after {
-        content: ' ▴';
-      }
-      .cfg-group > summary:hover {
-        opacity: 0.8;
-      }
-
-      .scroll-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        max-height: 620px;
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        padding-right: 4px;
-      }
-      .view > header {
-        cursor: pointer;
-        user-select: none;
-      }
-      .view > header:hover {
-        opacity: 0.85;
-      }
-      .view.open {
-        background: var(--bg-secondary);
-      }
-      /* Quiet, but findable. One sits on every row, so it must not compete with the lean pills
-         that carry the information — but at 0.45 it was missed entirely by someone actively
-         looking for it, which is the wrong end of that trade-off. */
-      .thread-link {
-        margin-left: 6px;
-        font-size: 13px;
-        line-height: 1;
-        opacity: 0.75;
-        text-decoration: none;
-        transition: opacity 0.12s ease;
-      }
-      .thread-link:hover,
-      .thread-link:focus-visible {
-        opacity: 1;
-      }
-
-      .chev {
-        color: var(--text-secondary);
-        font-size: 11px;
-        margin-left: 6px;
-      }
-      .scenarios {
-        margin: 0;
-        padding-left: var(--space-4);
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .table-wrap {
-        max-height: 460px;
-        overflow-y: auto;
-        overscroll-behavior: contain;
-        overflow-x: auto;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-xs);
-      }
-      th,
-      td {
-        text-align: left;
-        padding: 6px 8px;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
-      }
-      th {
-        color: var(--text-tertiary);
-        font-weight: var(--font-medium);
-        text-transform: uppercase;
-        font-size: 10.5px;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      .nowrap {
-        white-space: nowrap;
-      }
-      tr.refused {
-        opacity: 0.7;
-      }
-      .status {
-        font-weight: var(--font-semibold);
-      }
-      .status.ok {
-        color: var(--profit, #15803d);
-      }
-      .status.bad {
-        color: var(--loss, #b91c1c);
-      }
-      .status.neutral {
-        color: var(--text-secondary);
-      }
-      .dir {
-        margin-left: 4px;
-        color: var(--loss, #b91c1c);
-      }
-      .dir.buy {
-        color: var(--profit, #15803d);
-      }
-      .floor-tag {
-        margin-left: 4px;
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        background: rgba(234, 179, 8, 0.15);
-        color: #b45309;
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-      }
-      .conviction-tag {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        background: color-mix(in srgb, var(--accent) 16%, transparent);
-        color: var(--accent);
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .card-tag {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        white-space: nowrap;
-      }
-      .card-tag {
-        background: color-mix(in srgb, var(--text-muted, #64748b) 14%, transparent);
-        color: var(--text-muted, #64748b);
-        text-decoration: none;
-      }
-      a.card-tag:hover {
-        color: var(--accent);
-      }
-      /* One colour per OCO group: the legs share a stripe, and hovering one lights its partners. */
-      .oco-line {
-        margin-top: 4px;
-      }
-      tr.oco-row td:first-child {
-        box-shadow: inset 3px 0 0 hsl(var(--oco-h) 65% 52%);
-      }
-      tr.oco-lit {
-        opacity: 1;
-        background: hsl(var(--oco-h) 70% 50% / 0.12);
-      }
-      app-oco-banner {
-        margin-bottom: var(--space-3);
-      }
-      /* Its own line: the pre-mortem is a sentence, not a badge, and inlining it
-         beside the thesis made both unreadable. */
-      .premortem {
-        display: block;
-        margin-top: 3px;
-        font-size: 11px;
-        font-style: italic;
-      }
-      .reason {
-        max-width: 42ch;
-        line-height: 1.45;
-      }
-      /* The row's own ceiling. A full thesis rendered ~390px of cell, so fourteen rows filled
-         five screens; the table became unreadable exactly as it got interesting. */
-      .reason-body {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        cursor: pointer;
-      }
-      .reason.open .reason-body {
-        display: block;
-        overflow: visible;
-      }
-      .reason-body:hover {
-        opacity: 0.8;
-      }
-      .outcome {
-        display: block;
-        margin-top: 2px;
-        font-variant-numeric: tabular-nums;
-      }
     `,
   ],
 })
-export class PatientTraderPageComponent {
+export class PatientTraderPageComponent implements HasUnsavedChanges {
   private readonly svc = inject(PatientTraderService);
   private readonly auth = inject(AuthService);
+  private readonly currencyPairs = inject(CurrencyPairsService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
   /** The config PUT needs platform.engine.manage on the engine. */
   readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
 
-  private readonly currencyPairs = inject(CurrencyPairsService);
+  protected readonly pageSize = PLAN_PAGE_SIZE;
 
-  readonly timeframes = ['M15', 'H1', 'H4', 'D1'];
+  // ── URL state ──────────────────────────────────────────────────────────────
 
-  /** Timeframe applied when a market is newly ticked; per-market after that. */
-  newMarketTimeframe = 'H1';
+  /** The OCO group the plans table is narrowed to (`?oco=`), or null for the latest plans. */
+  readonly oco = signal<string | null>(
+    this.route.snapshot.queryParamMap.get('oco')?.trim() || null,
+  );
+  /** Plan filters and page (`?pstatus=&pdir=&pcode=&psym=&ppage=`). */
+  readonly filters = signal<PlanFilters>(
+    filtersFromParams((n) => this.route.snapshot.queryParamMap.get(n)),
+  );
+
+  // ── Data ───────────────────────────────────────────────────────────────────
+
+  /**
+   * The board is push-driven. The interval is a long fallback that only heals a missed push or a
+   * reconnect gap — an interval short enough to feel live is also short enough to repaint the
+   * page under an operator mid-edit.
+   */
+  private readonly boardResource = createPolledResource(
+    () => this.svc.getBoard(boardQuery(this.filters(), PLAN_PAGE_SIZE, this.oco())),
+    {
+      intervalMs: 600_000,
+      refreshOn: ['patientTraderChanged'],
+      // A filter or group switch drops the previous plans at once rather than presenting them as
+      // the new answer.
+      key: () => boardQuery(this.filters(), PLAN_PAGE_SIZE, this.oco()),
+    },
+  );
+  readonly board = this.boardResource.value;
+
+  /** Refreshed with the board, plus a one-minute tick so "next look" and "stuck" stay current. */
+  private readonly healthResource = createPolledResource(() => this.svc.getHealth(), {
+    intervalMs: 60_000,
+    refreshOn: ['patientTraderChanged'],
+  });
+  readonly health = this.healthResource.value;
+  readonly healthError = this.healthResource.error;
+
+  /**
+   * Configuration never refetches on its own: it is operator-owned, so a background refetch could
+   * only ever arrive while somebody is typing into the form it would replace. Fetched once, and
+   * replaced explicitly after a save or a conflict reload.
+   */
+  private readonly configResource = createPolledResource(() => this.svc.getConfig(), {
+    intervalMs: 0,
+  });
+  readonly configError = this.configResource.error;
+
+  /**
+   * The last config read from or written to the engine — the baseline for the dirty check and
+   * the "before" of the Live check. Seeded from the first load, then replaced only by a save, a
+   * discard-and-reload or a conflict reload.
+   */
+  private readonly loaded = signal<PatientTraderConfig | null>(null);
+  readonly config = this.loaded.asReadonly();
+  /** The editable copy. Immutable: every edit is a new object, so the dirty check recomputes. */
+  readonly draft = signal<PatientTraderConfig | null>(null);
+
+  /** Adopts the first loaded config as both the baseline and the editable copy, once. */
+  private readonly seedDraft = effect(() => {
+    const c = this.configResource.value();
+    if (!c) return;
+    untracked(() => {
+      if (this.loaded() === null) this.adopt(c);
+    });
+  });
+
+  readonly dirty = computed(() => isConfigDirty(this.loaded(), this.draft()));
+
+  readonly engine = computed(() => this.health()?.engine ?? this.loaded()?.analysisEngine ?? null);
+
+  /** Followed markets (persisted), for the panels' market filters. */
+  readonly symbols = computed(() => {
+    const set = new Set<string>();
+    for (const m of this.loaded()?.markets ?? []) set.add(m.symbol.toUpperCase());
+    for (const m of this.health()?.markets ?? []) set.add(m.symbol.toUpperCase());
+    return [...set].sort();
+  });
+
+  /** Plans matching the filters; an engine without `totalPlans` falls back to the page size. */
+  readonly planTotal = computed(() => {
+    const b = this.board();
+    if (!b) return 0;
+    return typeof b.totalPlans === 'number' ? b.totalPlans : b.plans.length;
+  });
+
+  readonly rejectionCodes = computed(() =>
+    Object.keys(this.board()?.counters.rejectedByCode ?? {}).sort(),
+  );
 
   readonly availableSymbols = signal<string[]>([]);
   readonly pairsLoading = signal(true);
 
+  // ── Save state ─────────────────────────────────────────────────────────────
+
+  readonly saving = signal(false);
+  readonly saveMessage = signal<string | null>(null);
+  /** Set when the last save lost to someone else's: the CURRENT config, offered for reload. */
+  readonly conflict = signal<PatientTraderConfig | null>(null);
+  readonly reason = signal('');
+  /** Markets a pending save would put into Live, while the confirmation is open. */
+  readonly liveConfirm = signal<{ payload: PatientTraderConfig; markets: string[] } | null>(null);
+
+  readonly liveConfirmMessage = computed(() => {
+    const p = this.liveConfirm();
+    if (!p) return '';
+    const names = p.markets.join(', ');
+    return (
+      `Saving this puts ${p.markets.length === 1 ? 'this market' : 'these markets'} into Live: ` +
+      `${names}. From then on, a card whose watch fires there files a real signal into the ` +
+      `trading pipeline.`
+    );
+  });
+
   constructor() {
     this.loadCurrencyPairs();
+    warnBeforeUnload(() => this.dirty());
+  }
+
+  // ── Unsaved-changes guard ──────────────────────────────────────────────────
+
+  hasUnsavedChanges(): boolean {
+    return this.dirty() && !this.saving();
+  }
+
+  unsavedChangesNote(): string {
+    return 'The Patient Trader configuration has unsaved changes';
+  }
+
+  // ── Config editing ─────────────────────────────────────────────────────────
+
+  applyPatch(patch: ConfigPatch): void {
+    const d = this.draft();
+    if (!d) return;
+    this.draft.set({ ...d, ...patch });
+  }
+
+  discard(): void {
+    const l = this.loaded();
+    if (l) this.draft.set(structuredClone(l));
+    this.saveMessage.set(null);
+  }
+
+  /** After a conflict: take the current settings (and their version), dropping this draft. */
+  reloadCurrent(): void {
+    const current = this.conflict();
+    this.conflict.set(null);
+    this.saveMessage.set(null);
+    if (current) {
+      this.adopt(current);
+      return;
+    }
+    // The conflict carried no config: read it afresh.
+    this.svc.getConfig().subscribe({
+      next: (c) => this.adopt(c),
+      error: () => this.saveMessage.set('Could not reload the configuration.'),
+    });
+  }
+
+  requestSave(): void {
+    const current = this.draft();
+    if (!current || this.saving() || !this.canManage()) return;
+    const payload = toSavePayload(current);
+    const markets = newlyLiveMarkets(this.loaded(), payload);
+    if (markets.length > 0) {
+      this.liveConfirm.set({ payload, markets });
+      return;
+    }
+    this.doSave(payload);
+  }
+
+  confirmLive(): void {
+    const p = this.liveConfirm();
+    if (!p) return;
+    this.doSave(p.payload, () => this.liveConfirm.set(null));
+  }
+
+  private doSave(payload: PatientTraderConfig, settled?: () => void): void {
+    this.saving.set(true);
+    this.saveMessage.set(null);
+    this.conflict.set(null);
+
+    this.svc.saveConfig(payload, { reason: this.reason() }).subscribe({
+      next: (result) => {
+        this.saving.set(false);
+        settled?.();
+        switch (result.kind) {
+          case 'saved':
+            // The PERSISTED state wins — anything governance queued or refused shows as it is.
+            this.adopt(result.config);
+            this.saveMessage.set(result.message ?? 'Saved.');
+            this.reason.set('');
+            this.boardResource.refresh();
+            this.healthResource.refresh();
+            break;
+          case 'conflict':
+            // Keep the operator's draft; offer the current settings instead of overwriting them.
+            this.conflict.set(result.config);
+            this.saveMessage.set(result.message);
+            break;
+          case 'refused':
+            this.saveMessage.set(result.message);
+            break;
+        }
+      },
+      error: (err: unknown) => {
+        this.saving.set(false);
+        settled?.();
+        this.saveMessage.set(
+          err instanceof Error && err.message
+            ? `Save failed — ${err.message}`
+            : 'Save failed — the configuration was not changed.',
+        );
+      },
+    });
+  }
+
+  /** Makes `c` both the baseline and the editable copy. */
+  private adopt(c: PatientTraderConfig): void {
+    const shown = withInstructionShown(c);
+    this.loaded.set(shown);
+    this.draft.set(structuredClone(shown));
+  }
+
+  // ── URL state ──────────────────────────────────────────────────────────────
+
+  /** Narrows the plans to one OCO group (null shows the latest plans again), kept in the URL. */
+  selectOco(group: string | null): void {
+    if (group === this.oco()) return;
+    this.oco.set(group);
+    this.syncUrl({ oco: group });
+    this.boardResource.refresh();
+  }
+
+  setFilters(f: PlanFilters): void {
+    this.filters.set(f);
+    this.syncUrl(filtersToParams(f));
+    this.boardResource.refresh();
+  }
+
+  private syncUrl(queryParams: Record<string, string | null>): void {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   /**
-   * Active symbols from the currency-pair catalogue.
-   *
-   * The catalogue is the authority on what the engine can actually trade, so following a market is
-   * a selection rather than a typed string — a mistyped symbol would otherwise be configured
-   * happily and then silently resolve no readings for ever.
+   * Active symbols from the currency-pair catalogue — the authority on what the engine can trade,
+   * so following a market is a selection rather than a typed string.
    */
   private loadCurrencyPairs(): void {
     this.pairsLoading.set(true);
@@ -1554,245 +503,4 @@ export class PatientTraderPageComponent {
       error: () => this.pairsLoading.set(false),
     });
   }
-
-  readonly parseScenarios = parseScenarios;
-
-  /**
-   * The board is push-driven. The interval is a long fallback that only heals a missed push or a
-   * reconnect gap — an interval short enough to feel live is also short enough to repaint the
-   * page under an operator mid-edit, which is what polling did here before.
-   */
-  private readonly route = inject(ActivatedRoute);
-  private readonly router = inject(Router);
-
-  /** The OCO group the plans table is narrowed to (`?oco=`), or null for the latest plans. */
-  readonly oco = signal<string | null>(
-    this.route.snapshot.queryParamMap.get('oco')?.trim() || null,
-  );
-  /** The group under the pointer — its legs light up together. */
-  readonly hoveredOco = signal<string | null>(null);
-
-  private readonly boardResource = createPolledResource(
-    () => this.svc.getBoard(this.oco() ? 200 : 50, this.oco()),
-    {
-      intervalMs: 600_000,
-      refreshOn: ['patientTraderChanged'],
-      // A group switch drops the previous plans at once rather than presenting them as its answer.
-      key: () => this.oco(),
-    },
-  );
-  readonly board = this.boardResource.value;
-
-  /**
-   * Configuration never refetches on its own.
-   *
-   * It is operator-owned: nothing in the engine changes it, so a background refetch can only ever
-   * arrive while somebody is typing into the form it would replace. Fetched once, and refreshed
-   * explicitly after a save so the persisted state — including anything governance queued or
-   * refused — is what ends up on screen.
-   */
-  private readonly configResource = createPolledResource(() => this.svc.getConfig(), {
-    intervalMs: 0,
-  });
-  readonly config = this.configResource.value;
-
-  /**
-   * The editable copy.
-   *
-   * Cloned from the last poll rather than bound to it, so a refresh landing mid-edit cannot
-   * silently discard what an operator has typed.
-   */
-  /**
-   * Which view and plan rows the operator has opened.
-   *
-   * Collapsed is the default because the page is a cockpit, not a document: twenty full
-   * narratives rendered at once made it seventeen screens tall and buried the one market that
-   * actually mattered. A set rather than a single id — comparing two markets side by side is the
-   * common reason to open one at all.
-   */
-  private readonly openViews = signal<ReadonlySet<number>>(new Set());
-  private readonly openPlans = signal<ReadonlySet<number>>(new Set());
-
-  protected isViewOpen(id: number): boolean {
-    return this.openViews().has(id);
-  }
-
-  protected isPlanOpen(id: number): boolean {
-    return this.openPlans().has(id);
-  }
-
-  protected toggleView(id: number): void {
-    this.openViews.update((s) => toggled(s, id));
-  }
-
-  protected togglePlan(id: number): void {
-    this.openPlans.update((s) => toggled(s, id));
-  }
-
-  private readonly localDraft = signal<PatientTraderConfig | null>(null);
-
-  readonly draft = computed<PatientTraderConfig | null>(() => {
-    const local = this.localDraft();
-    if (local) return local;
-
-    // Seeded from the first load and then owned outright. Returning a fresh clone of config()
-    // each time looks equivalent, but the form binds straight into the returned object — so any
-    // re-emit of config() would hand back a new clone and silently discard whatever had been
-    // typed into the old one.
-    const loaded = this.config();
-    return loaded ? structuredClone(loaded) : null;
-  });
-
-  /** Adopts the first loaded config as the editable copy, once. */
-  private readonly seedDraft = effect(() => {
-    const loaded = this.config();
-    if (loaded && this.localDraft() === null) {
-      this.localDraft.set(withInstructionShown(loaded));
-    }
-  });
-
-  readonly instructionMaxLength = 8000;
-
-  /** True when the instruction differs from the engine's built-in one. */
-  isCustomInstruction(c: PatientTraderConfig): boolean {
-    const text = (c.analysisInstruction ?? '').trim();
-    return text.length > 0 && text !== (c.defaultAnalysisInstruction ?? '').trim();
-  }
-
-  /** Puts the built-in instruction back in the box. Saved, it is stored as "use the default". */
-  resetInstruction(): void {
-    const current = this.draft();
-    if (!current) return;
-    const next = structuredClone(current);
-    next.analysisInstruction = next.defaultAnalysisInstruction ?? '';
-    this.localDraft.set(next);
-  }
-
-  readonly saving = signal(false);
-  readonly saveMessage = signal<string | null>(null);
-  reason = '';
-
-  /** True when this symbol is in the followed set. */
-  isFollowed(symbol: string): boolean {
-    return this.draft()?.markets.some((m) => m.symbol === symbol) ?? false;
-  }
-
-  marketFor(symbol: string): PatientTraderMarket | undefined {
-    return this.draft()?.markets.find((m) => m.symbol === symbol);
-  }
-
-  followedCount(): number {
-    return this.draft()?.markets.length ?? 0;
-  }
-
-  /** Adds or removes a market. Ticking it also enables it — following a market you left off would
-   * be a confusing half-state on a page where the checkbox IS the decision. */
-  toggleMarket(symbol: string): void {
-    const current = this.draft();
-    if (!current) return;
-    const next = structuredClone(current);
-
-    next.markets = next.markets.some((m) => m.symbol === symbol)
-      ? next.markets.filter((m) => m.symbol !== symbol)
-      : [...next.markets, { symbol, timeframe: this.newMarketTimeframe, enabled: true }];
-
-    this.localDraft.set(next);
-  }
-
-  /** Stops following every market. The tick list has no other bulk action. */
-  clearMarkets(): void {
-    const current = this.draft();
-    if (!current) return;
-    const next = structuredClone(current);
-    next.markets = [];
-    this.localDraft.set(next);
-  }
-
-  setTimeframe(symbol: string, timeframe: string): void {
-    const current = this.draft();
-    if (!current) return;
-    const next = structuredClone(current);
-    next.markets = next.markets.map((m) => (m.symbol === symbol ? { ...m, timeframe } : m));
-    this.localDraft.set(next);
-  }
-
-  save(): void {
-    const current = this.draft();
-    if (!current || this.saving() || !this.canManage()) return;
-
-    // Normalise symbols before they reach the engine — a lower-case entry would silently follow a
-    // market the rest of the engine does not recognise.
-    const payload = structuredClone(current);
-    payload.markets = payload.markets
-      .map((m) => ({ ...m, symbol: m.symbol.trim().toUpperCase() }))
-      .filter((m) => m.symbol.length > 0);
-    payload.mode = payload.mode as PatientTraderMode;
-    // Read-only on the engine; the built-in text saved unchanged is stored as "use the default".
-    delete payload.defaultAnalysisInstruction;
-
-    this.saving.set(true);
-    this.saveMessage.set(null);
-
-    this.svc.saveConfig(payload, { reason: this.reason }).subscribe({
-      next: (result) => {
-        // The PERSISTED state wins — anything governance queued or refused shows its real reading.
-        this.localDraft.set(withInstructionShown(result.config));
-        this.saveMessage.set(result.message ?? 'Saved.');
-        this.saving.set(false);
-        this.reason = '';
-        this.configResource.refresh();
-        this.boardResource.refresh();
-      },
-      error: (err: unknown) => {
-        this.saveMessage.set(
-          err instanceof Error ? err.message : 'Save failed — the configuration was not changed.',
-        );
-        this.saving.set(false);
-      },
-    });
-  }
-
-  /** A plan the agent or the checker turned down, rather than one that ran. */
-  isRefused(plan: PatientTraderPlan): boolean {
-    return plan.status === 'Declined' || plan.status === 'Rejected';
-  }
-
-  statusClass(plan: PatientTraderPlan): string {
-    switch (plan.status) {
-      case 'Settled':
-      case 'Filled':
-        return 'ok';
-      case 'Rejected':
-        return 'bad';
-      default:
-        return 'neutral';
-    }
-  }
-
-  /** The shared OCO colour, so a group reads the same here, on Recommendations and on Monitors. */
-  readonly ocoHue = ocoHue;
-
-  ocoPartnersOf(plan: PatientTraderPlan) {
-    return planOcoChipPartners(plan);
-  }
-
-  /** Narrows the plans to one OCO group (null shows the latest plans again), kept in the URL. */
-  selectOco(group: string | null): void {
-    if (group === this.oco()) return;
-    this.hoveredOco.set(null);
-    this.oco.set(group);
-    void this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { oco: group },
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    });
-    this.boardResource.refresh();
-  }
-
-  outcomeOf(plan: PatientTraderPlan) {
-    return parseOutcome(plan.outcomeJson);
-  }
-
-  protected readonly defaults = DEFAULT_PATIENT_TRADER_CONFIG;
 }
