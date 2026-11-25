@@ -31,14 +31,16 @@ import {
       <div class="ring" aria-hidden="true">
         <svg viewBox="0 0 44 44">
           <circle class="track" cx="22" cy="22" r="19" />
-          <circle
-            class="fill"
-            cx="22"
-            cy="22"
-            r="19"
-            pathLength="100"
-            [attr.stroke-dasharray]="remainingPct() + ' 100'"
-          />
+          @if (remainingPct() > 0) {
+            <circle
+              class="fill"
+              cx="22"
+              cy="22"
+              r="19"
+              pathLength="100"
+              [attr.stroke-dasharray]="remainingPct() + ' 100'"
+            />
+          }
         </svg>
         <span class="ring-ico">{{ tone() === 'ended' ? '⌛' : '⏱' }}</span>
       </div>
@@ -70,11 +72,13 @@ import {
 
       @if (tone() !== 'ended') {
         <div class="bar" aria-hidden="true">
-          <span class="bar-fill" [style.width.%]="elapsedPct()"></span>
+          <span class="bar-fill" [style.width.%]="remainingPct()"></span>
         </div>
         <div class="bar-legend">
-          <span>{{ b.fromUtc | date: 'MMM d, HH:mm' : 'UTC' }}</span>
-          <span>{{ elapsedPct() | number: '1.0-0' }}% of the {{ windowLabel() }} window used</span>
+          <span>Started {{ b.fromUtc | date: 'MMM d, HH:mm' : 'UTC' }} UTC</span>
+          <span
+            >{{ remainingPct() | number: '1.0-0' }}% of the {{ windowLabel() }} window left</span
+          >
         </div>
       }
 
