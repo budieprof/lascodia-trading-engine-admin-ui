@@ -1,30 +1,17 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  DestroyRef,
-  computed,
-  inject,
-  input,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 
 import type { RecDeadlineDto, RecExpiryDto } from '../../trade-recommendations.types';
-
-type Tone = 'calm' | 'soon' | 'urgent' | 'ended';
-
-const MIN = 60_000;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
-
-/** "1d 4h", "3h 12m", "8m", "40s" — the short form for the later clocks and "ago". */
-export function shortSpan(ms: number): string {
-  const a = Math.abs(ms);
-  if (a >= DAY) return `${Math.floor(a / DAY)}d ${Math.floor((a % DAY) / HOUR)}h`;
-  if (a >= HOUR) return `${Math.floor(a / HOUR)}h ${Math.floor((a % HOUR) / MIN)}m`;
-  if (a >= MIN) return `${Math.floor(a / MIN)}m`;
-  return `${Math.max(0, Math.floor(a / 1000))}s`;
-}
+import {
+  DAY,
+  HOUR,
+  MIN,
+  RecClock,
+  RecExpiryTone,
+  expiryElapsedPct,
+  expiryTone,
+  shortSpan,
+} from './rec-expiry.util';
 
 /**
  * A live countdown to the moment the recommendation stops being able to trade: the clock that runs out first, ticking
@@ -307,30 +294,15 @@ export function shortSpan(ms: number): string {
 export class RecExpiryComponent {
   readonly expiry = input.required<RecExpiryDto>();
 
-  private readonly now = signal(Date.now());
-
-  constructor() {
-    const t = setInterval(() => this.now.set(Date.now()), 1_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(t));
-  }
+  private readonly now = inject(RecClock).now;
 
   private readonly at = computed(() => Date.parse(this.expiry().binding.atUtc));
   private readonly from = computed(() => Date.parse(this.expiry().binding.fromUtc));
   private readonly left = computed(() => this.at() - this.now());
 
-  readonly tone = computed<Tone>(() => {
-    const left = this.left();
-    if (this.expiry().state === 'ended' || left <= 0) return 'ended';
-    if (left <= 10 * MIN) return 'urgent';
-    if (left <= HOUR || 100 - this.elapsedPct() <= 25) return 'soon';
-    return 'calm';
-  });
+  readonly tone = computed<RecExpiryTone>(() => expiryTone(this.expiry(), this.now()));
 
-  readonly elapsedPct = computed(() => {
-    const span = this.at() - this.from();
-    if (!(span > 0)) return 100;
-    return Math.min(100, Math.max(0, ((this.now() - this.from()) / span) * 100));
-  });
+  readonly elapsedPct = computed(() => expiryElapsedPct(this.expiry(), this.now()));
 
   readonly remainingPct = computed(() => (this.tone() === 'ended' ? 0 : 100 - this.elapsedPct()));
 

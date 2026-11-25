@@ -78,6 +78,8 @@ export interface TradeRecommendationCardDto {
   unrealizedPnL: number | null;
   /** Open | Won | Lost | Flat | Unfilled | SignalExpired | SignalRejected | Signal | Watching | <card status> */
   outcome: string;
+  /** The clock that ends its chance to trade — the detail page's answer (absent on older engines, null when none applies). */
+  expiry?: RecExpiryDto | null;
 }
 
 export interface TradeRecommendationSummaryDto {

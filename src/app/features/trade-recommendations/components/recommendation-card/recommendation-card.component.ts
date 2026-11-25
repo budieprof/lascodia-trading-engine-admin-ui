@@ -3,6 +3,7 @@ import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 
 import { OcoChipComponent } from '@shared/components/oco-chip/oco-chip.component';
+import { RecExpiryChipComponent } from '../rec-expiry/rec-expiry-chip.component';
 import { ocoHue } from '@shared/utils/oco';
 
 import {
@@ -24,7 +25,14 @@ import {
   selector: 'app-recommendation-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe, PercentPipe, RouterLink, OcoChipComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    PercentPipe,
+    RouterLink,
+    OcoChipComponent,
+    RecExpiryChipComponent,
+  ],
   styleUrls: ['../../rec-shared.scss'],
   template: `
     @let c = card();
@@ -122,6 +130,10 @@ import {
           }
           {{ r.detail }}
         </p>
+      }
+
+      @if (shownExpiry(); as x) {
+        <app-rec-expiry-chip [expiry]="x" />
       }
 
       <footer class="foot">
@@ -464,6 +476,20 @@ export class RecommendationCardComponent {
     () => REC_SOURCE_LABELS[this.card().source] ?? this.card().source,
   );
   readonly outcome = computed(() => recOutcomeView(this.card().outcome));
+
+  /**
+   * The countdown while a clock runs. Once it ran out, only while the card still looks alive (Proposed / Parked —
+   * the status alone would hide that it can no longer trade) or for a day after, so a page of old cards is not a
+   * wall of "Expired 20d ago".
+   */
+  readonly shownExpiry = computed(() => {
+    const x = this.card().expiry;
+    if (!x) return null;
+    if (x.state === 'counting') return x;
+    const alive = ['Proposed', 'Parked'].includes(this.card().status);
+    const recent = Date.now() - Date.parse(x.binding.atUtc) < 24 * 3_600_000;
+    return alive || recent ? x : null;
+  });
   readonly reason = computed(() => {
     const c = this.card();
     if (!c.statusReason) return null;
