@@ -8,18 +8,23 @@ import { OcoChipPartner } from '@shared/utils/oco';
  * one does. It never manages a position, and it decides its own entry, stop and target.
  */
 
-/** One market the agent follows. */
-export interface PatientTraderMarket {
-  symbol: string;
-  timeframe: string;
-  enabled: boolean;
-}
-
 /**
  * How far the module may go. Each step is the gate on the next, and the module is advanced by
  * changing this value rather than by a deploy.
  */
 export type PatientTraderMode = 'ForecastOnly' | 'PlanOnly' | 'Live';
+
+/** One market the agent follows. */
+export interface PatientTraderMarket {
+  symbol: string;
+  timeframe: string;
+  enabled: boolean;
+  /**
+   * The market's own mode. Null = follow the module. A market can never go further than the
+   * module's mode: PlanOnly here under a ForecastOnly module still runs ForecastOnly.
+   */
+  mode?: PatientTraderMode | null;
+}
 
 export interface PatientTraderConfig {
   enabled: boolean;
@@ -91,6 +96,19 @@ export interface PatientTraderConfig {
   analysisInstruction: string;
   /** The engine's built-in instruction (read-only; shown and used by "Reset to default"). */
   defaultAnalysisInstruction?: string;
+
+  /**
+   * Count notional (subscription) spend against the caps as well as paid spend. Off = the caps
+   * only stop paid API spend; subscription analyses are never capped.
+   */
+  spendCapCountsNotional: boolean;
+  /** A card whose watch fires inside a high-impact release window is held back, not filed. */
+  blackoutAppliesAtFire: boolean;
+  /**
+   * Fingerprint of the persisted configuration, filled by the read. Sent back on save so a save
+   * edited from an older read is refused instead of overwriting someone else's change.
+   */
+  version?: string | null;
 }
 
 export type PatientTraderEngine = 'Assistant' | 'Classic';
@@ -136,6 +154,8 @@ export const DEFAULT_PATIENT_TRADER_CONFIG: PatientTraderConfig = {
   cardWatchExpiryHours: 24,
   analystAdminUserId: 0,
   analysisInstruction: '',
+  spendCapCountsNotional: false,
+  blackoutAppliesAtFire: true,
 };
 
 /** One market's current standing view. */
@@ -167,12 +187,20 @@ export interface PatientTraderView {
   ageMinutes: number;
 }
 
-/** One entry in the scenario map — a pre-committed reaction, not a forecast. */
+/**
+ * One entry in the scenario map as the engine stores it. Two shapes exist:
+ *  - Classic: a pre-committed reaction `{ trigger, expectedReaction, myAction, invalidation }`.
+ *  - Assistant: a wake level `{ trigger (the reason), direction, watch: { op, value }, probability }`.
+ * Normalise with `normaliseScenario` (patient-trader.logic.ts) before rendering.
+ */
 export interface PatientTraderScenario {
   trigger?: string;
   expectedReaction?: string;
   myAction?: string;
   invalidation?: string;
+  direction?: string;
+  watch?: { op?: string; value?: number | null } | null;
+  probability?: number | null;
 }
 
 /** A plan, including the ones that were refused or declined. */
@@ -220,6 +248,15 @@ export interface PatientTraderPlan {
   expiresAtUtc: string;
   /** The other plans of this plan's OCO group (whole table, not just this page). */
   ocoPartners?: PatientTraderOcoPartner[];
+  timeframe?: string;
+  /** 'Limit' | 'Stop' | 'Market'. */
+  entryStyle?: string;
+  confidence?: number;
+  armedAtUtc?: string | null;
+  filledAtUtc?: string | null;
+  settledAtUtc?: string | null;
+  /** Refused before it was ever armed (as opposed to refused when its watch fired). */
+  refusedBeforeArming?: boolean;
 }
 
 /** Another plan in the same one-cancels-other group. */
@@ -254,7 +291,14 @@ export function planOcoChipPartners(plan: PatientTraderPlan): OcoChipPartner[] {
   }));
 }
 
-/** Resolved outcome of a plan, from the position-free forward walk. */
+/** The same trade held to its written stop and target, ignoring any later stop move. */
+export interface PatientTraderAsWritten {
+  outcome?: string | null;
+  rMultiple?: number | null;
+  mfeR?: number | null;
+}
+
+/** Resolved outcome of a plan, as stored in `outcomeJson`. */
 export interface PatientTraderOutcome {
   outcome?: string;
   rMultiple?: number | null;
@@ -262,6 +306,14 @@ export interface PatientTraderOutcome {
   maeR?: number | null;
   barsToExit?: number;
   livedHours?: number;
+  /** 'trade' = a real position settled it; 'replay' = walked over the candles afterwards. */
+  source?: string | null;
+  asWritten?: PatientTraderAsWritten | null;
+  /** A refused card replayed to see what it would have done. */
+  forgone?: boolean | null;
+  /** Where a replay started: 'fire' | 'resting-from-creation' | 'plan'. */
+  from?: string | null;
+  note?: string | null;
 }
 
 export interface PatientTraderCounters {
@@ -283,34 +335,249 @@ export interface PatientTraderCounters {
   /** Whether the agent reads the market, answered before any money is involved. */
   viewAccuracy: number | null;
   viewsAbstained: number;
+
+  /** Real trades behind `meanRMultiple` (paper walks are not counted). */
+  tradesSettled: number;
+  /** Plans abandoned before entry because the invalidation price was reached. */
+  invalidatedCount: number;
+  /** Cards refused at the moment their watch fired. */
+  refusedAtFire: number;
+  /** Refusals in the window, by reason code. */
+  rejectedByCode: Record<string, number>;
+  /** Refused cards replayed over the candles afterwards. */
+  refusalsScored: number;
+  /** Of those, how many would have reached their target. */
+  forgoneWinners: number;
 }
 
 export interface PatientTraderBoard {
   counters: PatientTraderCounters;
   views: PatientTraderView[];
   plans: PatientTraderPlan[];
+  /** Plans matching the filters, for the pager. */
+  totalPlans: number;
+  /** Days the counters cover. */
+  windowDays: number;
+}
+
+/** Filters and paging for the plans table. */
+export interface PatientTraderBoardQuery {
+  limit: number;
+  offset?: number;
+  ocoGroupId?: string | null;
+  status?: readonly string[];
+  direction?: string | null;
+  rejectionCode?: string | null;
+  symbol?: string | null;
+}
+
+/** Every plan status the engine writes, in lifecycle order (the filter's options). */
+export const PLAN_STATUSES = [
+  'Proposed',
+  'Armed',
+  'Filled',
+  'Settled',
+  'Rejected',
+  'Declined',
+  'Expired',
+  'Invalidated',
+  'Withdrawn',
+] as const;
+
+// ── /health ──────────────────────────────────────────────────────────────────
+
+/** Viability-gate limits for one direction — PRICE distances (divide by pipSize for pips). */
+export interface PatientTraderDirectionLimits {
+  minStop: number;
+  maxStop: number;
+  maxTarget: number;
+  noise: number;
+  reach: number;
+  needsStructure: boolean;
+}
+
+/** The enforced viability-gate limits a card's signal is held to when its watch fires. */
+export interface PatientTraderCardLimits {
+  lookbackBars: number;
+  pipSize: number;
+  atr: number;
+  minRewardRisk: number | null;
+  minConfidence: number | null;
+  noisePercentile: number;
+  noiseHorizonHours: number;
+  reachPercentile: number;
+  reachHorizonHours: number;
+  buy: PatientTraderDirectionLimits;
+  sell: PatientTraderDirectionLimits;
+}
+
+export interface PatientTraderSpend {
+  paidToday: number;
+  notionalToday: number;
+  dailyCapUsd: number;
+  perMarketCapUsd: number;
+  capCountsNotional: boolean;
+  /** What the caps are compared against today (paid, or paid + notional). */
+  countedToday: number;
+  dailyCapReached: boolean;
+}
+
+export interface PatientTraderMarketHealth {
+  symbol: string;
+  timeframe: string;
+  /** The mode it actually runs in. */
+  mode: string;
+  /** True when the market has its own mode rather than following the module. */
+  ownMode: boolean;
+  lastViewAtUtc: string | null;
+  lastViewTrigger: string | null;
+  nextDueAtUtc: string | null;
+  /** An analysis ran and wrote no view — the "stuck" signal. */
+  lastRunWithoutViewAtUtc: string | null;
+  lastRunWithoutViewSessionId: number | null;
+  closedUntilUtc: string | null;
+  closedReason: string | null;
+  blackoutUntilUtc: string | null;
+  blackoutTitle: string | null;
+  /** Multi-line list of the releases coming up. */
+  upcomingCatalysts: string | null;
+  armedCards: number;
+  paidToday: number;
+  notionalToday: number;
+  marketCapReached: boolean;
+  limits: PatientTraderCardLimits | null;
+}
+
+export interface PatientTraderHealth {
+  enabled: boolean;
+  mode: string;
+  engine: string;
+  killSwitchActive: boolean;
+  respectKillSwitch: boolean;
+  atUtc: string;
+  spend: PatientTraderSpend;
+  markets: PatientTraderMarketHealth[];
+}
+
+// ── /results ─────────────────────────────────────────────────────────────────
+
+export interface PatientTraderRStats {
+  count: number;
+  wins: number;
+  losses: number;
+  scratches: number;
+  sumR: number;
+  meanR: number | null;
+  ci95Low: number | null;
+  ci95High: number | null;
+}
+
+export interface PatientTraderBreakEvenTrade {
+  planId: number;
+  recommendationId: number | null;
+  direction: string;
+  settledAtUtc: string | null;
+  realR: number | null;
+  mfeR: number | null;
+  asWrittenOutcome: string | null;
+  asWrittenR: number | null;
+}
+
+export interface PatientTraderBreakEven {
+  count: number;
+  meanMfeR: number | null;
+  replayed: number;
+  asWrittenHitTp: number;
+  asWrittenHitSl: number;
+  asWrittenOther: number;
+  asWrittenSumR: number;
+  realSumR: number;
+  trades: PatientTraderBreakEvenTrade[];
+}
+
+export interface PatientTraderRefusalCodeStats {
+  code: string;
+  scored: number;
+  hitTp: number;
+  hitSl: number;
+  sumR: number;
+}
+
+export interface PatientTraderRefusalResults {
+  scored: number;
+  hitTp: number;
+  hitSl: number;
+  other: number;
+  sumR: number;
+  byCode: PatientTraderRefusalCodeStats[];
+}
+
+export interface PatientTraderViewResults {
+  correct: number;
+  wrong: number;
+  flat: number;
+  abstained: number;
+  unscorable: number;
+  accuracy: number | null;
+  buyScored: number;
+  buyAccuracy: number | null;
+  sellScored: number;
+  sellAccuracy: number | null;
+  /** Views the naive "last day's move continues" baseline could also be scored on. */
+  baselineScored: number;
+  baselineAccuracy: number | null;
+  /** The agent's accuracy on exactly those views. */
+  accuracyOnBaselineViews: number | null;
+}
+
+export interface PatientTraderEquityPoint {
+  atUtc: string;
+  planId: number;
+  direction: string;
+  r: number;
+  cumR: number;
+}
+
+export interface PatientTraderResults {
+  days: number;
+  symbol: string | null;
+  trades: PatientTraderRStats;
+  tradesBuy: PatientTraderRStats;
+  tradesSell: PatientTraderRStats;
+  asWritten: PatientTraderRStats;
+  paperFills: PatientTraderRStats;
+  breakEven: PatientTraderBreakEven;
+  refused: PatientTraderRefusalResults;
+  views: PatientTraderViewResults;
+  equity: PatientTraderEquityPoint[];
+}
+
+// ── /views (history) ─────────────────────────────────────────────────────────
+
+export interface PatientTraderViewHistoryRow {
+  id: number;
+  symbol: string;
+  timeframe: string;
+  regime: string;
+  lean: string;
+  confidence: number;
+  trigger: string;
+  narrative: string;
+  midAtView: number | null;
+  createdAtUtc: string;
+  horizonUtc: string;
+  llmInvocationId: number | null;
+  verdict: string | null;
+  movedPips: number | null;
+  realised: string | null;
+  baseline: string | null;
+  baselineVerdict: string | null;
+}
+
+export interface PatientTraderViewHistory {
+  total: number;
+  views: PatientTraderViewHistoryRow[];
 }
 
 /** Plan statuses that mean the agent chose not to trade, rather than failed to. */
 export const DECLINED_STATUSES = ['Declined', 'Rejected'] as const;
-
-/** Parses an outcome blob, tolerating absence and malformed JSON. */
-export function parseOutcome(json: string | null): PatientTraderOutcome | null {
-  if (!json) return null;
-  try {
-    return JSON.parse(json) as PatientTraderOutcome;
-  } catch {
-    return null;
-  }
-}
-
-/** Parses a scenario map, returning an empty list rather than throwing. */
-export function parseScenarios(json: string | null): PatientTraderScenario[] {
-  if (!json) return [];
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as PatientTraderScenario[]) : [];
-  } catch {
-    return [];
-  }
-}
