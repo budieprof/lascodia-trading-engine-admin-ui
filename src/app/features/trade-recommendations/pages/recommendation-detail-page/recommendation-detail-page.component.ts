@@ -119,7 +119,11 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
               {{ d.card.direction === 'Buy' ? '↑' : '↓' }} {{ d.card.direction }} {{ orderKind() }}
             </span>
             <span class="pill" [class]="'pill pill--' + statusTone()">{{ d.card.status }}</span>
-            <span class="pill" [class]="'pill pill--' + outcome().tone">{{ outcome().label }}</span>
+            @if (showOutcome()) {
+              <span class="pill" [class]="'pill pill--' + outcome().tone">{{
+                outcome().label
+              }}</span>
+            }
           }
         </span>
         @if (detail(); as d) {
@@ -854,19 +858,30 @@ export class RecommendationDetailPageComponent {
   });
 
   /** Filing is the engine's call (it refuses anything stale); offer it whenever nothing was filed yet. */
-  readonly canFile = computed(() => {
+  /**
+   * The outcome chip only when it says something the status chip does not — an Expired card's outcome is "Expired"
+   * again, a Rejected card's is "Refused".
+   */
+  readonly showOutcome = computed(() => {
     const c = this.card();
-    return !!c && !c.tradeSignalId && ['Proposed', 'Rejected', 'Expired'].includes(c.status);
+    return !!c && c.outcome !== c.status;
   });
-  readonly canArm = computed(() => {
+
+  /**
+   * Whether the engine would still file this card — the rule `FileTradeRecommendationCommand.WhyNotFileable` applies:
+   * no signal yet; Proposed, or Rejected only for timing ([EntryTooFar]); and its filing clocks have not run out.
+   * Expired and Withdrawn cards, and ones a gate refused for good, are refused, so neither button is offered.
+   */
+  private readonly fileable = computed(() => {
     const c = this.card();
-    return (
-      !!c &&
-      !c.tradeSignalId &&
-      !c.watchingMonitorId &&
-      ['Proposed', 'Rejected', 'Expired'].includes(c.status)
-    );
+    if (!c || c.tradeSignalId) return false;
+    const timingRefusal =
+      c.status === 'Rejected' && (c.statusReason ?? '').startsWith('[EntryTooFar]');
+    if (c.status !== 'Proposed' && !timingRefusal) return false;
+    return this.detail()?.expiry?.state !== 'ended';
   });
+  readonly canFile = computed(() => this.fileable());
+  readonly canArm = computed(() => this.fileable() && !this.card()?.watchingMonitorId);
 
   readonly args = computed<RecommendArgs | null>(() =>
     recParseJson<RecommendArgs>(this.detail()?.chatTurn?.toolArgsJson),
