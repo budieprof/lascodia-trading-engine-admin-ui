@@ -137,7 +137,9 @@ import {
       }
 
       <footer class="foot">
-        <span class="pill" [class]="'pill pill--' + outcome().tone">{{ outcome().label }}</span>
+        @if (c.outcome !== c.status) {
+          <span class="pill" [class]="'pill pill--' + outcome().tone">{{ outcome().label }}</span>
+        }
         @if (c.watchingMonitorId) {
           <span class="tag tag--info" title="An active monitor will file this card"
             >👁 #{{ c.watchingMonitorId }}</span
@@ -404,6 +406,10 @@ import {
       .reason--bad .code {
         background: rgba(255, 59, 48, 0.08);
         color: var(--loss);
+      }
+      /* Nothing left to say once the outcome only repeated the status — no bare divider. */
+      .foot:empty {
+        display: none;
       }
       .foot {
         margin-top: auto;
