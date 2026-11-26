@@ -33,7 +33,7 @@ RUN npm run build -- --configuration production
 # `docker run -p 80:8080 …` (or point the staging proxy at :8080).
 # 1.30 = the current stable line. 1.28 reached end of life and its tag stopped being rebuilt (last 2026-02-23), which
 # left the image on Alpine 3.23.3 / nginx 1.28.2 with ~90 fixable HIGH/CRITICAL CVEs (security scans red).
-FROM nginxinc/nginx-unprivileged:1.30-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # Upstream rebuilds the tag only every few weeks: take the security fixes published since, then drop back to the
 # unprivileged user. nginx itself comes from nginx.org's repo (pinned to the exact version in /etc/apk/world, repo
 # removed after install), so a plain `apk upgrade` never moves it: lift the pins and upgrade against that repo again.
