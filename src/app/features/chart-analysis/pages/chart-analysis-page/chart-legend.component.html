@@ -1,4 +1,9 @@
-<div class="legend" appMeasuredBottom (bottomChange)="bottomChange.emit($event)">
+<div
+  class="legend"
+  appMeasuredBottom
+  (bottomChange)="bottomChange.emit($event)"
+  (rightChange)="rightChange.emit($event)"
+>
   <div class="legend-title">
     <strong>{{ session.symbol() }}</strong>
     <span class="muted">{{ resolutionLabel(session.resolution()) }}</span>

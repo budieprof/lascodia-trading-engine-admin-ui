@@ -1,8 +1,4 @@
-import {
-  consolidatedId,
-  isConsolidatedId,
-  type MdSource,
-} from '@core/realtime/marketdata.types';
+import { consolidatedId, isConsolidatedId, type MdSource } from '@core/realtime/marketdata.types';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -75,13 +71,7 @@ import { NewsAnalysisModalComponent } from '../../panels/news-analysis-modal.com
 import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
-import {
-  studyDefaults,
-  studyDialogItems,
-  studyKind,
-  studyLabel,
-  studyMeta,
-} from '../../studies';
+import { studyDefaults, studyDialogItems, studyKind, studyLabel, studyMeta } from '../../studies';
 import { FxFundamentalsService } from '../../panels/fx-fundamentals.service';
 import { DailyBarsService } from '../../panels/daily-bars.service';
 import type { ChartViewState } from '../../chart/chart-host.component';
@@ -103,7 +93,6 @@ import {
   type ScriptDisplaySettings,
 } from '../../scripts/script-display';
 import { scriptRenderModel } from '../../scripts/script-model-cache';
-
 
 import { ScriptingRealtimeService } from '@core/realtime/scripting-realtime.service';
 import { ScriptingService } from '@core/services/scripting.service';
@@ -162,11 +151,7 @@ import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
 } from '../../scripts/script-editor-panel.component';
-import {
-  INDICATORS,
-  defaultParams,
-  indicatorById,
-} from '../../indicators/registry';
+import { INDICATORS, defaultParams, indicatorById } from '../../indicators/registry';
 import {
   ChartHostComponent,
   type ActiveIndicator,
@@ -200,10 +185,7 @@ import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog
 import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
 import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
-import {
-  parseStudyInput,
-  parseStudySource,
-} from '../../indicators/study-settings';
+import { parseStudyInput, parseStudySource } from '../../indicators/study-settings';
 import { ChartAlertsController } from './chart-alerts-controller';
 import { OrdersService } from '@core/services/orders.service';
 import { MartingaleService } from '@core/services/martingale.service';
@@ -1304,12 +1286,7 @@ export class ChartAnalysisPageComponent {
   );
   private readonly closedTradeMarkers = computed(() =>
     this.showClosedTrades()
-      ? closedTradeMarkers(
-          this.closedPositions(),
-          this.symbol(),
-          this.inTradeScope(),
-          this.facts(),
-        )
+      ? closedTradeMarkers(this.closedPositions(), this.symbol(), this.inTradeScope(), this.facts())
       : [],
   );
 
@@ -1482,12 +1459,18 @@ export class ChartAnalysisPageComponent {
   /** {@link studyNote} bound to the page, for the studies strip's input. */
   readonly studyNoteOf = (item: ActiveIndicator): string | null => this.studyNote(item);
   studyNote(item: ActiveIndicator): string | null {
-    if (item.defId === 'exchange-sessions') return exchangeSessionsNote(this.exchangeSessions(), this.symbol());
+    if (item.defId === 'exchange-sessions')
+      return exchangeSessionsNote(this.exchangeSessions(), this.symbol());
     const pane = this.externalPanes().find((p) => p.uid === item.uid)?.note;
     if (pane) return pane;
     // UA07: a volume study says what its volume is (and that a delta is estimated). Only once C1 has said it.
     if (!this.feed.factsOf(this.symbol())) return null;
-    return volumeStudyNote(item.defId, this.volumeKind(), this.facts().instrument.baseCurrency, item.params);
+    return volumeStudyNote(
+      item.defId,
+      this.volumeKind(),
+      this.facts().instrument.baseCurrency,
+      item.params,
+    );
   }
   // ── Watchlist ────────────────────────────────────────────────────────────
   //
@@ -1927,7 +1910,8 @@ export class ChartAnalysisPageComponent {
         {
           id: 'synthetic',
           text: syn.kind === 'ratio' ? 'Synthetic ratio' : 'Synthetic spread',
-          title: this.syntheticNote() ?? syntheticNotice(syn, { carriedA: 0, carriedB: 0, dropped: 0 }),
+          title:
+            this.syntheticNote() ?? syntheticNotice(syn, { carriedA: 0, carriedB: 0, dropped: 0 }),
         },
       ];
     return symbolChips(
@@ -1958,7 +1942,8 @@ export class ChartAnalysisPageComponent {
   readonly split = new SplitPanelsController({
     feed: this.feed,
     isSessionResolution: (r) => isSessionResolution(r),
-    noDataMessage: (symbol, r) => noDataMessage(symbol, this.resolutionLabel(r), this.catalogueRow(symbol)),
+    noDataMessage: (symbol, r) =>
+      noDataMessage(symbol, this.resolutionLabel(r), this.catalogueRow(symbol)),
     candidates: (taken) => panelCandidates(this.symbols(), this.instruments.all(), taken),
     mainSymbol: () => this.symbol(),
     mainResolution: () => this.resolution(),
@@ -1966,8 +1951,11 @@ export class ChartAnalysisPageComponent {
     now: () => this.serverClock.now(),
     calendarOf: (symbol) => this.calendarOf(symbol),
     calendarCodeOf: (symbol) =>
-      this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null,
-    loadCalendar: (code) => this.instruments.calendar(code).then((cal) => (cal ? exchangeSessionsOf(cal) : null)),
+      this.feed.factsOf(symbol)?.calendarCode ??
+      this.panelFacts(symbol).instrument.tradingCalendarCode ??
+      null,
+    loadCalendar: (code) =>
+      this.instruments.calendar(code).then((cal) => (cal ? exchangeSessionsOf(cal) : null)),
     linkSymbol: (id, symbol) => this.linked.linkSymbol(id, symbol),
     linkInterval: (id, r) => this.linked.linkInterval(id, r),
   });
@@ -2073,7 +2061,6 @@ export class ChartAnalysisPageComponent {
     this.symbolMenuOpen.set(false);
   }
 
-
   setVolumeProfileMode(mode: VolumeProfileMode): void {
     this.volumeProfileMode.set(mode);
     this.showVolumeProfile.set(true);
@@ -2093,7 +2080,12 @@ export class ChartAnalysisPageComponent {
         // can place anything on it.
         lookup: this.synthetic() ? 'resolving' : this.instruments.lookupState(this.symbol()),
         refPrice: () => this.bars().at(-1)?.close ?? null,
-        digitsHint: () => decimalsOfPrices(this.bars().slice(-50).map((b) => b.close)),
+        digitsHint: () =>
+          decimalsOfPrices(
+            this.bars()
+              .slice(-50)
+              .map((b) => b.close),
+          ),
       }),
     { equal: sameFacts },
   );
@@ -2605,7 +2597,9 @@ export class ChartAnalysisPageComponent {
       for (const s of this.warmSessions.all()) this.releaseWarm(s.key);
     });
     // EV-1: a headline labelled for the pair's currencies re-reads the news pane (and the watchlist's headline).
-    this.newsPane.followIngested(this.realtime.on<NewsArticleIngestedPayload>('newsArticleIngested'));
+    this.newsPane.followIngested(
+      this.realtime.on<NewsArticleIngestedPayload>('newsArticleIngested'),
+    );
 
     // UA01: the instrument resolved after the events were read (catalogue lookup, the first chart-bars answer): ask again.
     effect(() => {
@@ -2862,7 +2856,8 @@ export class ChartAnalysisPageComponent {
     this.loadTradingOverlays();
     // The symbol's session, which the day-based studies count trading days by, comes with every
     // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
-    if (!isSessionResolution(resolution) && !parseSynthetic(symbol)) void this.feed.learnSession(symbol);
+    if (!isSessionResolution(resolution) && !parseSynthetic(symbol))
+      void this.feed.learnSession(symbol);
     const now = Date.now();
     try {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
@@ -2874,7 +2869,8 @@ export class ChartAnalysisPageComponent {
       const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
       this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
       this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
-      if (this.replayActive() && replayAnchor !== null) void this.timeNav.reanchorReplay(replayAnchor);
+      if (this.replayActive() && replayAnchor !== null)
+        void this.timeNav.reanchorReplay(replayAnchor);
       this.session.resetFormingState(bars, resolution);
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
@@ -3714,7 +3710,9 @@ export class ChartAnalysisPageComponent {
   }
 
   /** US03: the symbols a panel's select offers — the broker's, then the catalogue's chartable instruments. */
-  readonly panelSymbolChoices = computed(() => panelSymbolGroups(this.symbols(), this.instruments.all()));
+  readonly panelSymbolChoices = computed(() =>
+    panelSymbolGroups(this.symbols(), this.instruments.all()),
+  );
   readonly panelSymbolKnown = computed(
     () => new Set(this.panelSymbolChoices().flatMap((g) => g.options.map((o) => o.symbol))),
   );
@@ -3726,7 +3724,11 @@ export class ChartAnalysisPageComponent {
     return panelLook(panel.view, { style: this.style(), scaleMode: this.scaleMode() });
   }
 
-  setPanelView<K extends keyof PanelView>(id: string, key: K, value: PanelView[K] | '' | undefined): void {
+  setPanelView<K extends keyof PanelView>(
+    id: string,
+    key: K,
+    value: PanelView[K] | '' | undefined,
+  ): void {
     this.split.setView(id, key, value);
   }
 
@@ -3976,6 +3978,8 @@ export class ChartAnalysisPageComponent {
   readonly appearance = signal<ChartAppearance | null>(null);
   /** How far down the floating legend reaches (px in the chart area): the chart keeps its top-left tables below it. */
   readonly legendBottom = signal<number | null>(null);
+  /** How far across the floating legend reaches (px in the chart area): top tables that would cover it go below it. */
+  readonly legendRight = signal<number | null>(null);
   readonly chartSettingsOpen = signal(false);
   /** Layout memory per symbol (CC-I11): on, and what each symbol was left on. */
   readonly rememberPerSymbol = signal(false);
@@ -4060,7 +4064,11 @@ export class ChartAnalysisPageComponent {
   private joinCalendarOf(symbol: string): string {
     const facts = this.panelFacts(symbol);
     if (facts.isFx) return 'fx';
-    return this.feed.factsOf(symbol)?.calendarCode ?? facts.instrument.tradingCalendarCode ?? `own:${symbol}`;
+    return (
+      this.feed.factsOf(symbol)?.calendarCode ??
+      facts.instrument.tradingCalendarCode ??
+      `own:${symbol}`
+    );
   }
 
   /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
@@ -4079,7 +4087,12 @@ export class ChartAnalysisPageComponent {
     const [a, b] = spec.symbols.map((x) => x.toUpperCase());
     if (!a || !b || (spec.kind !== 'ratio' && spec.kind !== 'spread')) return;
     this.compareOpen.set(false);
-    this.openSynthetic({ kind: spec.kind, a, b, mult: spec.kind === 'spread' ? (spec.mult ?? 1) : 1 });
+    this.openSynthetic({
+      kind: spec.kind,
+      a,
+      b,
+      mult: spec.kind === 'spread' ? (spec.mult ?? 1) : 1,
+    });
   }
 
   /** Add a compare series (the scale rule: {@link ChartCompareState.add}). */
@@ -4301,7 +4314,8 @@ export class ChartAnalysisPageComponent {
     active: this.active,
     isFullscreen: this.isFullscreen,
     // The snapshot's title: symbol, timeframe and style, as the chart's title reads.
-    title: () => `${this.symbol()} · ${this.resolutionLabel(this.resolution())} · ${this.styleLabel()}`,
+    title: () =>
+      `${this.symbol()} · ${this.resolutionLabel(this.resolution())} · ${this.styleLabel()}`,
     fileStem: () => `${this.symbol()}-${this.resolutionLabel(this.resolution())}`,
     closeContextMenu: () => this.contextMenu.set(null),
     host: () => this.host(),

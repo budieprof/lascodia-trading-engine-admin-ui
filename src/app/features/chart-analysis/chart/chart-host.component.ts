@@ -445,6 +445,7 @@ interface ExternalLineSeries {
           [paneHeight]="o.height"
           [pointer]="tablePointer()?.paneIndex === o.paneIndex ? tablePointer() : null"
           [topLeftOffset]="o.topLeftOffset"
+          [topLeftExtent]="o.topLeftExtent"
         />
       </div>
     }
@@ -805,6 +806,11 @@ export class ChartHostComponent implements OnDestroy {
    * it, `appMeasuredBottom`): the price pane's top-left script tables go below it. Null: no legend.
    */
   readonly legendBottom = input<number | null>(null);
+  /**
+   * Where the legend ends across, in px from the left of the container the chart sits in: a top-center or top-right
+   * table that would reach left of it goes below the legend too (a wide legend on a narrow chart). Null: unknown.
+   */
+  readonly legendRight = input<number | null>(null);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
   readonly liveAt = input<number | null>(null);
 
@@ -1223,6 +1229,7 @@ export class ChartHostComponent implements OnDestroy {
     // The legend grew or shrank: the top-left script tables move with it.
     effect(() => {
       this.legendBottom();
+      this.legendRight();
       untracked(() => {
         if (this.scriptTables().length) this.layoutScriptTables();
       });
@@ -3241,7 +3248,9 @@ export class ChartHostComponent implements OnDestroy {
       for (const s of target.series) {
         const values = computed[s.key] ?? [];
         const changed =
-          tailFrom !== undefined && s.values === values ? tailFrom : firstChangedValue(s.values, values);
+          tailFrom !== undefined && s.values === values
+            ? tailFrom
+            : firstChangedValue(s.values, values);
         const from = Math.min(timesFrom, changed);
         s.values = values;
         const rows = valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows());
@@ -3399,7 +3408,10 @@ export class ChartHostComponent implements OnDestroy {
   ): void {
     // The bars' times in seconds, once per change of the bars for every study with a fill.
     if (this.fillTimes?.version !== this.dataVersion)
-      this.fillTimes = { version: this.dataVersion, times: this.plotted.map((b) => asTime(b.time) as number) };
+      this.fillTimes = {
+        version: this.dataVersion,
+        times: this.plotted.map((b) => asTime(b.time) as number),
+      };
     const times = this.fillTimes.times;
     const models = (def.fills ?? []).map((f) => {
       const aheadA = computed[aheadKey(f.a)] ?? [];
@@ -3662,23 +3674,28 @@ export class ChartHostComponent implements OnDestroy {
             line.kind === 'histogram'
               ? chart.addSeries(
                   HistogramSeries,
-                  { color: line.color, priceLineVisible: false, title: line.title, priceFormat: format },
+                  {
+                    color: line.color,
+                    priceLineVisible: false,
+                    title: line.title,
+                    priceFormat: format,
+                  },
                   paneIndex,
                 )
               : chart.addSeries(
-                LineSeries,
-                {
-                  color: line.color,
-                  lineWidth: 2,
-                  // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
-                  lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
-                  priceLineVisible: false,
-                  title: line.title,
-                  ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
-                  priceFormat: format,
-                },
-                paneIndex,
-              );
+                  LineSeries,
+                  {
+                    color: line.color,
+                    lineWidth: 2,
+                    // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
+                    lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
+                    priceLineVisible: false,
+                    title: line.title,
+                    ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
+                    priceFormat: format,
+                  },
+                  paneIndex,
+                );
           return {
             api,
             sync: new SeriesSync<ValueRow>(api as unknown as SyncTarget<ValueRow>, sameValueRow),
@@ -3713,7 +3730,9 @@ export class ChartHostComponent implements OnDestroy {
    */
   private writeExternalLine(l: ExternalLineSeries, timesFrom: number): void {
     const values =
-      l.aggregate === 'sum' ? sumToBars(l.points, this.plottedUtc) : alignToBars(l.points, this.plottedUtc);
+      l.aggregate === 'sum'
+        ? sumToBars(l.points, this.plottedUtc)
+        : alignToBars(l.points, this.plottedUtc);
     const from = Math.min(timesFrom, firstChangedValue(l.values, values));
     l.values = values;
     l.sync.apply(valueRowsFrom(this.plotted, values, 'join', from, l.sync.rows()));
@@ -3758,6 +3777,8 @@ export class ChartHostComponent implements OnDestroy {
       tables: readonly KeyedTable[];
       /** Px kept free above the top-left corner's tables: the legend or a status line is there. */
       topLeftOffset: number;
+      /** Px from the pane's left where that top-left content ends (0: unknown / none). */
+      topLeftExtent: number;
     }[]
   >([]);
   /** The pointer over a pane (pane px): the table under it fades (PC-I11). */
@@ -3813,6 +3834,13 @@ export class ChartHostComponent implements OnDestroy {
               0,
               legendEnd - (this.hostEl.nativeElement as HTMLElement).offsetTop - topOf(0),
             );
+      // …and how far across it reaches, in the pane's px: the other top corners' tables go below it only when they
+      // would reach left of that.
+      const legendEnd2 = this.legendRight();
+      const legendRight =
+        legendEnd2 === null || legendBottom === 0
+          ? 0
+          : Math.max(0, legendEnd2 - (this.hostEl.nativeElement as HTMLElement).offsetLeft - left);
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
         if (!panes[index]) continue;
@@ -3826,6 +3854,7 @@ export class ChartHostComponent implements OnDestroy {
           height: size.height,
           tables,
           topLeftOffset: index === 0 ? legendBottom : scriptPanes.has(index) ? 22 : 0,
+          topLeftExtent: index === 0 ? legendRight : 0,
         });
       }
       // Script panes take the session breaks too.
@@ -4689,8 +4718,7 @@ export class ChartHostComponent implements OnDestroy {
           { label: 'Close', value: price(bar.close) },
           {
             label: 'Change',
-            value:
-              changeText(change, pct, this.unitSize(), precision, this.facts()) ?? '—',
+            value: changeText(change, pct, this.unitSize(), precision, this.facts()) ?? '—',
           },
           { label: 'Volume', value: formatVolume(bar.volume) },
         ],

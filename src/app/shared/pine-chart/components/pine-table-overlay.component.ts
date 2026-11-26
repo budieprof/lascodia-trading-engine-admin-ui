@@ -1,4 +1,5 @@
 import {
+  afterRenderEffect,
   ChangeDetectionStrategy,
   Component,
   ElementRef,
@@ -57,9 +58,12 @@ export type KeyedTable = TableLayout & { key?: string };
   template: `
     @for (g of groups(); track g.position) {
       <div
+        #group
         class="pine-tables"
         [attr.data-position]="g.position"
-        [style.top.px]="g.position === 'top_left' ? 4 + topLeftOffset() : null"
+        [style.top.px]="
+          g.position === 'top_left' || underLegend().has(g.position) ? 4 + topLeftOffset() : null
+        "
       >
         @for (t of g.tables; track t.key) {
           <div
@@ -211,6 +215,7 @@ export type KeyedTable = TableLayout & { key?: string };
 export class PineTableOverlayComponent {
   private readonly host = inject(ElementRef<HTMLElement>);
   private readonly tableEls = viewChildren<ElementRef<HTMLElement>>('table');
+  private readonly groupEls = viewChildren<ElementRef<HTMLElement>>('group');
 
   readonly tables = input<readonly KeyedTable[]>([]);
   /** Pane size in px (cell width/height percentages resolve against it). */
@@ -220,6 +225,13 @@ export class PineTableOverlayComponent {
   readonly pointer = input<{ x: number; y: number } | null>(null);
   /** Px kept free above the top-left corner's tables (a status line or legend sits there). */
   readonly topLeftOffset = input(0);
+  /**
+   * Px from the overlay's left where that top-left content ends (the chart's legend). A top-center or top-right
+   * stack that would reach left of it goes below it too, so a wide legend never runs under a dashboard. 0: none.
+   */
+  readonly topLeftExtent = input(0);
+  /** The top anchors (other than top_left) whose stacks are kept below the top-left content. */
+  readonly underLegend = signal<ReadonlySet<string>>(new Set());
 
   /** A table with no cell is not drawn at all — its frame alone would be a speck on the pane. */
   readonly views = computed<(TableView & { key: string })[]>(() =>
@@ -298,6 +310,28 @@ export class PineTableOverlayComponent {
   }
 
   constructor() {
+    // After each render: measure where the top-center / top-right stacks start across (moving one down does not
+    // change that, so this settles in one pass) and keep the ones that would cover the legend below it.
+    afterRenderEffect({
+      earlyRead: () => {
+        const extent = this.topLeftExtent();
+        const offset = this.topLeftOffset();
+        this.groups();
+        return topStacksUnderLegend(
+          this.groupEls().map((ref) => ({
+            position: ref.nativeElement.getAttribute('data-position') ?? '',
+            left: ref.nativeElement.offsetLeft,
+          })),
+          extent,
+          offset,
+        );
+      },
+      write: (next) => {
+        const set = next();
+        const cur = untracked(() => this.underLegend());
+        if (set.size !== cur.size || [...set].some((p) => !cur.has(p))) this.underLegend.set(set);
+      },
+    });
     effect(() => {
       const p = this.pointer();
       this.tableEls();
@@ -318,6 +352,26 @@ export class PineTableOverlayComponent {
     const cur = this.faded();
     if (next.size !== cur.size || [...next].some((k) => !cur.has(k))) this.faded.set(next);
   }
+}
+
+/** Gap kept between the top-left content and a top stack beside it before the stack has to go below, px. */
+const LEGEND_GAP = 8;
+
+/**
+ * The top-center / top-right stacks that would cover the top-left content (the legend): those starting less than
+ * {@link LEGEND_GAP} px right of where it ends. None when nothing sits there (`offset` 0) or its extent is unknown.
+ */
+export function topStacksUnderLegend(
+  stacks: readonly { position: string; left: number }[],
+  extent: number,
+  offset: number,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (extent <= 0 || offset <= 0) return out;
+  for (const s of stacks)
+    if ((s.position === 'top_center' || s.position === 'top_right') && s.left < extent + LEGEND_GAP)
+      out.add(s.position);
+  return out;
 }
 
 /** A table cell's tooltip as the overlay shows it. */

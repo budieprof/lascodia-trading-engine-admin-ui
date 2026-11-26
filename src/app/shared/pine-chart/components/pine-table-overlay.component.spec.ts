@@ -7,6 +7,7 @@ import {
   PineTableOverlayComponent,
   placeCellTip,
   tablesUnder,
+  topStacksUnderLegend,
   type KeyedTable,
 } from './pine-table-overlay.component';
 
@@ -183,5 +184,25 @@ describe('tablesUnder (the table to fade)', () => {
     expect([...tablesUnder({ x: 520, y: 60 }, origin, tables)]).toEqual(['b']);
     expect(tablesUnder({ x: 100, y: 20 }, origin, tables).size).toBe(0);
     expect(tablesUnder(null, origin, tables).size).toBe(0);
+  });
+});
+
+describe('topStacksUnderLegend (top tables keep clear of the legend)', () => {
+  const stacks = [
+    { position: 'top_left', left: 4 },
+    { position: 'top_center', left: 300 },
+    { position: 'top_right', left: 560 },
+  ];
+  it('moves a top stack that starts left of where the legend ends (plus a gap)', () => {
+    expect([...topStacksUnderLegend(stacks, 600, 90)].sort()).toEqual(['top_center', 'top_right']);
+    expect([...topStacksUnderLegend(stacks, 550, 90)]).toEqual(['top_center']);
+  });
+  it('leaves stacks clear of a short legend where they are', () => {
+    expect(topStacksUnderLegend(stacks, 200, 90).size).toBe(0);
+  });
+  it('never lists top_left (it always sits below) and does nothing without a legend', () => {
+    expect(topStacksUnderLegend(stacks, 900, 90).has('top_left')).toBe(false);
+    expect(topStacksUnderLegend(stacks, 900, 0).size).toBe(0);
+    expect(topStacksUnderLegend(stacks, 0, 90).size).toBe(0);
   });
 });

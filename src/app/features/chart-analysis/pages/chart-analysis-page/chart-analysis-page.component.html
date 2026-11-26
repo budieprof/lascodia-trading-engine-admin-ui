@@ -40,11 +40,19 @@
           />
           @if (symbolSearch.symbolClasses().length > 1) {
             <div class="symbol-classes" role="group" aria-label="Asset class">
-              <button type="button" [class.on]="!symbolSearch.symbolClass()" (click)="symbolSearch.symbolClass.set(null)">
+              <button
+                type="button"
+                [class.on]="!symbolSearch.symbolClass()"
+                (click)="symbolSearch.symbolClass.set(null)"
+              >
                 All
               </button>
               @for (c of symbolSearch.symbolClasses(); track c) {
-                <button type="button" [class.on]="symbolSearch.symbolClass() === c" (click)="symbolSearch.symbolClass.set(c)">
+                <button
+                  type="button"
+                  [class.on]="symbolSearch.symbolClass() === c"
+                  (click)="symbolSearch.symbolClass.set(c)"
+                >
                   {{ symbolSearch.assetClassLabel[c] }}
                 </button>
               }
@@ -53,7 +61,9 @@
           <ul class="menu-list">
             @for (g of symbolSearch.symbolGroups(); track g.assetClass) {
               @if (symbolSearch.symbolGroups().length > 1) {
-                <li class="menu-group" role="presentation">{{ symbolSearch.assetClassLabel[g.assetClass] }}</li>
+                <li class="menu-group" role="presentation">
+                  {{ symbolSearch.assetClassLabel[g.assetClass] }}
+                </li>
               }
               @for (p of g.rows; track p.key) {
                 <li>
@@ -80,7 +90,9 @@
                         <span class="sym-venue">· {{ p.venue }}</span>
                       }
                       @if (p.noDataReason) {
-                        <span class="sym-nodata" data-testid="symbol-no-data">· {{ p.noDataReason }}</span>
+                        <span class="sym-nodata" data-testid="symbol-no-data"
+                          >· {{ p.noDataReason }}</span
+                        >
                       }
                     </span>
                   </button>
@@ -88,7 +100,11 @@
               }
             } @empty {
               <li class="menu-empty">
-                {{ symbolSearch.remoteSearch.loading() ? 'Searching the catalogue…' : 'No symbols match.' }}
+                {{
+                  symbolSearch.remoteSearch.loading()
+                    ? 'Searching the catalogue…'
+                    : 'No symbols match.'
+                }}
               </li>
             }
             @if (symbolSearch.remoteSearch.error(); as err) {
@@ -101,10 +117,13 @@
                   [disabled]="symbolSearch.remoteSearch.loading()"
                   (click)="symbolSearch.remoteSearch.more()"
                 >
-                  Show more ({{ symbolSearch.remoteSearch.rows().length }} of {{ symbolSearch.remoteSearch.total() }})
+                  Show more ({{ symbolSearch.remoteSearch.rows().length }} of
+                  {{ symbolSearch.remoteSearch.total() }})
                 </button>
               </li>
-            } @else if (symbolSearch.remoteSearch.loading() && symbolSearch.filteredSymbols().length) {
+            } @else if (
+              symbolSearch.remoteSearch.loading() && symbolSearch.filteredSymbols().length
+            ) {
               <li class="menu-empty">Searching the catalogue…</li>
             }
           </ul>
@@ -198,7 +217,8 @@
         class="tb-btn"
         (click)="toggleMenu('style', $event)"
         [class.open]="openMenu() === 'style'"
-        [title]="styleLabel()" [attr.aria-label]="styleLabel()"
+        [title]="styleLabel()"
+        [attr.aria-label]="styleLabel()"
         data-testid="style-button"
       >
         <app-chart-icon [name]="style()" [size]="28" />
@@ -361,7 +381,8 @@
         class="tb-btn"
         (click)="toggleMenu('templates', $event)"
         [class.open]="openMenu() === 'templates'"
-        title="Indicator templates" aria-label="Indicator templates"
+        title="Indicator templates"
+        aria-label="Indicator templates"
       >
         <app-chart-icon name="templates" [size]="28" />
       </button>
@@ -425,7 +446,8 @@
               [attr.aria-pressed]="classDefault()?.resolution === resolution()"
               (click)="toggleClassResolution()"
             >
-              {{ classDefault()?.resolution === resolution() ? '✓ ' : '' }}Open {{ assetClassName[cls] }} on
+              {{ classDefault()?.resolution === resolution() ? '✓ ' : '' }}Open
+              {{ assetClassName[cls] }} on
               {{ resolutionLabel(resolution()) }}
             </button>
           }
@@ -536,7 +558,8 @@
       class="tb-btn tb-wide"
       (click)="chartUndo.undo()"
       [disabled]="!chartUndo.canUndo()"
-      [title]="chartUndo.undoTitle()" [attr.aria-label]="chartUndo.undoTitle()"
+      [title]="chartUndo.undoTitle()"
+      [attr.aria-label]="chartUndo.undoTitle()"
     >
       <app-chart-icon name="undo" [size]="28" />
     </button>
@@ -545,14 +568,27 @@
       class="tb-btn tb-wide"
       (click)="chartUndo.redo()"
       [disabled]="!chartUndo.canRedo()"
-      [title]="chartUndo.redoTitle()" [attr.aria-label]="chartUndo.redoTitle()"
+      [title]="chartUndo.redoTitle()"
+      [attr.aria-label]="chartUndo.redoTitle()"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
-    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(0.7)" title="Zoom in" aria-label="Zoom in">
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="zoomChart(0.7)"
+      title="Zoom in"
+      aria-label="Zoom in"
+    >
       <app-chart-icon name="zoom-in" [size]="28" />
     </button>
-    <button type="button" class="tb-btn tb-wide" (click)="zoomChart(1 / 0.7)" title="Zoom out" aria-label="Zoom out">
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="zoomChart(1 / 0.7)"
+      title="Zoom out"
+      aria-label="Zoom out"
+    >
       <app-chart-icon name="zoom-out" [size]="28" />
     </button>
 
@@ -607,7 +643,8 @@
         class="tb-btn"
         (click)="toggleMenu('split', $event)"
         [class.open]="openMenu() === 'split'"
-        title="Select layout" aria-label="Select layout"
+        title="Select layout"
+        aria-label="Select layout"
       >
         <app-chart-icon [name]="'layout-' + splitLayout()" [size]="28" />
       </button>
@@ -619,7 +656,8 @@
               class="tb-split"
               [class.selected]="splitLayout() === l.id"
               (click)="setSplitLayout(l.id); openMenu.set(null)"
-              [title]="l.panels + 1 + ' chart(s)'" [attr.aria-label]="l.panels + 1 + ' chart(s)'"
+              [title]="l.panels + 1 + ' chart(s)'"
+              [attr.aria-label]="l.panels + 1 + ' chart(s)'"
             >
               <app-chart-icon [name]="'layout-' + l.id" [size]="28" />
             </button>
@@ -629,7 +667,10 @@
             <div class="tb-menu-sep"></div>
             <label class="tb-menu-field" title="Charts in one link group follow each other">
               Main chart link
-              <select [value]="mainLink()" (change)="linked.setMainLink(+$any($event.target).value)">
+              <select
+                [value]="mainLink()"
+                (change)="linked.setMainLink(+$any($event.target).value)"
+              >
                 <option value="0">None</option>
                 <option value="1">Group 1</option>
                 <option value="2">Group 2</option>
@@ -755,7 +796,8 @@
       class="tb-btn tb-wide"
       (click)="layoutActions.toggleFullscreen()"
       [class.active]="isFullscreen()"
-      title="Fullscreen" aria-label="Fullscreen"
+      title="Fullscreen"
+      aria-label="Fullscreen"
     >
       <app-chart-icon name="fullscreen" [size]="28" />
     </button>
@@ -763,7 +805,8 @@
       type="button"
       class="tb-btn tb-wide"
       (click)="layoutActions.takeSnapshot()"
-      title="Take a snapshot (PNG)" aria-label="Take a snapshot (PNG)"
+      title="Take a snapshot (PNG)"
+      aria-label="Take a snapshot (PNG)"
     >
       <app-chart-icon name="camera" [size]="28" />
     </button>
@@ -771,7 +814,8 @@
       type="button"
       class="tb-btn tb-wide"
       (click)="chartSettingsOpen.set(true)"
-      title="Chart settings" aria-label="Chart settings"
+      title="Chart settings"
+      aria-label="Chart settings"
       data-testid="chart-settings"
     >
       <app-chart-icon name="settings" [size]="28" />
@@ -783,7 +827,8 @@
         class="tb-btn tb-more"
         (click)="toggleMenu('more', $event)"
         [class.open]="openMenu() === 'more'"
-        title="More" aria-label="More"
+        title="More"
+        aria-label="More"
         aria-haspopup="menu"
         [attr.aria-expanded]="openMenu() === 'more'"
       >
@@ -921,12 +966,15 @@
           [compareSeries]="compareSeries()"
           [scriptRows]="legendScriptRows()"
           (bottomChange)="legendBottom.set($event)"
+          (rightChange)="legendRight.set($event)"
           (switchSeries)="seriesAdjustments.switchContinuousSeries()"
           (adjustmentChange)="seriesAdjustments.setSeriesAdjustment($event)"
           (scriptAction)="onScriptAction($event)"
         />
         <!-- US05: the symbol, its market state and (at most every 30 s) its price, for screen readers. -->
-        <div class="sr-only" role="status" aria-live="polite" data-testid="chart-live">{{ liveMessage() }}</div>
+        <div class="sr-only" role="status" aria-live="polite" data-testid="chart-live">
+          {{ liveMessage() }}
+        </div>
 
         @if (error()) {
           <div class="chart-error">{{ error() }}</div>
@@ -938,6 +986,7 @@
           [showCountdown]="showCountdown()"
           [appearance]="appearance()"
           [legendBottom]="legendBottom()"
+          [legendRight]="legendRight()"
           (crosshairSync)="linked.onChartCrosshair('main', $event)"
           (rangeSync)="linked.onChartRange('main', $event)"
           [liveAt]="liveAt()"
@@ -1002,20 +1051,20 @@
         <!-- SP-I3/SP-I4 (trading): the order ticket and the draggable trading lines on the price pane. -->
         <!-- US04: none on a synthetic (spread / ratio) series: it is no instrument. -->
         @if (!synthetic()) {
-        <app-chart-trading
-          [host]="host"
-          [symbol]="symbol()"
-          [precision]="precision()"
-          [facts]="facts()"
-          [quote]="liveQuote()"
-          [(open)]="ticketOpen"
-          [prefill]="ticketPrefill()"
-          [positions]="openPositions()"
-          [orders]="workingOrders()"
-          [accountIds]="accountIdsInScope()"
-          (submitted)="onTicketSubmitted()"
-          (changed)="onChartTradeChanged()"
-        />
+          <app-chart-trading
+            [host]="host"
+            [symbol]="symbol()"
+            [precision]="precision()"
+            [facts]="facts()"
+            [quote]="liveQuote()"
+            [(open)]="ticketOpen"
+            [prefill]="ticketPrefill()"
+            [positions]="openPositions()"
+            [orders]="workingOrders()"
+            [accountIds]="accountIdsInScope()"
+            (submitted)="onTicketSubmitted()"
+            (changed)="onChartTradeChanged()"
+          />
         }
 
         <!-- SP-I5 (analysis): the analysis panel, the plan / watch lines and the watches' fire markers. -->
@@ -1223,7 +1272,9 @@
               class="panel-select"
               [attr.aria-pressed]="look.showVolume"
               (click)="setPanelView(panel.id, 'showVolume', look.showVolume ? undefined : true)"
-              [title]="look.showVolume ? 'Hide the volume on this chart' : 'Show the volume on this chart'"
+              [title]="
+                look.showVolume ? 'Hide the volume on this chart' : 'Show the volume on this chart'
+              "
             >
               Vol{{ look.showVolume ? ' ✓' : '' }}
             </button>
@@ -1277,7 +1328,8 @@
               type="button"
               class="panel-focus"
               (click)="focusPanel(panel.id)"
-              title="Swap with the main chart" aria-label="Swap with the main chart"
+              title="Swap with the main chart"
+              aria-label="Swap with the main chart"
             >
               <app-chart-icon name="swap" [size]="18" />
             </button>

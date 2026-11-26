@@ -56,6 +56,8 @@ export class ChartLegendComponent {
 
   /** The legend's measured bottom edge (the page lays the panes' status lines under it). */
   readonly bottomChange = output<number>();
+  /** The legend's measured right edge (the chart keeps top tables that would cover it below it). */
+  readonly rightChange = output<number>();
   readonly switchSeries = output<void>();
   readonly adjustmentChange = output<'none' | 'splits' | 'all' | null>();
   readonly scriptAction = output<ScriptAction>();
