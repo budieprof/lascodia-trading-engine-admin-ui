@@ -34,6 +34,7 @@ import {
     <div
       class="track"
       role="progressbar"
+      [attr.aria-label]="label()"
       aria-valuemin="0"
       aria-valuemax="100"
       [attr.aria-busy]="visible()"
@@ -111,6 +112,9 @@ export class ProgressBarComponent {
    * register, short enough to feel responsive.  Set to 0 to disable.
    */
   readonly minVisibleMs = input(500);
+
+  /** Accessible name of the bar (WCAG: a progressbar needs one). */
+  readonly label = input('Loading');
 
   private readonly destroyRef = inject(DestroyRef);
   private readonly heldUntil = signal<number | null>(null);

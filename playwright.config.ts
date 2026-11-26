@@ -39,7 +39,19 @@ export default defineConfig({
   // Co-locate snapshot binaries with their spec so the e2e/ tree is
   // self-contained — easier to scan when reviewing baseline changes.
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // Deterministic text for the visual baselines: without these, glyph antialiasing varies with GPU
+        // and load (every word of a page diffs by a pixel when workers run in parallel).
+        launchOptions: {
+          args: ['--font-render-hinting=none', '--disable-lcd-text', '--disable-gpu'],
+        },
+      },
+    },
+  ],
   webServer: process.env['E2E_BASE_URL']
     ? undefined
     : {

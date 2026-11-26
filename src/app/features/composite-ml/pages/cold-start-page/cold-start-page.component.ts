@@ -111,10 +111,12 @@ function scopeKeyOf(symbol: string | null, timeframe: Timeframe | null): string 
           <input
             type="search"
             placeholder="Symbol (e.g. EURUSD)"
+            aria-label="Symbol"
             [ngModel]="symbolInput()"
             (ngModelChange)="symbolInput.set($event); applyIfBothSet()"
           />
           <select
+            aria-label="Timeframe"
             [ngModel]="timeframeInput()"
             (ngModelChange)="timeframeInput.set($event); applyIfBothSet()"
           >
