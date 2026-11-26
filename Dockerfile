@@ -31,7 +31,19 @@ RUN npm run build -- --configuration production
 # Unprivileged nginx (uid 101, listens on 8080): nothing in the container runs as root (gaps program security,
 # Trivy DS-0002 / triage T-2 closed). PORT CHANGE: the staging image now serves :8080, not :80 — map it with
 # `docker run -p 80:8080 …` (or point the staging proxy at :8080).
-FROM nginxinc/nginx-unprivileged:1.28-alpine
+# 1.30 = the current stable line. 1.28 reached end of life and its tag stopped being rebuilt (last 2026-02-23), which
+# left the image on Alpine 3.23.3 / nginx 1.28.2 with ~90 fixable HIGH/CRITICAL CVEs (security scans red).
+FROM nginxinc/nginx-unprivileged:1.30-alpine
+# Upstream rebuilds the tag only every few weeks: take the security fixes published since, then drop back to the
+# unprivileged user. nginx itself comes from nginx.org's repo (pinned to the exact version in /etc/apk/world, repo
+# removed after install), so a plain `apk upgrade` never moves it: lift the pins and upgrade against that repo again.
+# Its signing key ships in the base image (/etc/apk/keys/nginx_signing.rsa.pub), so packages stay signature-checked.
+USER root
+RUN sed -i -E 's/^(nginx[a-z0-9-]*)=.*/\1/' /etc/apk/world \
+ && apk upgrade --no-cache \
+      -X "https://nginx.org/packages/alpine/v$(cut -d. -f1,2 /etc/alpine-release)/main" \
+ && nginx -v
+USER 101
 WORKDIR /usr/share/nginx/html
 
 # The base image's default site listens on 8080 already; ours replaces it.
