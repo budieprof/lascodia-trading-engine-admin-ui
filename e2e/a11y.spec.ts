@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { signedOut } from './support/console-session';
+
 /**
  * Automated a11y smoke across the public-visible routes. Runs axe-core's
  * WCAG 2.1 A + AA rulesets against each page's rendered DOM. Any finding
@@ -15,6 +17,7 @@ const ROUTES: Array<{ name: string; path: string }> = [{ name: 'Login', path: '/
 
 for (const route of ROUTES) {
   test(`${route.name} has no detectable a11y violations`, async ({ page }) => {
+    await signedOut(page);
     await page.goto(route.path);
     // Let the SPA finish its initial render + any route-entry animation.
     await page.waitForLoadState('networkidle');

@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { signIn } from './support/console-session';
+
 /**
  * a11y smoke for the v2 feature waves shipped this cycle (CompositeML console,
  * ML lifecycle additions, Strategy v2 net-new pages, EA detail, market-data
@@ -8,14 +10,9 @@ import { expect, test } from '@playwright/test';
  * each renders its chrome + an empty-state or skeleton without engine data
  * (every page wires `catchError(() => of([]))` on its polled-resource).
  *
- * Auth is stubbed via the cookie-session sentinel pattern the dashboard-pages
- * spec already uses — `authGuard` consults `AuthService.isAuthenticated()` which
- * reads sessionStorage synchronously in its constructor, so seeding the key
- * before SPA boot is enough.
- *
- * Role-gated routes (Operator+ / Admin) are NOT included; their guards redirect
- * mid-test under the cookie-session stub since the in-memory roles signal is
- * not populated.
+ * Signed in with the stand-in BFF session (`support/console-session.ts`): the house organisation and
+ * every permission, with the engine answered locally (GETs 503, writes aborted). Each test first
+ * checks the console shell is up, so a spec can never again pass by scanning the sign-in screen.
  */
 const ROUTES: Array<{ name: string; path: string }> = [
   // CompositeML Operator Console (Phase 1)
@@ -46,15 +43,14 @@ const ROUTES: Array<{ name: string; path: string }> = [
   { name: 'System — Worker Override Knobs', path: '/system-health/worker-override-knobs' },
 ];
 
-const TOKEN_KEY = 'lascodia.auth.token';
-
 for (const route of ROUTES) {
   test(`${route.name} has no detectable a11y violations`, async ({ page }) => {
-    await page.addInitScript((key) => {
-      sessionStorage.setItem(key, 'cookie-session');
-    }, TOKEN_KEY);
+    await signIn(page);
 
     await page.goto(route.path);
+    await expect(page.getByRole('complementary', { name: 'Primary navigation' })).toBeVisible({
+      timeout: 30_000,
+    });
     await page.waitForLoadState('networkidle');
 
     const results = await new AxeBuilder({ page })

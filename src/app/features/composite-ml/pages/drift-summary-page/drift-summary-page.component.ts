@@ -97,7 +97,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
 
         <div class="control-group">
           <span class="control-label">Sort</span>
-          <select [ngModel]="sortMode()" (ngModelChange)="sortMode.set($event)">
+          <select aria-label="Sort" [ngModel]="sortMode()" (ngModelChange)="sortMode.set($event)">
             <option value="layer">Layer key (A→Z)</option>
             <option value="drop">Drop alerts first</option>
             <option value="recent">Most recently evaluated</option>

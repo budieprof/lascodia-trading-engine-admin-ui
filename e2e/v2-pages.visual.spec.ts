@@ -1,15 +1,17 @@
 import { expect, test } from '@playwright/test';
 
+import { signIn } from './support/console-session';
+
 /**
  * Visual-regression baseline for the v2 feature waves. Companion to
- * v2-pages.a11y.spec.ts — same route set, same auth-stub pattern, but
+ * v2-pages.a11y.spec.ts — same route set, same stand-in BFF session, but
  * captures a full-page screenshot per route and compares against the
  * committed baseline.
  *
  * **Operational notes:**
  *   - Baselines live under `e2e/__screenshots__/v2-pages.visual.spec.ts/`
  *     and MUST be generated on the same OS/browser combo as CI (Ubuntu
- *     22.04 + Playwright's bundled Chromium). Running locally on macOS
+ *     24.04 + Playwright's bundled Chromium). Running locally on macOS
  *     will diff against committed baselines because of OS-level font
  *     antialiasing differences — that's expected, don't commit the
  *     macOS-rendered images.
@@ -52,16 +54,17 @@ const ROUTES: Array<{ name: string; path: string }> = [
   { name: 'positions-deltas', path: '/positions/deltas' },
 ];
 
-const TOKEN_KEY = 'lascodia.auth.token';
-
 for (const route of ROUTES) {
   test(`${route.name} matches visual baseline`, async ({ page }) => {
-    await page.addInitScript((key) => {
-      sessionStorage.setItem(key, 'cookie-session');
-    }, TOKEN_KEY);
+    await signIn(page);
 
     await page.goto(route.path);
+    await expect(page.getByRole('complementary', { name: 'Primary navigation' })).toBeVisible({
+      timeout: 30_000,
+    });
     await page.waitForLoadState('networkidle');
+    // Web fonts swap in after first paint; a screenshot taken mid-swap shifts every glyph.
+    await page.evaluate(() => document.fonts.ready);
 
     // Settle frame for any final layout shifts (skeleton-to-content
     // transitions, lazy-loaded panel content). Short enough to keep the

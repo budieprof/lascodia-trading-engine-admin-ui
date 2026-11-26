@@ -1,21 +1,17 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { signIn } from './support/console-session';
+
 /**
  * a11y smoke for the dashboard surfaces shipped through Phases 1-4. Each
  * route renders its chrome + an empty-state or skeleton without a backend
  * (their `fetchData` callbacks degrade gracefully via `catchError(() => of(empty))`),
  * so axe gets a meaningful DOM to scan even when the engine isn't reachable.
  *
- * To get past `authGuard` we seed the cookie-session sentinel into sessionStorage
- * (the same value `auth.service.ts` writes after `probeCookieSession()` resolves
- * a real session). This avoids a network login for tests that only care about
- * the rendered DOM, not behaviour.
- *
- * Pages requiring `requireRoles('Operator' | 'Admin')` are not covered here —
- * the role guard reads the in-memory roles signal which the sessionStorage
- * sentinel doesn't populate. Those routes redirect away mid-test and would
- * just re-test the dashboard a11y under a different name.
+ * Signed in with the stand-in BFF session (`support/console-session.ts`): the house organisation and
+ * every permission, with the engine answered locally (GETs 503, writes aborted). Each test first
+ * checks the console shell is up, so a spec can never again pass by scanning the sign-in screen.
  */
 const ROUTES: Array<{ name: string; path: string }> = [
   { name: 'Strategy Portfolio', path: '/strategy-portfolio' },
@@ -25,17 +21,14 @@ const ROUTES: Array<{ name: string; path: string }> = [
   { name: 'Strategy Analytics', path: '/strategies/1/analytics' },
 ];
 
-const TOKEN_KEY = 'lascodia.auth.token';
-
 for (const route of ROUTES) {
   test(`${route.name} has no detectable a11y violations`, async ({ page }) => {
-    // Stub auth before the SPA boots — initial state is read from sessionStorage
-    // synchronously in AuthService's constructor, so seeding it here is enough.
-    await page.addInitScript((key) => {
-      sessionStorage.setItem(key, 'cookie-session');
-    }, TOKEN_KEY);
+    await signIn(page);
 
     await page.goto(route.path);
+    await expect(page.getByRole('complementary', { name: 'Primary navigation' })).toBeVisible({
+      timeout: 30_000,
+    });
     await page.waitForLoadState('networkidle');
 
     const results = await new AxeBuilder({ page })
