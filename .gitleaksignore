@@ -6,3 +6,26 @@
 7ed793f507ce1d8eeae0d6797e4a1b6a097ac6dc:src/app/features/organisation/alerts.logic.spec.ts:generic-api-key:143
 7ed793f507ce1d8eeae0d6797e4a1b6a097ac6dc:src/app/features/organisation/alerts.logic.spec.ts:generic-api-key:154
 f58d74e6b636369d15aea88f85190519ae6e64e3:src/app/features/organisation/terminals.logic.spec.ts:generic-api-key:179
+
+# Reviewed 2026-11-26 (security-scans failing since 2026-10-28): every entry below is an identifier or a
+# placeholder, not a credential — checked line by line at the flagged commit.
+# metric field names (wallP50Seconds / wallP95Seconds)
+9526a96532f6cbccc4c192efa86c87e0b3b14074:src/app/features/assistant-ops/assistant-quality.logic.spec.ts:generic-api-key:217
+9526a96532f6cbccc4c192efa86c87e0b3b14074:src/app/features/assistant-ops/assistant-quality.logic.ts:generic-api-key:338
+9526a96532f6cbccc4c192efa86c87e0b3b14074:src/app/features/assistant-ops/assistant-quality.logic.ts:generic-api-key:345
+# news-story eventKey fixture (fed-rate-decision-2026-11) in a visual-review stub
+9fd7e8cc22c640445801738b55a169514071d889:tools/visual-review/news-intel-check.js:generic-api-key:97
+f9eae19b84ed1a1191cdb464985ad5662ac69994:tools/visual-review/news-intel-check.js:generic-api-key:121
+f9eae19b84ed1a1191cdb464985ad5662ac69994:tools/visual-review/news-intel-check.js:generic-api-key:123
+f9eae19b84ed1a1191cdb464985ad5662ac69994:tools/visual-review/news-intel-check.js:generic-api-key:125
+# made-up enrolment token in a unit test ('lsc_enr_abcd1234_SECRET')
+fada7916406f13856e9b90f81c107c8ebdae28bd:src/app/features/organisation/connect/add-computer-page.spec.ts:generic-api-key:39
+# table column key (tierMinVolume30d)
+0b08b86d63d78c0954139dcc4595e4f1834b2c17:src/app/features/venues/pages/fee-schedules-page.component.ts:generic-api-key:50
+# audit check names (T2_WalkerBoundary, T3_..., T4_...)
+ebb1bda0b37b7730dbca0108c912994b896d6980:src/app/features/analyser-comparison/pages/look-ahead-audit-page/look-ahead-audit.logic.ts:generic-api-key:39
+ebb1bda0b37b7730dbca0108c912994b896d6980:src/app/features/analyser-comparison/pages/look-ahead-audit-page/look-ahead-audit.logic.ts:generic-api-key:44
+ebb1bda0b37b7730dbca0108c912994b896d6980:src/app/features/analyser-comparison/pages/look-ahead-audit-page/look-ahead-audit.logic.ts:generic-api-key:49
+# placeholder bearer token in a documentation curl example ('lsc_pat_...')
+1b2b20bb8055a52565d63d6b1dfecd632b68ed40:public/docs-content/api-overview.md:curl-auth-header:53
+1b2b20bb8055a52565d63d6b1dfecd632b68ed40:public/docs-content/integrations.md:curl-auth-header:171
