@@ -40,8 +40,16 @@ export interface ScriptAlertTarget {
 
 const FREQUENCIES = [
   { id: 'once_per_bar', label: 'Once per bar', hint: 'The first time it is true in a bar' },
-  { id: 'once_per_bar_close', label: 'Once per bar close', hint: 'Only when the bar closes with it true' },
-  { id: 'all', label: 'Every time', hint: 'Each time the script finds it true (the storm guard stops a flood)' },
+  {
+    id: 'once_per_bar_close',
+    label: 'Once per bar close',
+    hint: 'Only when the bar closes with it true',
+  },
+  {
+    id: 'all',
+    label: 'Every time',
+    hint: 'Each time the script finds it true (the storm guard stops a flood)',
+  },
   { id: 'once', label: 'Only once', hint: 'Fires once, then pauses itself' },
 ] as const;
 
@@ -62,8 +70,13 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
       @if (edit(); as e) {
         @if (e.scriptChanged) {
           <label class="saf-banner" data-testid="saf-rearm">
-            <input type="checkbox" [checked]="rearm()" (change)="rearm.set($any($event.target).checked)" />
-            The script “{{ e.scriptName }}” changed since this alert was armed — re-arm it with the current version
+            <input
+              type="checkbox"
+              [checked]="rearm()"
+              (change)="rearm.set($any($event.target).checked)"
+            />
+            The script “{{ e.scriptName }}” changed since this alert was armed — re-arm it with the
+            current version
           </label>
         }
       }
@@ -77,21 +90,34 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
             }
           </select>
         } @else {
-          <input type="text" [value]="alertKey()" (input)="alertKey.set($any($event.target).value)" data-testid="saf-key" />
+          <input
+            type="text"
+            [value]="alertKey()"
+            (input)="alertKey.set($any($event.target).value)"
+            data-testid="saf-key"
+          />
         }
       </label>
 
       <label class="saf-row">
         <span>Watch</span>
-        <select (change)="useWatchlist.set($any($event.target).value === 'list')" data-testid="saf-scope">
+        <select
+          (change)="useWatchlist.set($any($event.target).value === 'list')"
+          data-testid="saf-scope"
+        >
           <option value="symbols" [selected]="!useWatchlist()">Symbols</option>
-          <option value="list" [selected]="useWatchlist()" [disabled]="!watchlists().length">A watchlist</option>
+          <option value="list" [selected]="useWatchlist()" [disabled]="!watchlists().length">
+            A watchlist
+          </option>
         </select>
       </label>
       @if (useWatchlist()) {
         <label class="saf-row">
           <span>Watchlist</span>
-          <select (change)="watchlistId.set(+$any($event.target).value || null)" data-testid="saf-watchlist">
+          <select
+            (change)="watchlistId.set(+$any($event.target).value || null)"
+            data-testid="saf-watchlist"
+          >
             @for (w of watchlists(); track w.id) {
               <option [value]="w.id" [selected]="w.id === watchlistId()">{{ w.name }}</option>
             }
@@ -123,7 +149,9 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
         <span>Trigger</span>
         <select (change)="frequency.set($any($event.target).value)" data-testid="saf-frequency">
           @for (f of frequencyOptions(); track f.id) {
-            <option [value]="f.id" [title]="f.hint" [selected]="f.id === frequency()">{{ f.label }}</option>
+            <option [value]="f.id" [title]="f.hint" [selected]="f.id === frequency()">
+              {{ f.label }}
+            </option>
           }
         </select>
       </label>
@@ -132,7 +160,11 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
         <legend>Notify by</legend>
         @for (c of channelOptions; track c.id) {
           <label>
-            <input type="checkbox" [checked]="channels().includes(c.id)" (change)="toggleChannel(c.id)" />
+            <input
+              type="checkbox"
+              [checked]="channels().includes(c.id)"
+              (change)="toggleChannel(c.id)"
+            />
             {{ c.label }}
           </label>
         }
@@ -152,7 +184,11 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
 
       <label class="saf-row">
         <span>Expires</span>
-        <input type="datetime-local" [value]="expires()" (input)="expires.set($any($event.target).value)" />
+        <input
+          type="datetime-local"
+          [value]="expires()"
+          (input)="expires.set($any($event.target).value)"
+        />
       </label>
       <label class="saf-row">
         <span>Name</span>
@@ -165,7 +201,13 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
         />
       </label>
       <label class="saf-col">
-        <span>Message <small>(Pine placeholders: {{ '{{' }}close{{ '}}' }}, {{ '{{' }}ticker{{ '}}' }}, {{ '{{' }}plot_0{{ '}}' }} …)</small></span>
+        <span
+          >Message
+          <small
+            >(Pine placeholders: {{ '{{' }}close{{ '}}' }}, {{ '{{' }}ticker{{ '}}' }},
+            {{ '{{' }}plot_0{{ '}}' }} …)</small
+          ></span
+        >
         <textarea
           rows="2"
           maxlength="1000"
@@ -183,7 +225,12 @@ const TIMEFRAMES = ['1', '5', '15', '30', '60', '120', '240', '1D', '1W'];
       }
       <div class="saf-actions">
         <button type="button" (click)="cancelled.emit()">Cancel</button>
-        <button type="submit" class="primary" [disabled]="!!problem() || saving()" data-testid="saf-save">
+        <button
+          type="submit"
+          class="primary"
+          [disabled]="!!problem() || saving()"
+          data-testid="saf-save"
+        >
           {{ saving() ? 'Saving…' : edit() ? 'Save' : 'Create alert' }}
         </button>
       </div>
@@ -328,7 +375,9 @@ export class ChartScriptAlertFormComponent {
   readonly serverError = signal<string | null>(null);
 
   readonly heading = computed(() =>
-    this.edit() ? `Edit alert · ${this.edit()!.displayName}` : `Create alert on ${this.target()?.scriptName ?? 'the script'}`,
+    this.edit()
+      ? `Edit alert · ${this.edit()!.displayName}`
+      : `Create alert on ${this.target()?.scriptName ?? 'the script'}`,
   );
   readonly scriptName = computed(() => this.edit()?.scriptName ?? this.target()?.scriptName ?? '');
   readonly watchlists = computed(() => this.watchlistService.lists().filter((w) => w.id > 0));
@@ -340,9 +389,12 @@ export class ChartScriptAlertFormComponent {
       const k = this.edit()?.alertKey;
       return k ? [{ id: k, label: keyLabel(k) }] : [];
     }
+    // Every event the script reports comes first, and is the default: a script that calls alert() writes each event's
+    // own text there, so one alert covers all of them (a single alertcondition is the narrower choice).
     const out: { id: string; label: string }[] = [];
-    if (!t.isStrategy) for (const title of t.alertConditions) out.push({ id: title, label: `“${title}”` });
-    if (t.callsAlert) out.push({ id: ALERT_CALLS_KEY, label: 'Any alert() call' });
+    if (t.callsAlert) out.push({ id: ALERT_CALLS_KEY, label: ALERT_CALLS_LABEL });
+    if (!t.isStrategy)
+      for (const title of t.alertConditions) out.push({ id: title, label: `“${title}”` });
     if (t.isStrategy) out.push({ id: ORDER_FILLS_KEY, label: 'Order fills' });
     return out;
   });
@@ -356,9 +408,14 @@ export class ChartScriptAlertFormComponent {
 
   readonly timeframes = computed(() => [...new Set([...TIMEFRAMES, this.timeframe()])]);
 
-  readonly symbols = computed(() =>
-    [...new Set(this.symbolsText().split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean))],
-  );
+  readonly symbols = computed(() => [
+    ...new Set(
+      this.symbolsText()
+        .split(/[\s,;]+/)
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ]);
 
   /** Why it cannot be saved yet, in a sentence; null when it can. */
   readonly problem = computed<string | null>(() => {
@@ -366,10 +423,13 @@ export class ChartScriptAlertFormComponent {
       return this.target() && !this.keyOptions().length
         ? 'This script has nothing to alert on: no alertcondition(), no alert() call (and it is not a strategy).'
         : 'Pick what to alert on.';
-    if (this.useWatchlist() ? this.watchlistId() === null : this.symbols().length === 0) return 'Pick at least one symbol.';
+    if (this.useWatchlist() ? this.watchlistId() === null : this.symbols().length === 0)
+      return 'Pick at least one symbol.';
     if (!this.channels().length) return 'Pick at least one way to be notified.';
-    if (this.channels().includes('Webhook') && !this.webhook().trim()) return 'Give the webhook URL.';
-    if (this.expires() && Date.parse(this.expires()) <= Date.now()) return 'The expiry is in the past.';
+    if (this.channels().includes('Webhook') && !this.webhook().trim())
+      return 'Give the webhook URL.';
+    if (this.expires() && Date.parse(this.expires()) <= Date.now())
+      return 'The expiry is in the past.';
     return null;
   });
 
@@ -416,7 +476,9 @@ export class ChartScriptAlertFormComponent {
   }
 
   toggleChannel(id: string): void {
-    this.channels.update((list) => (list.includes(id) ? list.filter((c) => c !== id) : [...list, id]));
+    this.channels.update((list) =>
+      list.includes(id) ? list.filter((c) => c !== id) : [...list, id],
+    );
   }
 
   protected tfLabel(tf: string): string {
@@ -457,8 +519,14 @@ export class ChartScriptAlertFormComponent {
   }
 }
 
+const ALERT_CALLS_LABEL = 'Every event the script reports (any alert() call)';
+
 function keyLabel(k: string): string {
-  return k === ALERT_CALLS_KEY ? 'Any alert() call' : k === ORDER_FILLS_KEY ? 'Order fills' : `“${k}”`;
+  return k === ALERT_CALLS_KEY
+    ? ALERT_CALLS_LABEL
+    : k === ORDER_FILLS_KEY
+      ? 'Order fills'
+      : `“${k}”`;
 }
 
 /** An ISO instant as a `datetime-local` value in the viewer's zone. */

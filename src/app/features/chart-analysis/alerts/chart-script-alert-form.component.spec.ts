@@ -8,10 +8,16 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { RealtimeService, type RealtimeEventName } from '@core/realtime/realtime.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
-import { ChartScriptAlertFormComponent, type ScriptAlertTarget } from './chart-script-alert-form.component';
+import {
+  ChartScriptAlertFormComponent,
+  type ScriptAlertTarget,
+} from './chart-script-alert-form.component';
 import type { ChartScriptAlertDto } from './chart-script-alerts.types';
 
-declareSignalIo(ChartScriptAlertFormComponent, { inputs: ['target', 'edit'], outputs: ['saved', 'cancelled'] });
+declareSignalIo(ChartScriptAlertFormComponent, {
+  inputs: ['target', 'edit'],
+  outputs: ['saved', 'cancelled'],
+});
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
@@ -90,7 +96,9 @@ describe('ChartScriptAlertFormComponent (PC-I14, SS-I1)', () => {
     fixture.detectChanges();
     el = fixture.nativeElement as HTMLElement;
     // The operator's watchlists, for "Watch: a watchlist".
-    http.expectOne(`${BASE}/chart-watchlist`).flush(ok([{ id: 3, name: 'Majors', isActive: true, sortOrder: 0, sections: [] }]));
+    http
+      .expectOne(`${BASE}/chart-watchlist`)
+      .flush(ok([{ id: 3, name: 'Majors', isActive: true, sortOrder: 0, sections: [] }]));
     fixture.detectChanges();
   }
 
@@ -109,10 +117,16 @@ describe('ChartScriptAlertFormComponent (PC-I14, SS-I1)', () => {
 
   afterEach(() => http.verify());
 
-  it('offers the script’s own alerts and arms the first on the chart’s symbol and timeframe', () => {
+  it('offers every event first, then the script’s own alerts, and arms every event on the chart’s symbol and timeframe', () => {
     render({ target: TARGET });
-    const options = [...q<HTMLSelectElement>('[data-testid="saf-key"]').options].map((o) => o.textContent?.trim());
-    expect(options).toEqual(['“Cross up”', '“Cross down”', 'Any alert() call']);
+    const options = [...q<HTMLSelectElement>('[data-testid="saf-key"]').options].map((o) =>
+      o.textContent?.trim(),
+    );
+    expect(options).toEqual([
+      'Every event the script reports (any alert() call)',
+      '“Cross up”',
+      '“Cross down”',
+    ]);
     expect(q<HTMLInputElement>('[data-testid="saf-symbols"]').value).toBe('EURUSD');
 
     let saved: ChartScriptAlertDto | null = null;
@@ -122,7 +136,7 @@ describe('ChartScriptAlertFormComponent (PC-I14, SS-I1)', () => {
     expect(post.request.method).toBe('POST');
     expect(post.request.body).toEqual({
       name: null,
-      alertKey: 'Cross up',
+      alertKey: 'alert()',
       timeframe: '60',
       frequency: 'once_per_bar',
       channels: ['InApp'],
@@ -142,9 +156,25 @@ describe('ChartScriptAlertFormComponent (PC-I14, SS-I1)', () => {
     q<HTMLFormElement>('form').dispatchEvent(new Event('submit'));
     http
       .expectOne(`${BASE}/scripting/alerts`)
-      .flush({ data: null, status: false, message: 'The engine has no market data for XAUXAG.', responseCode: '-11' });
+      .flush({
+        data: null,
+        status: false,
+        message: 'The engine has no market data for XAUXAG.',
+        responseCode: '-11',
+      });
     fixture.detectChanges();
-    expect(q('[data-testid="saf-server-error"]').textContent).toContain('no market data for XAUXAG');
+    expect(q('[data-testid="saf-server-error"]').textContent).toContain(
+      'no market data for XAUXAG',
+    );
+  });
+
+  it('a script without alert() calls arms its first alertcondition', () => {
+    render({ target: { ...TARGET, callsAlert: false } });
+    const options = [...q<HTMLSelectElement>('[data-testid="saf-key"]').options].map(
+      (o) => o.value,
+    );
+    expect(options).toEqual(['Cross up', 'Cross down']);
+    expect(fixture.componentInstance.alertKey()).toBe('Cross up');
   });
 
   it('a script with nothing to alert on cannot be armed', () => {
@@ -155,7 +185,9 @@ describe('ChartScriptAlertFormComponent (PC-I14, SS-I1)', () => {
 
   it('a strategy alerts on its order fills', () => {
     render({ target: { ...TARGET, isStrategy: true, callsAlert: false } });
-    const options = [...q<HTMLSelectElement>('[data-testid="saf-key"]').options].map((o) => o.value);
+    const options = [...q<HTMLSelectElement>('[data-testid="saf-key"]').options].map(
+      (o) => o.value,
+    );
     expect(options).toEqual(['order-fills']);
   });
 
